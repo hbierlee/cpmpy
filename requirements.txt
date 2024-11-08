@@ -1,2 +1,2 @@
-numpy < 2.0
-ortools >= 9.9
+. # install most dependencies using setup.py
+ortools>=9.9 # TODO apparently 9.9 (which was in requirements.txt) has one regression (or fix?) of test_solvers.TestSolvers testMethod=test_ortools_direct_solver
