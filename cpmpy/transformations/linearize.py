@@ -306,6 +306,8 @@ def linearize_constraint(lst_of_expr, supported={"sum","wsum","->"}, reified=Fal
         elif isinstance(cpm_expr, GlobalConstraint) and cpm_expr.name not in supported:
             raise ValueError(f"Linearization of global constraint {cpm_expr} not supported, run "
                              f"`cpmpy.transformations.decompose_global.decompose_global() first")
+        else:
+            newlist.append(cpm_expr)
 
     return newlist
 
