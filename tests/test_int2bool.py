@@ -1,14 +1,17 @@
 import pytest
 
+import cpmpy as cp
+
+
 from cpmpy import SolverLookup
 from cpmpy.expressions.core import BoolVal, Comparison, Operator
 from cpmpy.expressions.utils import argvals
 from cpmpy.expressions.variables import _BoolVarImpl, _IntVarImpl, boolvar, intvar
 from cpmpy.model import Model
-from utils import skip_on_missing_pblib
 from cpmpy.transformations.flatten_model import flatten_constraint
 from cpmpy.transformations.get_variables import get_variables
 from cpmpy.transformations.int2bool import int2bool
+from utils import skip_on_missing_pblib
 
 # add some small but non-trivial integer variables (i.e. non-zero lower bounds, domain size not a power of two)
 x = intvar(1, 3, name="x")
@@ -138,3 +141,23 @@ class TestTransInt2Bool:
          SOL_IN: {cons_sols}
          SOL_OU: {flat_sols}
         """
+
+    def test_int2bool_cse_one_var(self):
+        x = cp.intvar(0, 2, name="x")
+        slv = cp.solvers.CPM_pindakaas()
+        slv.encoding = "direct"
+        # assert str(slv.transform((x == 0) )) == "[(EncDir(x)[0]) + (EncDir (x)[1]) == 1, EncDir(x)[0], ~EncDir(x)[1]]"
+        assert (
+            str(slv.transform((x == 0) | (x == 2)))
+            == "[(⟦x == 0⟧) or (⟦x == 2⟧), sum([⟦x == 0⟧, ⟦x == 1⟧, ⟦x == 2⟧]) == 1]"
+        )
+
+    def test_int2bool_cse_two_vars(self):
+        slv = cp.solvers.CPM_pindakaas()
+        slv.encoding = "direct"
+        x = cp.intvar(0, 2, name="x")
+        y = cp.intvar(0, 2, name="y")
+        assert (
+            str(slv.transform((x == 0) | (y == 2)))
+            == "[(⟦x == 0⟧) or (⟦y == 2⟧), sum([⟦x == 0⟧, ⟦x == 1⟧, ⟦x == 2⟧]) == 1, sum([⟦y == 0⟧, ⟦y == 1⟧, ⟦y == 2⟧]) == 1]"
+        )
