@@ -7,7 +7,6 @@ from cpmpy import SolverLookup
 from cpmpy.expressions.core import BoolVal, Comparison, Operator
 from cpmpy.expressions.utils import argvals
 from cpmpy.expressions.variables import _BoolVarImpl, _IntVarImpl, boolvar, intvar
-from cpmpy.model import Model
 from cpmpy.transformations.flatten_model import flatten_constraint
 from cpmpy.transformations.get_variables import get_variables
 from cpmpy.transformations.int2bool import int2bool
@@ -110,7 +109,7 @@ class TestTransInt2Bool:
         flat_sols = []
 
         # "Trusted" solver (not using int2bool)
-        Model(constraint).solveAll(
+        cp.Model(constraint).solveAll(
             solver="ortools",
             display=lambda: cons_sols.append(tuple(argvals(user_vars))),
         )
