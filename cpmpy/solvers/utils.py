@@ -17,6 +17,7 @@
 """
 
 import warnings # for deprecation warning
+import time
 
 from .gurobi import CPM_gurobi
 from .lazy_gurobi import CPM_lazy_gurobi
@@ -292,7 +293,6 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
 
     def store_sol():
         if all(x.value() is None for x in X):
-            assert False
             return
 
         class Hashabledict(dict):
