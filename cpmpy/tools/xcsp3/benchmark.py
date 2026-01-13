@@ -204,7 +204,9 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
 
     # Parse the output to get status, solution and timings
     complete_solution = None
-    while parent_conn.poll(timeout=1):
+    timeout = time_limit + check_time_limit
+    # poll for at most the remaining time
+    while parent_conn.poll(timeout=timeout - (time.time() - total_start) + 1):
         line = parent_conn.recv()
 
         # Received a print statement from the subprocess
@@ -253,11 +255,13 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
         # Received a new status from the subprocess
         elif isinstance(line, dict):
             status = line
+            break  # status signals end of process
 
         else:
             raise()
 
-    process.join(timeout=time_limit + check_time_limit)
+    # wait another second for the process to close itself
+    process.join(timeout=1)
 
     # Replicate competition convention on how jobs get terminated
     if process.is_alive():
@@ -274,6 +278,7 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
 
     # Parse the exit status
     if status["status"] == "error":
+        result["status"] = ExitStatus.error.value
         # Ignore timeouts
         if "TimeoutError" in repr(status["exception"]):
             pass
@@ -409,7 +414,7 @@ def xcsp3_benchmark(year: int, track: str, solver: str, workers: int = 1,
         for k, g in itertools.groupby(dataset, key=lambda f_m: f_m[0].split("-")[0]):
             dataset_.append(min(g, key=lambda g_:g_[0]))
         dataset = dataset_
-    dataset = ((filename, metadata) for filename, metadata in dataset if metadata['area'] > 0)
+    dataset = [(filename, metadata) for filename, metadata in dataset if metadata['area'] > 0]
 
     # Process instances in parallel
     with ThreadPoolExecutor(max_workers=workers) as executor:
