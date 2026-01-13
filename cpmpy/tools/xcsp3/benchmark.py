@@ -195,22 +195,6 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
                                                         }, 
                                                     verbose))
     process.start()
-    process.join(timeout=time_limit + check_time_limit)
-
-    # Replicate competition convention on how jobs get terminated
-    if process.is_alive():
-        # Send sigterm to let process know it reached its time limit
-        os.kill(process.pid, signal.SIGTERM)
-        print("SIGNAL SIGTERM")
-        # 1 second grace period
-        process.join(timeout=1)
-        # Kill if still alive
-        if process.is_alive():
-            os.kill(process.pid, signal.SIGKILL)
-            print("SIGNAL SIGKILL")
-            process.join()
-
-    result['time_total'] = time.time() - total_start
        
     sol_time = None # For annotation intermediate solutions (when they were received)
     
@@ -272,6 +256,21 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
 
         else:
             raise()
+
+    process.join(timeout=time_limit + check_time_limit)
+
+    # Replicate competition convention on how jobs get terminated
+    if process.is_alive():
+        # Send sigterm to let process know it reached its time limit
+        os.kill(process.pid, signal.SIGTERM)
+        # 1 second grace period
+        process.join(timeout=1)
+        # Kill if still alive
+        if process.is_alive():
+            os.kill(process.pid, signal.SIGKILL)
+            process.join()
+
+    result['time_total'] = time.time() - total_start
 
     # Parse the exit status
     if status["status"] == "error":
