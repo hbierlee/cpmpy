@@ -102,7 +102,7 @@ class CPM_ortools(SolverInterface):
             return None
 
 
-    def __init__(self, cpm_model=None, subsolver=None):
+    def __init__(self, cpm_model=None, subsolver=None, time_limit=None):
         """
         Constructor of the native solver object
 

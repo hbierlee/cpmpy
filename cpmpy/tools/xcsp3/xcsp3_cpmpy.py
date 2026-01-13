@@ -745,7 +745,7 @@ def xcsp3_cpmpy(
 
         # ------------------------------------- - ------------------------------------ #
 
-        if s.status().exitstatus in (CPMStatus.FEASIBLE, CPMStatus.OPTIMAL):
+        if check_time_limit > 0 and s.status().exitstatus in (CPMStatus.FEASIBLE, CPMStatus.OPTIMAL):
             print_comment(f"Checking solution within check time limit {check_time_limit}")
             time_check = time.time()
             for c in model.constraints:
@@ -798,7 +798,7 @@ if __name__ == "__main__":
     # MEMLIMIT: Total amount of memory in MiB (mebibyte = 1024 * 1024 bytes)
     parser.add_argument("-m", "--mem-limit", required=False, type=int, default=None, help="Memory limit in MiB (1 MiB = 1024 x 1024 bytes). Gets passed on to the solver (if supported) and is also enforced on the Python/CPMpy side. Measured as Virtual Memory Size")
     # CHECKTIMELIMIT: Total CPU time in seconds (before it gets killed)
-    parser.add_argument("-l", "--check-time-limit", required=False, type=int, default=None, help="Check time limit in seconds.") # TIMELIMIT
+    parser.add_argument("--check-time-limit", required=False, type=int, default=10, help="Check time limit in seconds.") # TIMELIMIT
     # TMPDIR: Only location where temporary read/write is allowed
     parser.add_argument("-t","--tmpdir", required=False, type=dir_path, help="Directory for temporary read/write operations.")
     # NBCORE: Number of processing units (can by any of the following: a processor / a processor core / logical processor (hyper-threading))
