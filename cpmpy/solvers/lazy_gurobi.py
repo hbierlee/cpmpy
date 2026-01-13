@@ -151,7 +151,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "debug": False,
             "verbosity": 0,
             "log": pathlib.Path("lazy.log"),
-            "heuristic": Heuristic.INPUT,
+            "heuristic": Heuristic.GREEDY,
             "shrink": True,
             "explain_fractional": True,
             "cuts": [],
@@ -468,7 +468,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                 self.check_max_iterations(len(self.env["cuts"]))
                 if feasible and frm == "MIPSOL":
-                    self.log("found feasible")
+                    self.log("found feasible", verbosity=2)
                     self.env["found_feasible"] = feasible
             except Exception as e:
                 what._callback_exception = e
@@ -652,12 +652,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if cpm_expr.name == "table":
                 X, T = cpm_expr.args
                 assert len(set(X)) == len(X), f"Dup. int vars in table: {X}"
-                self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=2)
-                self.log("T =", verbosity=2)
-                self.log(T, verbosity=2)
+                self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
+                self.log("T =", verbosity=3)
+                self.log(T, verbosity=3)
                 T_enc = encode(X, T)
-                self.log("T_enc =", verbosity=2)
-                self.log(T_enc, verbosity=2)
+                self.log("T_enc =", verbosity=3)
+                self.log(T_enc, verbosity=3)
 
                 for x in X:
                     x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
