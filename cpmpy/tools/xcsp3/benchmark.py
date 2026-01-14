@@ -211,7 +211,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
     
     # Default status if nothing returned by subprocess
     # -> process exited prematurely due to sigterm
-    status = {"status": "error", "exception": "sigterm"}
+    status = {"status": ExitStatus.error.value, "exception": "sigterm"}
 
     # Parse the output to get status, solution and timings
     complete_solution = None
@@ -491,6 +491,8 @@ if __name__ == "__main__":
 
     print("Experiments:")
     pprint.pprint(experiments)
+
+    experiments = [e for e in experiments if e.get("alias", None) == "lazy_gurobi-coverlift"]
     # assert len(set(experiments)) == len(experiments)
 
     for experiment in experiments:
