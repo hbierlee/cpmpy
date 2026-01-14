@@ -123,7 +123,7 @@ def env():
         "max_iterations": 1000,
         "seed": 42,
         "shrink": True,
-        "explain_fractional": True,
+        "fractional": True,
     }
 
 

@@ -42,6 +42,7 @@ import signal
 import subprocess
 import time
 import pathlib
+import pprint
 import lzma
 import sys
 import argparse
@@ -58,6 +59,7 @@ from filelock import FileLock
 from concurrent.futures import ThreadPoolExecutor
 
 import cpmpy as cp
+import experiments
 from cpmpy.tools.xcsp3.dataset import XCSP3Dataset
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import xcsp3_cpmpy, init_signal_handlers, ExitStatus
@@ -130,22 +132,27 @@ def xcsp3_wrapper(conn, kwargs, verbose):
         init_signal_handlers() # configure OS signal handlers
         xcsp3_cpmpy(**kwargs, verbose=verbose)
         conn.send({"status": "ok"})
+    except MemoryError as e: # capture exceptions and report in state
+        tb_str = traceback.format_exc()
+        conn.send({"status": ExitStatus.memory.value, "exception": e, "traceback": tb_str})
     except Exception as e: # capture exceptions and report in state
         tb_str = traceback.format_exc()
-        conn.send({"status": "error", "exception": e, "traceback": tb_str})
+        conn.send({"status": ExitStatus.error.value, "exception": e, "traceback": tb_str})
     finally:
         sys.stdout = original_stdout
         conn.close()
 
 # exec_args = (filename, metadata, solver, time_limit, mem_limit, check_time_limit, output_file, verbose) 
-def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, bool, str]) -> None:
+def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, str, bool, bool, str]) -> None:
     """
     Solve a single XCSP3 instance and write results to file immediately.
     
     Args is a list of:
         filename: Path to the XCSP3 instance file
         metadata: Dictionary containing instance metadata (year, track, name)
+        alias: Alias for the solver configto use
         solver: Name of the solver to use
+        solver_kwargs: Solver kwargs
         time_limit: Time limit in seconds
         mem_limit: Memory limit in MB
         check_time_limit: Check time limit in seconds
@@ -153,10 +160,10 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
         verbose: Whether to show solver output
     """
     
-    filename, metadata, solver, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path = args
+    filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path = args
 
     # Fieldnames for the CSV file
-    fieldnames = ['year', 'track', 'instance', 'solver',
+    fieldnames = ['year', 'track', 'instance', 'alias', 'solver', 'solver_kwargs',
                   'time_total', 'time_parse', 'time_model', 'time_post', 'time_solve',
                   'status', 'objective_value', 'solution', 'intermediate', 'checker_result']
     result = dict.fromkeys(fieldnames)  # init all fields to None
@@ -164,6 +171,8 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
     result['track'] = metadata['track']
     result['instance'] = metadata['name'] 
     result['solver'] = solver
+    result['alias'] = alias
+    result['solver_kwargs'] = str(solver_kwargs)
 
     # Decompress before timers start
     file_path = filename
@@ -184,6 +193,7 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
                                                       {
                                                           "benchname": filename, 
                                                           "metadata": metadata,
+                                                          "alias": alias, 
                                                           "solver": solver, 
                                                           "time_limit": time_limit, 
                                                           "check_time_limit": check_time_limit, 
@@ -192,6 +202,7 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
                                                           "force_mem_limit": True,
                                                           "time_buffer": 1,
                                                           "cores": cores,
+                                                          **solver_kwargs,
                                                         }, 
                                                     verbose))
     process.start()
@@ -205,9 +216,10 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
     # Parse the output to get status, solution and timings
     complete_solution = None
     timeout = time_limit + check_time_limit
-    # poll for at most the remaining time
-    while parent_conn.poll(timeout=timeout - (time.time() - total_start) + 1):
-        line = parent_conn.recv()
+    while True:
+        if parent_conn.poll(timeout=1):
+            line = parent_conn.recv()
+        dt = None if timeout is None else time.time() - total_start
 
         # Received a print statement from the subprocess
         if isinstance(line, str):
@@ -255,12 +267,14 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
         # Received a new status from the subprocess
         elif isinstance(line, dict):
             status = line
-            break  # status signals end of process
+            break
 
         else:
             raise()
 
-    # wait another second for the process to close itself
+        if dt > timeout + 1:
+            break
+
     process.join(timeout=1)
 
     # Replicate competition convention on how jobs get terminated
@@ -277,8 +291,7 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
     result['time_total'] = time.time() - total_start
 
     # Parse the exit status
-    if status["status"] == "error":
-        result["status"] = ExitStatus.error.value
+    if status["status"] != "ok":
         # Ignore timeouts
         if "TimeoutError" in repr(status["exception"]):
             pass
@@ -286,6 +299,7 @@ def execute_instance(args: Tuple[str, dict, str, int, int, int, int, str, bool, 
         # All other exceptions, put in solution field
         elif result['solution'] is None:
             result["solution"] = status['exception']
+            result["status"] = status['status']
 
     if checker_path is not None and complete_solution is not None:
         checker_output, checker_time = run_solution_checker(
@@ -354,17 +368,23 @@ def get_table_metadata(model):
 
 
 
-def xcsp3_benchmark(year: int, track: str, solver: str, workers: int = 1, 
-                   time_limit: int = 300,
-                   mem_limit: Optional[int] = 4096, cores: int=1,
-                   check_time_limit: int = 10,
-                   output_dir: str = 'results',
-                   no_timestamp: bool = False,
-                   verbose: bool = False, intermediate: bool = False,
-                   checker_path: Optional[str] = None,
-                   glob: Optional[str] = None,
-                   first: Optional[bool] = False,
-                 ) -> str:
+def xcsp3_benchmark(
+    year: int,
+    track: str,
+    solver: str,
+    alias: Optional[str] = None,
+    solver_kwargs: Optional[dict] = {},
+    workers: int = 1,
+    time_limit: int = 300,
+    mem_limit: Optional[int] = 4096, cores: int=1,
+    check_time_limit: int = 10,
+    output_dir: str = 'results',
+    no_timestamp: bool = False,
+    verbose: bool = False, intermediate: bool = False,
+    checker_path: Optional[str] = None,
+    glob: Optional[str] = None,
+    first: Optional[bool] = False,
+) -> str:
     """
     Benchmark a solver on XCSP3 instances.
     
@@ -372,6 +392,7 @@ def xcsp3_benchmark(year: int, track: str, solver: str, workers: int = 1,
         year (int): Competition year (e.g., 2023)
         track (str): Track type (e.g., COP, CSP, MiniCOP)
         solver (str): Solver name (e.g., ortools, exact, choco, ...)
+        alias (str): Solver alias (e.g., ortools-parallel, ...)
         workers (int): Number of parallel workers
         time_limit (int): Time limit in seconds per instance
         check_time_limit (int): Check time limit in seconds per instance
@@ -387,7 +408,8 @@ def xcsp3_benchmark(year: int, track: str, solver: str, workers: int = 1,
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    output_file = f"xcsp3_{year}_{track}_{solver}"
+    alias = solver if alias is None else alias
+    output_file = f"xcsp3_{year}_{track}_{alias}"
     if no_timestamp is False:
         # Get current timestamp in a filename-safe format
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -420,10 +442,10 @@ def xcsp3_benchmark(year: int, track: str, solver: str, workers: int = 1,
     with ThreadPoolExecutor(max_workers=workers) as executor:
         # Submit all tasks and track their futures
         futures = [executor.submit(execute_instance,  # below: args
-                                   (filename, metadata, solver, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path))
+                                   (filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path))
                    for filename, metadata in dataset]
         # Process results as they complete
-        for i,future in enumerate(tqdm(futures, total=len(futures), desc=f"Running {solver}")):
+        for i,future in enumerate(tqdm(futures, total=len(futures), desc=f"Running {alias}")):
             try:
                 _ = future.result(timeout=time_limit+60)  # for cleanliness sake, result is empty
             except TimeoutError:
@@ -440,28 +462,45 @@ def xcsp3_benchmark(year: int, track: str, solver: str, workers: int = 1,
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Benchmark solvers on XCSP3 instances')
-    parser.add_argument('--year', type=int, required=True, help='Competition year (e.g., 2023)')
-    parser.add_argument('--track', type=str, required=True, help='Track type (e.g., COP, CSP, MiniCOP)')
-    parser.add_argument('--solver', type=str, required=True, help='Solver name (e.g., ortools, exact, choco, ...)')
-    parser.add_argument('--workers', type=int, default=4, help='Number of parallel workers')
-    parser.add_argument('--time-limit', type=int, default=300, help='Time limit in seconds per instance')
-    parser.add_argument('--check-time-limit', type=int, default=10, help='Check time limit in seconds per instance')
+    parser.add_argument('--cp-cuts', action='store_true', help='Run CP-CUTS experiment')
+    parser.add_argument('--year', type=int, help='Competition year (e.g., 2023)')
+    parser.add_argument('--track', type=str, help='Track type (e.g., COP, CSP, MiniCOP)')
+    parser.add_argument('--solver', type=str, help='Solver name (e.g., ortools, exact, choco, ...)')
+    parser.add_argument('--alias', type=str, help='Solver config alias (e.g., ortools-par, ...)')
+    parser.add_argument('--workers', type=int, help='Number of parallel workers')
+    parser.add_argument('--time-limit', type=int, help='Time limit in seconds per instance')
+    parser.add_argument('--check-time-limit', type=int, help='Check time limit in seconds per instance')
     parser.add_argument('--glob', type=str, help='Filter instances according to glob expression')
     parser.add_argument('--first', action='store_true', help='Run only first instance of each problem')
-    parser.add_argument('--mem-limit', type=int, default=8192, help='Memory limit in MB per instance')
-    parser.add_argument('--cores', type=int, default=1, help='Number of cores to assign to a single instance')
-    parser.add_argument('--output-dir', type=str, default='results', help='Output directory for CSV files')
+    parser.add_argument('--mem-limit', type=int, help='Memory limit in MB per instance')
+    parser.add_argument('--cores', type=int, help='Number of cores to assign to a single instance')
+    parser.add_argument('--output-dir', type=str, help='Output directory for CSV files')
     parser.add_argument('--no-timestamp', action='store_true', help='Add timestamp to file names')
     parser.add_argument('--verbose', action='store_true', help='Show solver output')
     parser.add_argument('--intermediate', action='store_true', help='Report on intermediate solutions')
-    parser.add_argument('--checker-path', type=str, default=None,
-                    help='Path to the XCSP3 solution checker JAR file')
+    parser.add_argument('--checker-path', type=str, help='Path to the XCSP3 solution checker JAR file')
     
     
-    args = parser.parse_args()
+    args = {k: v for k, v in vars(parser.parse_args()).items() if v is not None}
 
-    if not args.verbose:
+    if not args["verbose"]:
         warnings.filterwarnings("ignore")
     
-    output_file = xcsp3_benchmark(**vars(args))
-    print(f"Results added to {output_file}")
+    experiments = experiments.get_experiments(args) if args["cp_cuts"] else [args]
+    # experiments = experiments[:1]
+
+    print("Experiments:")
+    pprint.pprint(experiments)
+    # assert len(set(experiments)) == len(experiments)
+
+    for experiment in experiments:
+        del experiment["cp_cuts"]
+        print("Run", experiment)
+        output_file = xcsp3_benchmark(**experiment)
+        print(f"Results added to {output_file}")
+
+
+    output_dir = pathlib.Path(next(e["output_dir"] for e in experiments))
+    import pandas as pd
+    dfs = pd.concat([pd.read_csv(f) for f in output_dir.glob("*.csv")], ignore_index=True)
+    dfs.to_csv(pathlib.Path(output_dir.name).with_suffix(".csv"))

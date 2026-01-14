@@ -455,6 +455,8 @@ def gurobi_arguments(model: cp.Model,
                      seed: Optional[int] = None,
                      mem_limit: Optional[int] = None,
                      intermediate: bool = False,
+                     force_mem_limit = None,
+                     opt: bool = None,
                      **kwargs):
     # Documentation: https://www.gurobi.com/documentation/9.5/refman/parameters.html#sec:Parameters
     res = dict()
@@ -494,6 +496,8 @@ def gurobi_arguments(model: cp.Model,
         res |= { "solution_callback": GurobiSolutionCallback(model).callback }
 
     assert "solution_callback" not in res
+
+    res |= kwargs
     return res, None
 
 def cpo_arguments(model: cp.Model,
@@ -605,6 +609,7 @@ def xcsp3_cpmpy(
         check_time_limit: Optional[int] = None,
         cores: int = 1,
         solver: str = None,
+        alias: str = None,
         time_buffer: int = 0,
         intermediate: bool = False,
         verbose: bool = False,
