@@ -33,6 +33,7 @@ import matplotlib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import benchmark
 
 def _extract_cost(solution_str):
     """
@@ -269,7 +270,7 @@ def main():
     # Read and merge all CSV files
     dfs = []
     for file in csv_files:
-        df = pd.read_csv(file)
+        df = pd.read_csv(file, names=benchmark.FIELDNAMES, skiprows=1)
         dfs.append(df)
     
     df = pd.concat(dfs, ignore_index=True)

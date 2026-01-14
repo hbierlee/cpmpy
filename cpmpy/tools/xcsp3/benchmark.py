@@ -64,6 +64,30 @@ from cpmpy.tools.xcsp3.dataset import XCSP3Dataset
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import xcsp3_cpmpy, init_signal_handlers, ExitStatus
 
+
+FIELDNAMES = [
+    "year",
+    "track",
+    "instance",
+    "alias",
+    "solver",
+    "solver_kwargs",
+    "time_total",
+    "time_parse",
+    "time_model",
+    "time_post",
+    "time_solve",
+    "status",
+    "objective_value",
+    "solution",
+    "intermediate",
+    "checker_result",
+    "n_cuts",
+    "n_cuts_explained",
+    "n_cuts_unexplained",
+    "cb_time",
+]
+
 class Tee:
     """
     A stream-like object that duplicates writes to multiple underlying streams.
@@ -164,10 +188,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
     output_file = pathlib.Path(output_file)
 
     # Fieldnames for the CSV file
-    fieldnames = ['year', 'track', 'instance', 'alias', 'solver', 'solver_kwargs',
-                  'time_total', 'time_parse', 'time_model', 'time_post', 'time_solve',
-                  'status', 'objective_value', 'solution', 'intermediate', 'checker_result','n_cuts','n_cuts_explained',"n_cuts_unexplained"]
-    result = dict.fromkeys(fieldnames)  # init all fields to None
+    result = dict.fromkeys(FIELDNAMES)  # init all fields to None
     result['year'] = metadata['year']
     result['track'] = metadata['track']
     result['instance'] = metadata['name'] 
