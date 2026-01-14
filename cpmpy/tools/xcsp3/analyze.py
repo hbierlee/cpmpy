@@ -204,9 +204,10 @@ def xcsp3_stats(df):
     df["posted"] = ~df["time_post"].isna()
     df["time_cb"] = df["cb_time"].fillna(value=0.0)
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_solve"])
+    df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
 
     df = df[df["solver"].isin(("gurobi", "lazy_gurobi"))]
-    print(df[["instance", "alias", "time_solve", "area", "cb_rel"]])
+    print(df[["instance", "alias", "time_solve", "area", "n_cuts", "cb_rel"]])
 
     TO = 600
     TIMES = ("post", "solve")
@@ -226,7 +227,7 @@ def xcsp3_stats(df):
                 posted = ('posted', 'sum'),
                 feasib = ('feasible', 'sum'),
                 solved = ('solved', 'sum'),
-                n_cuts = ('n_cuts', 'mean'),
+                cuts = ('cuts', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
                 )
 

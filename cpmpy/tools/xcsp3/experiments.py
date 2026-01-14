@@ -11,11 +11,13 @@ def get_experiments(args):
             [
                 # setup
                 {
-                    "time_limit": 30,
+                    "time_limit": 1 * 60,
                     "check_time_limit": 10,
                     "first": False,
-                    "mem_limit": 8192,
+                    "mem_limit": 8 * 1024,
                     "cores": 1,
+                    "workers": 7,  # pinac42: 1-12-20, 64Gb
+                    "check_time_limit": 2 * 60,
                     "output_dir": "results",
                     "no_timestamp": True,
                 }
@@ -40,6 +42,14 @@ def get_experiments(args):
                             "shrink",
                             "coverlift",
                         ],
+                    )
+                    + (
+                        "no-shrink",
+                        {
+                            "fractional": True,
+                            "shrink": False,
+                            "coverlift": True,
+                        },
                     )
                 ],
             ],
