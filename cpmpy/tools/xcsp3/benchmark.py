@@ -143,7 +143,7 @@ def xcsp3_wrapper(conn, kwargs, verbose):
         conn.close()
 
 # exec_args = (filename, metadata, solver, time_limit, mem_limit, check_time_limit, output_file, verbose) 
-def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, str, bool, bool, str]) -> None:
+def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, pathlib.Path, bool, bool, str]) -> None:
     """
     Solve a single XCSP3 instance and write results to file immediately.
     
@@ -161,11 +161,12 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
     """
     
     filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path = args
+    output_file = pathlib.Path(output_file)
 
     # Fieldnames for the CSV file
     fieldnames = ['year', 'track', 'instance', 'alias', 'solver', 'solver_kwargs',
                   'time_total', 'time_parse', 'time_model', 'time_post', 'time_solve',
-                  'status', 'objective_value', 'solution', 'intermediate', 'checker_result']
+                  'status', 'objective_value', 'solution', 'intermediate', 'checker_result','n_cuts','n_cuts_explained',"n_cuts_unexplained"]
     result = dict.fromkeys(fieldnames)  # init all fields to None
     result['year'] = metadata['year']
     result['track'] = metadata['track']
@@ -316,12 +317,18 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
             result['checker_result'] = None
 
     # Use a lock file to prevent concurrent writes
-    lock_file = f"{output_file}.lock"
+    lock_file = output_file.with_suffix(".lock")
     lock = FileLock(lock_file)
     try:
         with lock:
             # Pre-check if file exists to determine if we need to write header
             write_header = not os.path.exists(output_file)
+            # # TODO fix dynamic fieldnames
+            # if output_file.exists():
+            #     import pandas as pd
+            #     df = pd.read_csv(output_file)
+            #     if not set(fieldnames).subset(set(df.columns)):
+            #         df.append(result)
 
             with open(output_file, 'a', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -409,15 +416,15 @@ def xcsp3_benchmark(
     output_dir.mkdir(parents=True, exist_ok=True)
     
     alias = solver if alias is None else alias
-    output_file = f"xcsp3_{year}_{track}_{alias}"
+    output_file = pathlib.Path(f"xcsp3_{year}_{track}_{alias}")
     if no_timestamp is False:
         # Get current timestamp in a filename-safe format
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"{output_file}_{timestamp}"
+        output_file = output_file.with_name(f"{output_file.name}_{timestamp}")
     
     # Define output file path with timestamp
-    output_file = str(output_dir / f"{output_file}.csv")
-    pathlib.Path(output_file).unlink(missing_ok=True)
+    output_file = output_dir / output_file.with_suffix(".csv")
+    output_file.unlink(missing_ok=True)
     
     # Initialize dataset
     def update_metadata_table(metadata):
