@@ -732,7 +732,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         for cpm_expr in cpm_expressions:
             if cpm_expr.name == "table":
                 X, T = cpm_expr.args
-                assert len(set(X)) == len(X), f"Dup. int vars in table: {X}"
+                assert len(set(X)) == len(X), "Dup. int vars in table"
                 self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
                 self.log("T =", verbosity=3)
                 self.log(T, verbosity=3)
