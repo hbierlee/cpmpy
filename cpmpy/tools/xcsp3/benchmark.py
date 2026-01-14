@@ -283,8 +283,8 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
                 parts = line.split('=')
                 field = parts[1]
                 result[field] = parts[2]
-                if field not in fieldnames:
-                    fieldnames.append(field)
+                if field not in FIELDNAMES:
+                    FIELDNAMES.append(field)
 
         # Received a new status from the subprocess
         elif isinstance(line, dict):
@@ -352,7 +352,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
             #         df.append(result)
 
             with open(output_file, 'a', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
                 if write_header:
                     writer.writeheader()
                 writer.writerow(result)
