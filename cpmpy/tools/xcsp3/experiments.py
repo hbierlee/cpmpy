@@ -36,21 +36,25 @@ def get_experiments(args):
                 *[
                     {"alias": f"{solver}-{alias}", "solver": solver, "solver_kwargs": {"env": kw}}
                     for solver in ["lazy_gurobi"]
-                    for alias, kw in ablate(
-                        [
-                            "fractional",
-                            "shrink",
-                            "coverlift",
+                    for alias, kw in [
+                        *ablate(
+                            [
+                                "fractional",
+                                "shrink",
+                                "coverlift",
+                            ],
+                        ),
+                        *[
+                            (
+                                "no-shrink",
+                                {
+                                    "fractional": True,
+                                    "shrink": False,
+                                    "coverlift": True,
+                                },
+                            )
                         ],
-                    )
-                    + (
-                        "no-shrink",
-                        {
-                            "fractional": True,
-                            "shrink": False,
-                            "coverlift": True,
-                        },
-                    )
+                    ]
                 ],
             ],
         )
