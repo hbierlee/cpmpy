@@ -275,7 +275,7 @@ def main():
 
     # Save convenience
     if path.is_dir():
-        df.to_csv(Path(path.name).with_suffix("csv"))
+        df.to_csv(Path(path.name).with_suffix(".csv"))
     
     # Print some stats
     xcsp3_stats(df)
