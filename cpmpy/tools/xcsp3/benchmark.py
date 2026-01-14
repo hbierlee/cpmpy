@@ -520,7 +520,7 @@ if __name__ == "__main__":
     print("Experiments:")
     pprint.pprint(experiments)
 
-    experiments = [e for e in experiments if e.get("alias", None) == "lazy_gurobi-coverlift"]
+    # experiments = [e for e in experiments if e.get("alias", None) == "lazy_gurobi-coverlift"]
     # assert len(set(experiments)) == len(experiments)
 
     for experiment in experiments:
