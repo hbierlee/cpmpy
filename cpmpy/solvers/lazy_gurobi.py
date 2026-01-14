@@ -12,7 +12,6 @@ from enum import Enum
 
 import numpy as np
 import pandas as pd
-from gurobipy import GRB
 
 import cpmpy as cp
 from cpmpy.expressions.core import Comparison, Operator
@@ -341,6 +340,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         self.log("S", show_set(S), verbosity=3)
         self.log("terms", C_enc, verbosity=3)
         return S, C_enc, k
+
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
@@ -481,6 +481,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             assert i <= self.env["max_iterations"]
 
     def get_solution_callback(self):
+        from gurobipy import GRB
+
         all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
 
         def solution_callback(what, where):
