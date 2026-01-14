@@ -25,7 +25,7 @@ def get_experiments(args):
                 {
                     "year": 2025,
                     "track": "COP25",
-                    "glob": "RoadefPlaning2-2021-06_c25.xml",
+                    "glob": None,
                 }
             ],
             [
