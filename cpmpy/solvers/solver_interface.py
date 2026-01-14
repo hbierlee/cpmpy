@@ -62,7 +62,7 @@ class SolverInterface(object):
         """
         raise NotImplementedError("Implementation of 'version' is missing in solver interface. This should be fixed. If encountered, please report on GitHub.")
 
-    def __init__(self, name="dummy", cpm_model=None, subsolver=None):
+    def __init__(self, name="dummy", cpm_model=None, subsolver=None, time_limit=None):
         """
             Initalize solver interface
 
@@ -84,6 +84,9 @@ class SolverInterface(object):
         self.cpm_status = SolverStatus(self.name) # status of solving this model
         self.objective_value_ = None
 
+
+        self.time_limit = time_limit
+        self.time = time.time()
 
         # initialise variable handling
         self.user_vars = set()  # variables in the original (non-transformed) model

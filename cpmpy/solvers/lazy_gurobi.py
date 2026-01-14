@@ -10,14 +10,13 @@ import sys
 import time
 from enum import Enum
 
-import gurobipy as gp
 import numpy as np
 import pandas as pd
 from gurobipy import GRB
 
 import cpmpy as cp
-from cpmpy.expressions.utils import show_assignment
 from cpmpy.expressions.core import Comparison, Operator
+from cpmpy.expressions.utils import is_false_cst, show_assignment
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.solvers.gurobi import CPM_gurobi
 
@@ -90,8 +89,12 @@ DEBUG_NP_PRINTOPTIONS = {
 }
 
 
+def show_ind(a, index=INDEX):
+    return a + index
+
+
 def show_set(S, index=INDEX):
-    return f"{{{', '.join(str(s + index) for s in sorted(S))}}}"
+    return f"{{{', '.join(str(show_ind(s, index=index)) for s in sorted(S))}}}"
 
 
 class Infeasible(Exception):
@@ -105,6 +108,7 @@ def rows(T, i, j=1):
 
 def cols(T, i, j=1):
     """Col indices where T[i]==j"""
+    # TODO replace for rows(T.T, ..)?
     return set(int(i) for i in np.where(T[i, :] == j)[0].flatten())
 
 
@@ -126,6 +130,11 @@ def encode_x(a, lb, ub):
         # [[0, 1], [1, 0]]
         pass
     return X
+
+
+def union(sets):
+    sets = tuple(sets)
+    return set.union(*sets) if sets else set()
 
 
 def encode(X, T):
@@ -154,12 +163,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "heuristic": Heuristic.GREEDY,
             "shrink": True,
             "explain_fractional": True,
+            "coverlift": True,
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
             "checker": cp.Model(),
             "tables": [],
             "found_feasible": False,
+            "example2": False,
             **({} if env is None else env),
         }
         self.indent = 0
@@ -271,6 +282,65 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C = C - {i}
         return C
 
+    def gencoverlift(self, S, C_enc, k, T_enc):
+        self.log("gencoverlift", verbosity=3)
+        R = set(range(len(T_enc)))  # rows
+        C = set(range(len(T_enc.T)))  # cols
+
+        def tight(R, RS):
+            # TODO [peter] incorrect def in alg?
+            # return {r for r in R if sum(T_enc[r, i] for i in S) == k}
+            return {r for r in R if is_eq(RS[r], k)}
+
+        self.log("S", show_set(S), verbosity=3)
+        self.log("C_enc, k", C_enc, k, verbosity=3)
+        # terms = set(get_terms(cut.args[0]))
+        # self.log("T", terms, verbosity=3)
+        RS = [sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc]
+        self.log("RS", RS, verbosity=3)
+        R_tight = tight(R, RS)
+        self.log("R", show_set(R_tight), verbosity=3)
+        X = union(cols(T_enc, r) for r in R_tight)
+        self.log("X", show_set(X), verbosity=3)
+        self.log("C", show_set(C), verbosity=3)
+        # TODO [peter] C missing from alg
+
+        def choose(S):
+            self.log("choose from", show_set(S), verbosity=3)
+            return min(S)
+
+        i = 0
+        while C - X:
+            j = [3, 7, 0][i] if self.env["example2"] else choose(C - X)
+
+            a_j = min((k - RS[r] for r in R - R_tight if T_enc[r, j] == 1), default=None)
+            if a_j is None:
+                break
+
+            S.add(j)  # S = S + {j}
+            self.log("j", show_ind(j), verbosity=3)
+            self.log("S", show_set(S), verbosity=3)
+
+            # assert j not in C_enc # TODO [peter] can happen?
+            C_enc[j] = a_j
+            self.log("a_j", a_j, verbosity=3)
+            self.log("A", a_j * T_enc.T[j], verbosity=3)
+            RS = RS + a_j * T_enc.T[j]
+            self.log("RS", RS, verbosity=3)
+            N_tight = tight(R - R_tight, RS)
+            self.log("N_tight", show_set(N_tight), verbosity=3)
+            R_tight = R_tight.union(N_tight)
+            self.log("R_tight", show_set(R_tight), verbosity=3)
+
+            X = X.union(union(cols(T_enc, r) for r in N_tight))
+            self.log("X", show_set(X), verbosity=3)
+            if self.env["debug"]:
+                i += 1
+                self.check_max_iterations(i)
+
+        self.log("S", show_set(S), verbosity=3)
+        self.log("terms", C_enc, verbosity=3)
+        return S, C_enc, k
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
@@ -325,8 +395,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if F:
             if not U:
-                self.log("  unexplainable")
-                self.log("    because U is empty", verbosity=3)
+                self.log("unexplainable", indent=2)
+                self.log("because U is empty", verbosity=3, indent=4)
                 return
             else:
                 i = self.choose(U, T_enc, R, heuristic=self.env["heuristic"])
@@ -371,8 +441,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return c
 
             C_ = C(A_enc, l)
-            sets = [rows(T_enc, i) for i in C_]
-            sets = set.union(*sets) if sets else set()
+            sets = union(rows(T_enc, i) for i in C_)
             self.log(f"Union = {show_set(sets)}", verbosity=3)
             R = R.intersection(sets)
             X = X.union(C_)
@@ -386,7 +455,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             X_shrunk = self.shrink(X, T_enc)
             shrunk = len(X) - len(X_shrunk)
             if shrunk:
-                self.log(f"  shrunk by {shrunk}: {show_set(X)} --> {show_set(X_shrunk)}")
+                self.log(f"shrunk by {shrunk}: {show_set(X)} --> {show_set(X_shrunk)}", indent=2)
                 if self.env["debug"]:
                     self.env["cuts"][-1] = {
                         **self.env["cuts"][-1],
@@ -395,9 +464,16 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     }
             self.env["cuts"][-1]["shrunk"] = shrunk
 
+        C_enc = {s: 1 for s in X}
+        k = len(X) - 1
+
+        self.log(f"cut == {show_set(X)}, {C_enc}, {k}", indent=2)
+        if self.env["coverlift"]:
+            X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc)
+
         self.env["cuts"][-1]["size"] = len(X)
-        self.log(f"  cut == {show_set(X)}")
-        return X
+        self.log(f"gcut== {show_set(X)}, {C_enc}, {k}", indent=2)
+        return X, C_enc, k
 
     def check_max_iterations(self, i):
         # Loop termination for debug purposes
@@ -449,12 +525,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                     if isinstance(expr, Comparison) and expr.name == "<=":
                         assert isinstance(expr.args[0], Operator)
+                        expr, k = explanation.args
                         cut = (
-                            gp.quicksum([self.solver_var(x) for x in expr.args[0].args])
-                            <= explanation.args[1] - 1.0
+                            self._make_numexpr(expr) <= k
+                            # gp.quicksum([self.solver_var(x) for x in expr.args[0].args])
+                            # <= explanation.args[1]
                         )
                         what.cbLazy(cut)
-                    elif expr is False:
+                    elif is_false_cst(expr):
                         raise Infeasible
                     else:
                         assert False, f"Unsupported expl: {expr}"
@@ -517,12 +595,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                             if a > 0.0
                         ]
                     ]
-
                 if explanation:
+                    X, C_enc, k = explanation
+                    expr = cp.sum(C_enc[i] * X_enc[i] for i in X) <= k
                     self.log(
-                        f"  cons == {' + '.join(X_enc[c].name for c in explanation)} < {len(explanation)}",
+                        f"cons == {expr}",
+                        indent=2,
                     )
-                    expr = cp.sum(X_enc[c] for c in explanation) < len(explanation)
                     self.env["cuts"][-1]["expr"] = expr
 
                     # if self.env["debug"]:

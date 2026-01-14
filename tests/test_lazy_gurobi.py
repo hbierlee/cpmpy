@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 
 import cpmpy as cp
-from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
 from cpmpy.expressions.utils import show_assignment
+from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
 
 
 def generate_table_from_example():
@@ -144,6 +144,24 @@ class TestTables:
             CPM_lazy_gurobi(
                 env={**env, **{"verbosity": 4, "debug": False}},
             ).explain(A_enc, T_enc, parts, frm="MIPSOL")
+
+    def test_coverlift(self, env):
+        slv = CPM_lazy_gurobi(
+            cpm_model=cp.Model(generate_table_from_example().constraints),
+            env={**env, **{"shrink": False, "debug": True, "example2": True}},
+        )
+        X_enc, T_enc, parts, table = slv.tables[0]
+
+        # example 2 / 11
+        S = {1, 5, 8}
+
+        C_enc = {s: 1 for s in S}
+        k = len(S) - 1
+
+        c = slv.gencoverlift(S, C_enc, k, T_enc)
+
+        print("c", c)
+        # TODO assert
 
     def test_explain(self, env):
         slv = CPM_lazy_gurobi(
