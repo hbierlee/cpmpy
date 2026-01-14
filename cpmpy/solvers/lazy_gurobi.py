@@ -158,11 +158,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
         self.env = {
             "debug": False,
             "verbosity": 0,
-            "log": pathlib.Path("lazy.log"),
+            "log": None,
             "heuristic": Heuristic.GREEDY,
             "shrink": True,
-            "explain_fractional": True,
-            "coverlift": True,
+            "fractional": True,
+            "coverlift": False,
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
@@ -230,7 +230,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def stats(self):
         self.log(
-            ", ".join(f"{k}={self.env[k]}" for k in ["shrink", "heuristic", "explain_fractional"]),
+            ", ".join(f"{k}={self.env[k]}" for k in ["shrink", "heuristic", "fractional"]),
             verbosity=0,
         )
         self.print_cuts()
@@ -499,7 +499,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                 match where:
                     case GRB.Callback.MIPNODE:
-                        if not self.env["explain_fractional"]:
+                        if not self.env["fractional"]:
                             return
                         # Optimal solution to LP relaxation
                         if what.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
@@ -679,10 +679,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         # assert len(sols) >= len(T_enc), f"{sols} != {len(T_enc)} for checker {self.env['checker']}"
 
-    def solve(self, time_limit=None, solution_callback=None, **kwargs):
+    def solve(self, time_limit=None, solution_callback=None, env=None, **kwargs):
         """
         Call the gurobi solver with cut generation
         """
+
+        if env is not None:
+            self.env = { **self.env, **env }
 
         self.env["cuts"] = []
         self.env["cb_time"] = 0.0

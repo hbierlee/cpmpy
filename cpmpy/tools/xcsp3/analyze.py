@@ -206,7 +206,7 @@ def xcsp3_stats(df):
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_solve"])
 
     df = df[df["solver"].isin(("gurobi", "lazy_gurobi"))]
-    print(df[["instance", "solver", "time_solve", "area", "cb_rel"]])
+    print(df[["instance", "alias", "time_solve", "area", "cb_rel"]])
 
     TO = 600
     TIMES = ("post", "solve")
@@ -214,7 +214,7 @@ def xcsp3_stats(df):
     for t in TIMES:
         df[f"time_{t}_p2"] = df[f"time_{t}"].fillna(value=TO*2)
 
-    for grouping in (['problem', 'solver'], ['solver']):
+    for grouping in (['problem', 'alias'], ['alias']):
         groups = df.groupby(grouping).agg(
                 area = ('area', 'mean'),
                 t_totl_hr = ('time_total', 'sum'),
@@ -226,6 +226,7 @@ def xcsp3_stats(df):
                 posted = ('posted', 'sum'),
                 feasib = ('feasible', 'sum'),
                 solved = ('solved', 'sum'),
+                n_cuts = ('n_cuts', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
                 )
 
@@ -254,9 +255,9 @@ def main():
     for path_str in args.files:
         path = Path(path_str)
         if path.is_file() and path.suffix == '.csv':
-            csv_files.append(path)
+            csv_files.append(Path(path))
         elif path.is_dir():
-            csv_files.extend(path.rglob('*.csv'))
+            csv_files.extend(Path(p) for p in path.rglob('*.csv'))
         else:
             print(f"Warning: {path} is not a valid CSV file or directory")
 
@@ -271,6 +272,10 @@ def main():
         dfs.append(df)
     
     df = pd.concat(dfs, ignore_index=True)
+
+    # Save convenience
+    if path.is_dir():
+        df.to_csv(Path(path.name).with_suffix("csv"))
     
     # Print some stats
     xcsp3_stats(df)

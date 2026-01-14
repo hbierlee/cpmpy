@@ -257,6 +257,16 @@ def get_supported_solvers():
     warnings.warn("Deprecated, use Model.solvernames() instead, will be removed in stable version", DeprecationWarning)
     return [sv for sv in builtin_solvers if sv.supported()]
 
+
+class Hashabledict(dict):
+    def __hash__(self):
+        return hash(frozenset(self))
+
+    def __repr__(self):
+        return (
+            f"{{{', '.join(f'{k}: {v}' for k, v in sorted(self.items(), key=lambda k: k[0].name))}}}"
+        )
+
 def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosity=1, diverse=False):
     """Return all solutions of `P` as values of the projected variables, `X`, within the time limit, or `False` iff `P` is determined to be unsatisfiable."""
     P = P.copy()
@@ -297,15 +307,6 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
     def store_sol():
         if all(x.value() is None for x in X):
             return
-
-        class Hashabledict(dict):
-            def __hash__(self):
-                return hash(frozenset(self))
-
-            def __repr__(self):
-                return (
-                    f"{{{', '.join(f'{k}: {v}' for k, v in sorted(self.items(), key=lambda k: k[0].name))}}}"
-                )
 
         sol = Hashabledict((x, value(x)) for x in X if x.value() is not None)
 
