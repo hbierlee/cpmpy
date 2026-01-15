@@ -699,11 +699,13 @@ def xcsp3_cpmpy(
         # Post model to solver
         time_post = time.time()
 
+
+        solver_init_args = {"name": solver, "model": model, "time_limit": time_limit - wall_time(p) - time_buffer}
         if solver == "exact": # Exact2 takes its options at creation time
-            s = cp.SolverLookup.get(name=solver, model=model, time_limit=time_limit, **solver_args)
+            s = cp.SolverLookup.get(**solver_init_args, **solver_args)
             solver_args = dict()  # no more solver args needed
         else:
-            s = cp.SolverLookup.get(name=solver, model=model, time_limit=time_limit)
+            s = cp.SolverLookup.get(**solver_init_args)
         time_post = time.time() - time_post
         if verbose: print_comment(f"took {time_post:.4f} seconds to post model to {solver}")
 
@@ -756,9 +758,13 @@ def xcsp3_cpmpy(
             for c in model.constraints:
                 assert c.value(), f"Constraint {c} failed for assignment {show_assignment(get_variables(c))}"
                 if check_time_limit - (time.time() - time_check) < 1:
-                    raise TimeoutError(f"Checking did not finish in time limit {check_time_limit}")
+                    raise Exception(f"Checking did not finish in time limit {check_time_limit}")
             print_comment(f"Checking passed in {time.time() - time_check:.4f}")
         
+    except TimeoutError as e:
+        print_comment(f"TimeoutError raised. Reached time limit of {time_limit}:\n\n{e}")
+        print_status(ExitStatus.unknown)
+        raise e
     except MemoryError as e:
         print_comment(f"MemoryError raised. Reached limit of {mem_limit} MiB")
         print_status(ExitStatus.memory)

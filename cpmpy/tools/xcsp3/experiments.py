@@ -1,7 +1,8 @@
 import itertools
 
 
-def get_experiments(args):
+
+def get_experiments(args, glob_alias=None):
     return list(
         {
             **dict(it for di in x for it in di.items()),
@@ -31,31 +32,35 @@ def get_experiments(args):
                 }
             ],
             [
-                # solvers
-                {"solver": "gurobi"},
-                *[
-                    {"alias": f"{solver}-{alias}", "solver": solver, "solver_kwargs": {"env": kw}}
-                    for solver in ["lazy_gurobi"]
-                    for alias, kw in [
-                        *ablate(
-                             [
-                                "fractional",
-                                "shrink",
-                                "coverlift",
+                solver
+                for solver in [
+                    # solvers
+                    {"solver": "gurobi", "alias": "gurobi"},  # TODO gen.
+                    *[
+                        {"alias": f"{solver}-{alias}", "solver": solver, "solver_kwargs": {"env": kw}}
+                        for solver in ["lazy_gurobi"]
+                        for alias, kw in [
+                            *ablate(
+                                [
+                                    "fractional",
+                                    "shrink",
+                                    "coverlift",
+                                ],
+                            ),
+                            *[
+                                (
+                                    "no_shrink",
+                                    {
+                                        "fractional": True,
+                                        "shrink": False,
+                                        "coverlift": True,
+                                    },
+                                )
                             ],
-                        ),
-                        *[
-                            (
-                                "no-shrink",
-                                {
-                                    "fractional": True,
-                                    "shrink": False,
-                                    "coverlift": True,
-                                },
-                            )
-                        ],
-                    ]
-                ],
+                        ]
+                    ],
+                ]
+                if glob_alias is None or solver["alias"] == glob_alias
             ],
         )
     )

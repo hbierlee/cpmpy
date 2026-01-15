@@ -63,30 +63,8 @@ import experiments
 from cpmpy.tools.xcsp3.dataset import XCSP3Dataset
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import xcsp3_cpmpy, init_signal_handlers, ExitStatus
+import analyze
 
-
-FIELDNAMES = [
-    "year",
-    "track",
-    "instance",
-    "alias",
-    "solver",
-    "solver_kwargs",
-    "time_total",
-    "time_parse",
-    "time_model",
-    "time_post",
-    "time_solve",
-    "status",
-    "objective_value",
-    "solution",
-    "intermediate",
-    "checker_result",
-    "n_cuts",
-    "n_cuts_explained",
-    "n_cuts_unexplained",
-    "cb_time",
-]
 
 class Tee:
     """
@@ -156,6 +134,9 @@ def xcsp3_wrapper(conn, kwargs, verbose):
         init_signal_handlers() # configure OS signal handlers
         xcsp3_cpmpy(**kwargs, verbose=verbose)
         conn.send({"status": "ok"})
+    except TimeoutError as e: # capture exceptions and report in state
+        tb_str = traceback.format_exc()
+        conn.send({"status": ExitStatus.unknown.value, "exception": e, "traceback": tb_str})
     except MemoryError as e: # capture exceptions and report in state
         tb_str = traceback.format_exc()
         conn.send({"status": ExitStatus.memory.value, "exception": e, "traceback": tb_str})
@@ -188,7 +169,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
     output_file = pathlib.Path(output_file)
 
     # Fieldnames for the CSV file
-    result = dict.fromkeys(FIELDNAMES)  # init all fields to None
+    result = dict.fromkeys(analyze.FIELDNAMES)  # init all fields to None
     result['year'] = metadata['year']
     result['track'] = metadata['track']
     result['instance'] = metadata['name'] 
@@ -283,8 +264,8 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
                 parts = line.split('=')
                 field = parts[1]
                 result[field] = parts[2]
-                if field not in FIELDNAMES:
-                    FIELDNAMES.append(field)
+                if field not in analyze.FIELDNAMES:
+                    analyze.FIELDNAMES.append(field)
 
         # Received a new status from the subprocess
         elif isinstance(line, dict):
@@ -315,13 +296,12 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
     # Parse the exit status
     if status["status"] != "ok":
         # Ignore timeouts
-        if "TimeoutError" in repr(status["exception"]):
-            pass
+        # if "TimeoutError" in repr(status["exception"]):
+        #     pass
 
         # All other exceptions, put in solution field
-        elif result['solution'] is None:
-            result["solution"] = status['exception']
-            result["status"] = status['status']
+        result["exception"] = status['exception']
+        result["status"] = status['status']
 
     if checker_path is not None and complete_solution is not None:
         checker_output, checker_time = run_solution_checker(
@@ -352,7 +332,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
             #         df.append(result)
 
             with open(output_file, 'a', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+                writer = csv.DictWriter(f, fieldnames=analyze.FIELDNAMES)
                 if write_header:
                     writer.writeheader()
                 writer.writerow(result)
@@ -495,6 +475,7 @@ if __name__ == "__main__":
     parser.add_argument('--track', type=str, help='Track type (e.g., COP, CSP, MiniCOP)')
     parser.add_argument('--solver', type=str, help='Solver name (e.g., ortools, exact, choco, ...)')
     parser.add_argument('--alias', type=str, help='Solver config alias (e.g., ortools-par, ...)')
+    parser.add_argument('--glob-alias', type=str, default=None, help='Solver config alias (e.g., ortools-par, ...)')
     parser.add_argument('--workers', type=int, help='Number of parallel workers')
     parser.add_argument('--time-limit', type=int, help='Time limit in seconds per instance')
     parser.add_argument('--check-time-limit', type=int, help='Check time limit in seconds per instance')
@@ -507,14 +488,20 @@ if __name__ == "__main__":
     parser.add_argument('--verbose', action='store_true', help='Show solver output')
     parser.add_argument('--intermediate', action='store_true', help='Report on intermediate solutions')
     parser.add_argument('--checker-path', type=str, help='Path to the XCSP3 solution checker JAR file')
+    parser.add_argument('--analyze', action='store_true', help='Analyze results')
     
     
-    args = {k: v for k, v in vars(parser.parse_args()).items() if v is not None}
+    args = parser.parse_args()
+    args_ = {
+        k: v
+        for k, v in vars(args).items()
+        if v is not None and k not in ("cp_cuts", "glob_alias", "analyze")
+    }
 
-    if not args["verbose"]:
+    if not args_["verbose"]:
         warnings.filterwarnings("ignore")
     
-    experiments = experiments.get_experiments(args) if args["cp_cuts"] else [args]
+    experiments = experiments.get_experiments(args_, glob_alias=args.glob_alias) if args.cp_cuts else [args_]
     # experiments = experiments[:1]
 
     print("Experiments:")
@@ -524,7 +511,8 @@ if __name__ == "__main__":
     # assert len(set(experiments)) == len(experiments)
 
     for experiment in experiments:
-        del experiment["cp_cuts"]
+        # for k in ("cp_cuts", "glob_alias", "analyze"):
+        #     del experiment[k]
         print("Run", experiment)
         output_file = xcsp3_benchmark(**experiment)
         print(f"Results added to {output_file}")
@@ -534,3 +522,6 @@ if __name__ == "__main__":
     import pandas as pd
     dfs = pd.concat([pd.read_csv(f) for f in output_dir.glob("*.csv")], ignore_index=True)
     dfs.to_csv(pathlib.Path(output_dir.name).with_suffix(".csv"))
+
+    if args.analyze:
+        analyze.analyze([output_dir], time_limit=args.time_limit, output=None)
