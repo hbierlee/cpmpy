@@ -27,7 +27,7 @@ Optional Arguments
 import argparse
 import ast
 import json
-from pathlib import Path
+import pathlib
 import re
 import matplotlib
 import pandas as pd
@@ -265,13 +265,14 @@ def xcsp3_stats(df, time_limit=None):
                 cuts = ('cuts', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
                 )[[
-            *(["insts"] if PER_PROBLEM else []),
+            # *(["insts"] if PER_PROBLEM else ["insts"]),
             *[
                 "area",
             ],
             *([] if PER_PROBLEM else [
                 "t_post_p2",
                 "t_solv_p2",
+                "insts",
                 "err",
                 "unk",
                 "mem",
@@ -303,21 +304,30 @@ def main():
                         help='Maximum time limit in seconds to show on x-axis')
     parser.add_argument('--output', '-o', type=str, default=None,
                         help='Path to save the plot image (e.g., output.png)')
+    parser.add_argument('--sync', type=pathlib.Path, default=None,
+                        help='Location to sync files from')
     args = parser.parse_args()
-    analyze(args.files, time_limit=args.time_limit, output=args.output)
+    analyze(args.files, time_limit=args.time_limit, output=args.output, sync=args.sync)
 
-def analyze(files, time_limit=None, output=None):
+def analyze(files, time_limit=None, output=None, sync=None):
+
+    import subprocess
+    if sync:
+        assert len(files) == 1
+        subprocess.run(["scp", "-r", f"{sync}/*", files[0]])
     
+
     # Gather all CSV files
     csv_files = []
     for path_str in files:
-        path = Path(path_str)
+        path = pathlib.Path(path_str)
         if path.is_file() and path.suffix == '.csv':
-            csv_files.append(Path(path))
+            csv_files.append(pathlib.Path(path))
         elif path.is_dir():
-            csv_files.extend(Path(p) for p in path.rglob('*.csv'))
+            csv_files.extend(pathlib.Path(p) for p in path.rglob('*.csv'))
         else:
             print(f"Warning: {path} is not a valid CSV file or directory")
+
 
     if not csv_files:
         print("No CSV files found.")
@@ -338,7 +348,7 @@ def analyze(files, time_limit=None, output=None):
 
     # Save convenience
     if path.is_dir():
-        df.to_csv(Path(path.name).with_suffix(".csv"))
+        df.to_csv(pathlib.Path(path.name).with_suffix(".csv"))
     
     # Print some stats
     xcsp3_stats(df, time_limit=time_limit)

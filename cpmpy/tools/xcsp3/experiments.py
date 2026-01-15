@@ -60,7 +60,7 @@ def get_experiments(args, glob_alias=None):
                         ]
                     ],
                 ]
-                if glob_alias is None or solver["alias"] == glob_alias
+                if glob_alias is None or solver["alias"] in glob_alias
             ],
         )
     )
