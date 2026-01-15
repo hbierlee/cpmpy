@@ -33,7 +33,31 @@ import matplotlib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import benchmark
+
+FIELDNAMES = [
+    "year",
+    "track",
+    "instance",
+    "alias",
+    "solver",
+    "solver_kwargs",
+    "time_total",
+    "time_parse",
+    "time_model",
+    "time_post",
+    "time_solve",
+    "status",
+    "objective_value",
+    "solution",
+    "exception",
+    "intermediate",
+    "checker_result",
+    "n_cuts",
+    "n_cuts_explained",
+    "n_cuts_unexplained",
+    "cb_time",
+]
+
 
 def _extract_cost(solution_str):
     """
@@ -51,15 +75,16 @@ UNS = 'UNSATISFIABLE'
 SAT = 'SATISFIABLE'
 MEM = 'MEMORY'
 ERR = 'ERROR'
+UNK = 'UNKNOWN'
 
-def xcsp3_plot(df, time_limit=None, metric="time_solve", filter="solved"):
+def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved"):
     # Get unique solvers
-    solvers = df['solver'].unique()
+    solvers = df['alias'].unique()
 
     # Determine the status to plot (Opt if at least one opt, otherwise sat)
-    if filter == "solved":
+    if filter_by == "solved":
         status_filter = (OPT, UNS)
-    elif filter == "feasible":
+    elif filter_by == "feasible":
         status_filter = (OPT, UNS, SAT)
     else:
         raise Exception
@@ -68,7 +93,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter="solved"):
     # print(df[["solver", "instance", "status", metric]])
 
     # Count how many instances each solver solved (with correct status)
-    solver_counts = df['solver'].value_counts()
+    solver_counts = df['alias'].value_counts()
 
     # Sort solvers descending by number of instances solved
     solvers_sorted = solver_counts.sort_values(ascending=False).index.tolist()
@@ -78,7 +103,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter="solved"):
     
     for solver in sorted(solvers): # Sort solver names for consistent ordering
         # Get data for this solver
-        solver_data = df[df['solver'] == solver]
+        solver_data = df[df['alias'] == solver]
         
         # Sort by time_total
         solver_data = solver_data.sort_values(metric)
@@ -182,14 +207,17 @@ def xcsp3_objective_performance_profile(df):
 
     return fig
 
-def xcsp3_stats(df):
+def xcsp3_stats(df, time_limit=None):
 
-    for phase in ['parse', 'model', 'post']:
-        slowest_idx = df[f'time_{phase}'].idxmax()
-        if slowest_idx is not None and not pd.isna(slowest_idx):
-            print(f"Slowest {phase}: {df.loc[slowest_idx, f'time_{phase}']}s ({df.loc[slowest_idx, 'instance']}, {df.loc[slowest_idx, 'solver']})")
+    if False:  # TODO FutureWarning: The behavior of Series.idxmax with all-NA values, or any-NA and skipna=False, is deprecated. In a future version this will raise ValueError
+        for phase in ['parse', 'model', 'post']:
+            slowest_idx = df[f"time_{phase}"].idxmax()
+            if slowest_idx is not None and not pd.isna(slowest_idx):
+                print(f"Slowest {phase}: {df.loc[slowest_idx, f'time_{phase}']}s ({df.loc[slowest_idx, 'instance']}, {df.loc[slowest_idx, 'solver']})")
 
     df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
+
+    print("Problems", df['problem'].unique())
     def get_metadata(x):
         with open(x) as f:
             metadata = json.load(f)
@@ -198,11 +226,12 @@ def xcsp3_stats(df):
     df["area"] = df["file_name"].map(get_metadata)
     pd.set_option('display.float_format', '{:0.1f}'.format)
 
+    df["unknown"] = df["status"] == UNK
     df["error"] = df["status"] == ERR
     df["memory"] = df["status"] == MEM
     df["feasible"] = df["status"].isin((OPT, SAT, UNS))
     df["solved"] = df["status"].isin((OPT, UNS))
-    df["posted"] = ~df["time_post"].isna()
+    df["post"] = ~df["time_post"].isna()
     df["time_cb"] = df["cb_time"].fillna(value=0.0)
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_solve"])
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
@@ -210,32 +239,56 @@ def xcsp3_stats(df):
     df = df[df["solver"].isin(("gurobi", "lazy_gurobi"))]
     print(df[["instance", "alias", "time_solve", "area", "n_cuts", "cb_rel"]])
 
-    TO = 600
     TIMES = ("post", "solve")
 
-    for t in TIMES:
-        df[f"time_{t}_p2"] = df[f"time_{t}"].fillna(value=TO*2)
+    if time_limit is not None:
+        for t in TIMES:
+            df[f"time_{t}_p2"] = df[f"time_{t}"].fillna(value=time_limit * 2)
 
-    for grouping in (['problem', 'alias'], ['alias']):
+    for grouping in (['alias', 'problem'], ['problem', 'alias'], ['alias']):
+        PER_PROBLEM = grouping == ['alias', 'problem']
+
         groups = df.groupby(grouping).agg(
+                alias = ("alias", "first"),
+                insts = ("problem", 'count'),
                 area = ('area', 'mean'),
                 t_totl_hr = ('time_total', 'sum'),
                 t_post_p2 = ('time_post_p2', 'sum'),
                 t_solv_p2 = ('time_solve_p2', 'sum'),
-                insts = ('status', 'count'),
-                error = ('error', 'sum'),
-                memory = ('memory', 'sum'),
-                posted = ('posted', 'sum'),
-                feasib = ('feasible', 'sum'),
-                solved = ('solved', 'sum'),
+                # insts = ('status', 'count'),
+                err = ('error', 'sum'),
+                unk = ('unknown', 'sum'),
+                mem = ('memory', 'sum'),
+                post = ('post', 'sum'),
+                feas = ('feasible', 'sum'),
+                solv = ('solved', 'sum'),
                 cuts = ('cuts', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
-                )
+                )[[
+            *(["insts"] if PER_PROBLEM else []),
+            *[
+                "area",
+            ],
+            *([] if PER_PROBLEM else [
+                "t_post_p2",
+                "t_solv_p2",
+                "err",
+                "unk",
+                "mem",
+                "post",
+                "feas",
+                "solv",
+                "cuts",
+                "cb_rel",
+            ]),
+        ]]
+
 
         # groups = groups.sort_index(level=["problem"], by="area")
         # groups = groups.sort_values(by="area", ascending=False)
         groups["area"] = groups["area"].map(lambda x: f"{x:.1e}")
-        groups["t_totl_hr"] = groups["t_totl_hr"].map(lambda x: x / 3600)
+        if "t_totl_hr" in groups:
+            groups["t_totl_hr"] = groups["t_totl_hr"].map(lambda x: x / 3600)
         # groups.loc[('Total')] = groups.sum(numeric_only=True)
 
         print(groups)
@@ -251,10 +304,13 @@ def main():
     parser.add_argument('--output', '-o', type=str, default=None,
                         help='Path to save the plot image (e.g., output.png)')
     args = parser.parse_args()
+    analyze(args.files, time_limit=args.time_limit, output=args.output)
+
+def analyze(files, time_limit=None, output=None):
     
     # Gather all CSV files
     csv_files = []
-    for path_str in args.files:
+    for path_str in files:
         path = Path(path_str)
         if path.is_file() and path.suffix == '.csv':
             csv_files.append(Path(path))
@@ -270,31 +326,37 @@ def main():
     # Read and merge all CSV files
     dfs = []
     for file in csv_files:
-        df = pd.read_csv(file, names=benchmark.FIELDNAMES, skiprows=1)
+        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1)
         dfs.append(df)
     
     df = pd.concat(dfs, ignore_index=True)
+
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.expand_frame_repr", False)
+    print("RESULTS")
+    print(df[["instance", "alias", "status", "time_total", "time_post", "time_solve", "exception", "cb_time"]])
 
     # Save convenience
     if path.is_dir():
         df.to_csv(Path(path.name).with_suffix(".csv"))
     
     # Print some stats
-    xcsp3_stats(df)
+    xcsp3_stats(df, time_limit=time_limit)
     
     # Create performance plot
     # df[cb_time] = df[f"time_{t}"].fillna(value=TO*2)
     # df["t_solve_wo_cb"] = df["time_solve"] - df["cb_time"].fillna(value=0)
     # fig = xcsp3_plot(df, args.time_limit, metric="t_solve_wo_cb")
-    fig = xcsp3_plot(df, args.time_limit, filter="feasible")
+
+    fig = xcsp3_plot(df, time_limit, filter_by="feasible")
     # fig = xcsp3_objective_performance_profile(merged_df)
 
     # Save or show plot
-    if args.output:
-        fig.savefig(args.output, bbox_inches='tight')
-        print(f"Plot saved to {args.output}")
-    else:
-        plt.show()
+    if output:
+        fig.savefig(output, bbox_inches='tight')
+        print(f"Plot saved to {output}")
+    # else:
+    #     plt.show()
 
 
 if __name__ == '__main__':
