@@ -57,6 +57,7 @@ from io import StringIO
 from datetime import datetime
 from filelock import FileLock
 from concurrent.futures import ThreadPoolExecutor
+import gurobipy
 
 import cpmpy as cp
 from cpmpy.tools.xcsp3.experiments import get_experiments
@@ -140,6 +141,10 @@ def xcsp3_wrapper(conn, kwargs, verbose):
     except MemoryError as e: # capture exceptions and report in state
         tb_str = traceback.format_exc()
         conn.send({"status": ExitStatus.memory.value, "exception": e, "traceback": tb_str})
+    except gurobipy._exception.GurobiError as e:
+        tb_str = traceback.format_exc()
+        status = ExitStatus.memory if e.errno == 10001 else ExitStatus.error
+        conn.send({"status": status.value, "exception": e, "traceback": tb_str})
     except Exception as e: # capture exceptions and report in state
         tb_str = traceback.format_exc()
         conn.send({"status": ExitStatus.error.value, "exception": e, "traceback": tb_str})

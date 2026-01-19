@@ -10,7 +10,7 @@ import time
 TIMEOUT = 5
 
 
-def raise_error(*args, **kwargs):
+def raise_error():
     raise Exception("Raised error")
 
 
@@ -52,6 +52,16 @@ class CPM_gurobi_callback_timeout(CPM_gurobi):
     def solve(self, *args, **kwargs):
         super().solve(*args, **kwargs, solution_callback=lambda *args: timeout(self.time_limit))
 
+class CPM_gurobi_callback_error(CPM_gurobi):
+    def transform(self, *args, **kwargs):
+        return []
+
+    def solve(self, *args, **kwargs):
+        def solution_callback(*args):
+            raise_error()
+        super().solve(*args, **kwargs, solution_callback=lambda *args: raise_error())
+
+
 
 class CPM_gurobi_solve_memoryout(CPM_gurobi):
     def transform(self, *args, **kwargs):
@@ -60,6 +70,16 @@ class CPM_gurobi_solve_memoryout(CPM_gurobi):
     def solve(self, *args, **kwargs):
         time.sleep(TIMEOUT / 2)
         raise MemoryError
+
+class CPM_gurobi_solve_grb_memoryout(CPM_gurobi):
+    def transform(self, *args, **kwargs):
+        return []
+
+    def solve(self, *args, **kwargs):
+        time.sleep(TIMEOUT / 2)
+        import gurobipy
+        raise gurobipy._exception.GurobiError(10001, "Out of memory")
+
 
 
 class CPM_gurobi_solve_incorrect(CPM_gurobi):
@@ -113,8 +133,10 @@ class TestBenchmark:
                 ({"solver": CPM_gurobi_transform_timeout}, ExitStatus.unknown),
                 ({"solver": CPM_gurobi_solve_timeout}, ExitStatus.unknown),
                 ({"solver": CPM_gurobi_callback_timeout}, ExitStatus.unknown),
+                ({"solver": CPM_gurobi_callback_error}, ExitStatus.error),
                 ({"solver": CPM_gurobi_solve_error}, ExitStatus.error),
                 ({"solver": CPM_gurobi_solve_memoryout}, ExitStatus.memory),
+                ({"solver": CPM_gurobi_solve_grb_memoryout}, ExitStatus.memory),
                 (
                     {
                         "solver": CPM_gurobi,
