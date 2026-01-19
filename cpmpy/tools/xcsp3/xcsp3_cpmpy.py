@@ -90,7 +90,7 @@ SUPPORTED_SUBSOLVERS = {
     "minizinc": ["gecode", "chuffed"]
 }
 DEFAULT_SOLVER = "ortools"
-TIME_BUFFER = 5 # seconds
+TIME_BUFFER = 2 # seconds
 # TODO : see if good value
 MEMORY_BUFFER_SOFT = 2 # MiB
 MEMORY_BUFFER_HARD = 0 # MiB
@@ -551,6 +551,8 @@ def solver_arguments(solver: str,
     opt = model.has_objective()
     sat = not opt
 
+    if not isinstance(solver, str):
+        return gurobi_arguments(model, cores=cores, seed=seed, mem_limit=mem_limit, intermediate=intermediate, opt=opt, **kwargs)
     if solver == "ortools":
         return ortools_arguments(model, cores=cores, seed=seed, intermediate=intermediate, **kwargs)
     elif solver == "exact":
@@ -640,6 +642,7 @@ def xcsp3_cpmpy(
 
         # Set time limit (if provided)
         if time_limit is not None:
+            # don't add check time limit; this is not given extra to posting
             set_time_limit(int(time_limit - wall_time(p) + time.process_time()), verbose=verbose) # set remaining process time != wall time
    
         sys.argv = ["-nocompile"] # Stop pyxcsp3 from complaining on exit
@@ -700,23 +703,25 @@ def xcsp3_cpmpy(
         time_post = time.time()
 
 
-        solver_init_args = {"name": solver, "model": model, "time_limit": time_limit - wall_time(p) - time_buffer}
-        if solver == "exact": # Exact2 takes its options at creation time
-            s = cp.SolverLookup.get(**solver_init_args, **solver_args)
+        solver_init_args = {"time_limit": time_limit - wall_time(p) - time_buffer}
+        if not isinstance(solver, str):
+            s = solver(cpm_model = model, **solver_init_args)
+        elif solver == "exact": # Exact2 takes its options at creation time
+            s = cp.SolverLookup.get(name=solver, model=model, **solver_init_args, **solver_args)
             solver_args = dict()  # no more solver args needed
         else:
-            s = cp.SolverLookup.get(**solver_init_args)
+            s = cp.SolverLookup.get(name=solver, model=model, **solver_init_args)
         time_post = time.time() - time_post
         if verbose: print_comment(f"took {time_post:.4f} seconds to post model to {solver}")
-
-        if time_limit and time_limit < wall_time(p):
-            raise TimeoutError("Time's up after post")
 
         # ------------------------------- Solve model ------------------------------- #
         
         if time_limit:
             # give solver only the remaining time
             time_limit = time_limit - wall_time(p) - time_buffer
+            if time_limit < 0:
+                raise TimeoutError("Time's up after post")
+
             # disable signal-based time limit and let the solver handle it (solvers don't play well with difference between cpu and wall time)
             set_time_limit(None)
             
@@ -752,12 +757,13 @@ def xcsp3_cpmpy(
 
         # ------------------------------------- - ------------------------------------ #
 
-        if check_time_limit > 0 and s.status().exitstatus in (CPMStatus.FEASIBLE, CPMStatus.OPTIMAL):
+        if check_time_limit is not None and s.status().exitstatus in (CPMStatus.FEASIBLE, CPMStatus.OPTIMAL):
             print_comment(f"Checking solution within check time limit {check_time_limit}")
             time_check = time.time()
             for c in model.constraints:
                 assert c.value(), f"Constraint {c} failed for assignment {show_assignment(get_variables(c))}"
-                if check_time_limit - (time.time() - time_check) < 1:
+                # stop in time; we are in danger of being killed
+                if check_time_limit - (time.time() - time_check) < time_buffer:
                     raise Exception(f"Checking did not finish in time limit {check_time_limit}")
             print_comment(f"Checking passed in {time.time() - time_check:.4f}")
         

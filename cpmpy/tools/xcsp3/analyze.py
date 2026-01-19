@@ -50,6 +50,7 @@ FIELDNAMES = [
     "objective_value",
     "solution",
     "exception",
+    "traceback",
     "intermediate",
     "checker_result",
     "n_cuts",
