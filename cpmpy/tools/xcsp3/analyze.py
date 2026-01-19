@@ -236,8 +236,8 @@ def xcsp3_stats(df, time_limit=None):
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_solve"])
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
 
-    df = df[df["solver"].isin(("gurobi", "lazy_gurobi"))]
-    print(df[["instance", "alias", "time_solve", "area", "n_cuts", "cb_rel"]])
+    print("RESULTS")
+    print(df[["instance", "alias", "status", "time_total", "time_post", "time_solve", "exception", "cb_time"]].sort_values(by=["instance", "alias"]))
 
     TIMES = ("post", "solve")
 
@@ -314,7 +314,7 @@ def analyze(files, time_limit=None, output=None, sync=None):
     import subprocess
     if sync:
         assert len(files) == 1
-        subprocess.run(["scp", "-r", f"{sync}/*", files[0]])
+        subprocess.run(["rsync", f"{sync}/*", files[0]])
     
 
     # Gather all CSV files
@@ -342,9 +342,8 @@ def analyze(files, time_limit=None, output=None, sync=None):
     df = pd.concat(dfs, ignore_index=True)
 
     pd.set_option("display.max_columns", None)
+    pd.set_option("display.max_rows", None)
     pd.set_option("display.expand_frame_repr", False)
-    print("RESULTS")
-    print(df[["instance", "alias", "status", "time_total", "time_post", "time_solve", "exception", "cb_time"]])
 
     # Save convenience
     if path.is_dir():
