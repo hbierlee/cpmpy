@@ -479,7 +479,10 @@ def main(args):
     if not args_["verbose"]:
         warnings.filterwarnings("ignore")
     
-    experiments = get_experiments(overrides=args_, filters=[("alias", args.glob_alias)]) if args.cp_cuts else [args_]
+    experiments = get_experiments(
+        overrides=args_,
+        filters=[("alias", args.glob_alias)] if args.glob_alias else []
+    ) if args.cp_cuts else [args_]
 
     print("Experiments:")
     pprint.pprint(experiments)
@@ -511,7 +514,7 @@ if __name__ == "__main__":
     parser.add_argument('--time-limit', type=int, help='Time limit in seconds per instance')
     parser.add_argument('--check-time-limit', type=int, help='Check time limit in seconds per instance')
     parser.add_argument('--glob-alias', type=str, default=None, help='Solver config alias (e.g., ortools-par, ...)')
-    parser.add_argument('--glob-instance', type=str, help='Filter instances according to glob expression')
+    parser.add_argument('--glob-instance', type=str, default=None, help='Filter instances according to glob expression')
     parser.add_argument('--first', action='store_true', help='Run only first instance of each problem')
     parser.add_argument('--mem-limit', type=int, help='Memory limit in MB per instance')
     parser.add_argument('--cores', type=int, help='Number of cores to assign to a single instance')
