@@ -1,69 +1,93 @@
 import itertools
+import math
 
 
+MEM_LIMIT = 8
+PINAC_42_MEM_LIMIT = 64
+PINAC_42_WORKERS = 12
 
-def get_experiments(args, glob_alias=None):
-    return list(
+
+def calculate_workers(mem_limit, pinac_mem_limit, pinac_workers):
+    workers = min(math.floor((pinac_mem_limit - 0.1) / 8), pinac_workers)
+    assert workers > 1
+    return workers
+
+
+DEFAULTS = [
+    # setup
+    [
         {
-            **dict(it for di in x for it in di.items()),
-            **args,
+            "time_limit": 1 * 60,
+            "check_time_limit": 10,
+            "first": False,
+            "mem_limit": MEM_LIMIT * 1024,
+            "workers": calculate_workers(
+                MEM_LIMIT, PINAC_42_MEM_LIMIT, PINAC_42_WORKERS
+            ),  # pinac42: 1-12-20, 64Gb
+            "check_time_limit": 2 * 60,
+            "output_dir": "results",
+            "no_timestamp": True,
         }
-        for x in itertools.product(
+    ],
+    # benchmarks
+    [
+        {
+            "year": 2025,
+            "track": "COP25",
+            "glob_instance": None,
+        }
+    ],
+]
+
+
+def get_experiments(overrides={}, filters=[]):
+    return experiment(
+        [
             [
-                # setup
-                {
-                    "time_limit": 1 * 60,
-                    "check_time_limit": 10,
-                    "first": False,
-                    "mem_limit": 8 * 1024,
-                    "cores": 1,
-                    "workers": 7,  # pinac42: 1-12-20, 64Gb
-                    "check_time_limit": 2 * 60,
-                    "output_dir": "results",
-                    "no_timestamp": True,
-                }
-            ],
-            [
-                # benchmarks
-                {
-                    "year": 2025,
-                    "track": "COP25",
-                    "glob": None,
-                }
-            ],
-            [
-                solver
-                for solver in [
-                    # solvers
-                    {"solver": "gurobi", "alias": "base_gurobi"},  # TODO gen.
-                    *[
-                        {"alias": f"{solver}-{alias}", "solver": solver, "solver_kwargs": {"env": kw}}
-                        for solver in ["lazy_gurobi"]
-                        for alias, kw in [
-                            *ablate(
-                                [
-                                    "fractional",
-                                    "shrink",
-                                    "coverlift",
-                                ],
-                            ),
-                            *[
-                                (
-                                    "no_shrink",
-                                    {
-                                        "fractional": True,
-                                        "shrink": False,
-                                        "coverlift": True,
-                                    },
-                                )
+                # solvers
+                {"solver": "gurobi", "alias": "base_gurobi"},  # TODO gen.
+                *[
+                    {"alias": f"{solver}-{alias}", "solver": solver, "solver_kwargs": {"env": kw}}
+                    for solver in ["lazy_gurobi"]
+                    for alias, kw in [
+                        *ablate(
+                            [
+                                "fractional",
+                                "shrink",
+                                "coverlift",
                             ],
-                        ]
-                    ],
-                ]
-                if glob_alias is None or solver["alias"] in glob_alias
-            ],
-        )
+                        ),
+                        *[
+                            (
+                                "no_shrink",
+                                {
+                                    "fractional": True,
+                                    "shrink": False,
+                                    "coverlift": True,
+                                },
+                            )
+                        ],
+                    ]
+                ],
+            ]
+        ],
+        filters=filters,
+        overrides=overrides,
     )
+
+
+def experiment(experiments, overrides={}, filters=[]):
+    return [
+        experiment
+        for experiment in [
+            {
+                **dict(it for di in experiment_ for it in di.items()),
+                **overrides,
+            }
+            for experiment_ in itertools.product(*DEFAULTS, *experiments)
+        ]
+        if all(v in experiment[k] for k, v in filters)
+    ]
 
 
 def ablate(feats, add_all=True):

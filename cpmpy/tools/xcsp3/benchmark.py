@@ -59,10 +59,10 @@ from filelock import FileLock
 from concurrent.futures import ThreadPoolExecutor
 
 import cpmpy as cp
-import experiments
+from cpmpy.tools.xcsp3.experiments import get_experiments
 from cpmpy.tools.xcsp3.dataset import XCSP3Dataset
 from cpmpy.tools.xcsp3 import read_xcsp3
-from cpmpy.tools.xcsp3.xcsp3_cpmpy import xcsp3_cpmpy, init_signal_handlers, ExitStatus
+from cpmpy.tools.xcsp3.xcsp3_cpmpy import xcsp3_cpmpy, init_signal_handlers, ExitStatus, TIME_BUFFER
 import analyze
 
 
@@ -203,7 +203,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
                                                           "mem_limit": mem_limit, 
                                                           "intermediate": intermediate, 
                                                           "force_mem_limit": True,
-                                                          "time_buffer": 1,
+                                                          "time_buffer": TIME_BUFFER,
                                                           "cores": cores,
                                                           **solver_kwargs,
                                                         }, 
@@ -214,18 +214,20 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
     
     # Default status if nothing returned by subprocess
     # -> process exited prematurely due to sigterm
-    status = {"status": ExitStatus.error.value, "exception": "sigterm"}
+    status = {"status": ExitStatus.unknown.value}
 
     # Parse the output to get status, solution and timings
     complete_solution = None
     timeout = time_limit + check_time_limit
     while True:
-        if parent_conn.poll(timeout=1):
-            line = parent_conn.recv()
+        line = parent_conn.recv() if parent_conn.poll(timeout=0.1) else None
         dt = None if timeout is None else time.time() - total_start
 
-        # Received a print statement from the subprocess
-        if isinstance(line, str):
+        if not process.is_alive():
+            break
+        elif line is None:
+            pass
+        elif isinstance(line, str):
             if line.startswith('s '):
                 result['status'] = line[2:].strip()
             elif line.startswith('v ') and result['solution'] is None:
@@ -275,7 +277,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
         else:
             raise()
 
-        if dt > timeout + 1:
+        if dt > timeout:  # a buffer time is already given to the solver
             break
 
     process.join(timeout=1)
@@ -300,8 +302,8 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
         #     pass
 
         # All other exceptions, put in solution field
-        result["exception"] = status['exception']
-        result["status"] = status['status']
+        # result["exception"] = status['exception']
+        result |= status
 
     if checker_path is not None and complete_solution is not None:
         checker_output, checker_time = run_solution_checker(
@@ -390,7 +392,7 @@ def xcsp3_benchmark(
     no_timestamp: bool = False,
     verbose: bool = False, intermediate: bool = False,
     checker_path: Optional[str] = None,
-    glob: Optional[str] = None,
+    glob_instance: Optional[str] = None,
     first: Optional[bool] = False,
 ) -> str:
     """
@@ -404,7 +406,7 @@ def xcsp3_benchmark(
         workers (int): Number of parallel workers
         time_limit (int): Time limit in seconds per instance
         check_time_limit (int): Check time limit in seconds per instance
-        glob (int): Filter instances
+        glob_instance (int): Filter instances
         mem_limit (int): Memory limit in MB per instance
         output_dir (str): Output directory for CSV files
         verbose (bool): Whether to show solver output
@@ -437,8 +439,8 @@ def xcsp3_benchmark(
         return metadata
 
     dataset = XCSP3Dataset(year=year, track=track, download=True, target_transform=update_metadata_table)
-    if glob is not None:
-        dataset = ((filename, metadata) for filename, metadata in dataset if glob in filename)
+    if glob_instance is not None:
+        dataset = ((filename, metadata) for filename, metadata in dataset if glob_instance in filename)
     if first:
         dataset_ = []
         for k, g in itertools.groupby(dataset, key=lambda f_m: f_m[0].split("-")[0]):
@@ -467,52 +469,22 @@ def xcsp3_benchmark(
     
     return output_file
 
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(description='Benchmark solvers on XCSP3 instances')
-    parser.add_argument('--cp-cuts', action='store_true', help='Run CP-CUTS experiment')
-    parser.add_argument('--year', type=int, help='Competition year (e.g., 2023)')
-    parser.add_argument('--track', type=str, help='Track type (e.g., COP, CSP, MiniCOP)')
-    parser.add_argument('--solver', type=str, help='Solver name (e.g., ortools, exact, choco, ...)')
-    parser.add_argument('--alias', type=str, help='Solver config alias (e.g., ortools-par, ...)')
-    parser.add_argument('--glob-alias', type=str, default=None, help='Solver config alias (e.g., ortools-par, ...)')
-    parser.add_argument('--workers', type=int, help='Number of parallel workers')
-    parser.add_argument('--time-limit', type=int, help='Time limit in seconds per instance')
-    parser.add_argument('--check-time-limit', type=int, help='Check time limit in seconds per instance')
-    parser.add_argument('--glob', type=str, help='Filter instances according to glob expression')
-    parser.add_argument('--first', action='store_true', help='Run only first instance of each problem')
-    parser.add_argument('--mem-limit', type=int, help='Memory limit in MB per instance')
-    parser.add_argument('--cores', type=int, help='Number of cores to assign to a single instance')
-    parser.add_argument('--output-dir', type=str, help='Output directory for CSV files')
-    parser.add_argument('--no-timestamp', action='store_true', help='Add timestamp to file names')
-    parser.add_argument('--verbose', action='store_true', help='Show solver output')
-    parser.add_argument('--intermediate', action='store_true', help='Report on intermediate solutions')
-    parser.add_argument('--checker-path', type=str, help='Path to the XCSP3 solution checker JAR file')
-    parser.add_argument('--analyze', action='store_true', help='Analyze results')
-    
-    
-    args = parser.parse_args()
+def main(args):
     args_ = {
         k: v
         for k, v in vars(args).items()
-        if v is not None and k not in ("cp_cuts", "glob_alias", "analyze")
+        if v is not None and k not in ("cp_cuts", "analyze", "glob_alias")
     }
 
     if not args_["verbose"]:
         warnings.filterwarnings("ignore")
     
-    experiments = experiments.get_experiments(args_, glob_alias=args.glob_alias) if args.cp_cuts else [args_]
-    # experiments = experiments[:1]
+    experiments = get_experiments(overrides=args_, filters=[("alias", args.glob_alias)]) if args.cp_cuts else [args_]
 
     print("Experiments:")
     pprint.pprint(experiments)
 
-    # experiments = [e for e in experiments if e.get("alias", None) == "lazy_gurobi-coverlift"]
-    # assert len(set(experiments)) == len(experiments)
-
     for experiment in experiments:
-        # for k in ("cp_cuts", "glob_alias", "analyze"):
-        #     del experiment[k]
         print("Run", experiment)
         output_file = xcsp3_benchmark(**experiment)
         print(f"Results added to {output_file}")
@@ -525,3 +497,29 @@ if __name__ == "__main__":
 
     if args.analyze:
         analyze.analyze([output_dir], time_limit=args.time_limit, output=None)
+    return dfs
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description='Benchmark solvers on XCSP3 instances')
+    parser.add_argument('--cp-cuts', action='store_true', help='Run CP-CUTS experiment')
+    parser.add_argument('--year', type=int, help='Competition year (e.g., 2023)')
+    parser.add_argument('--track', type=str, help='Track type (e.g., COP, CSP, MiniCOP)')
+    parser.add_argument('--solver', type=str, help='Solver name (e.g., ortools, exact, choco, ...)')
+    parser.add_argument('--alias', type=str, help='Solver config alias (e.g., ortools-par, ...)')
+    parser.add_argument('--workers', type=int, help='Number of parallel workers')
+    parser.add_argument('--time-limit', type=int, help='Time limit in seconds per instance')
+    parser.add_argument('--check-time-limit', type=int, help='Check time limit in seconds per instance')
+    parser.add_argument('--glob-alias', type=str, default=None, help='Solver config alias (e.g., ortools-par, ...)')
+    parser.add_argument('--glob-instance', type=str, help='Filter instances according to glob expression')
+    parser.add_argument('--first', action='store_true', help='Run only first instance of each problem')
+    parser.add_argument('--mem-limit', type=int, help='Memory limit in MB per instance')
+    parser.add_argument('--cores', type=int, help='Number of cores to assign to a single instance')
+    parser.add_argument('--output-dir', type=str, help='Output directory for CSV files')
+    parser.add_argument('--no-timestamp', action='store_true', help='Add timestamp to file names')
+    parser.add_argument('--verbose', action='store_true', help='Show solver output')
+    parser.add_argument('--intermediate', action='store_true', help='Report on intermediate solutions')
+    parser.add_argument('--checker-path', type=str, help='Path to the XCSP3 solution checker JAR file')
+    parser.add_argument('--analyze', action='store_true', help='Analyze results')
+    
+    main(parser.parse_args())

@@ -1,0 +1,146 @@
+import pandas as pd
+import cpmpy as cp
+from cpmpy.transformations.get_variables import get_variables
+from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark
+from cpmpy.tools.xcsp3.experiments import experiment
+from cpmpy.tools.xcsp3.xcsp3_cpmpy import ExitStatus, TIME_BUFFER
+from cpmpy.solvers.gurobi import CPM_gurobi
+import time
+
+TIMEOUT = 5
+
+
+def raise_error(*args, **kwargs):
+    raise Exception("Raised error")
+
+
+def timeout(time_limit):
+    time.sleep(5 * time_limit)
+
+
+class CPM_gurobi_transform_error(CPM_gurobi):
+    def transform(self, *args, **kwargs):
+        raise_error()
+
+
+class CPM_gurobi_transform_timeout(CPM_gurobi):
+    def transform(self, _):
+        timeout(self.time_limit)
+        return []
+
+
+class CPM_gurobi_solve_error(CPM_gurobi):
+    def transform(self, *args, **kwargs):
+        return []
+
+    def solve(self, *args, **kwargs):
+        raise_error()
+
+
+class CPM_gurobi_solve_timeout(CPM_gurobi):
+    def transform(self, *args, **kwargs):
+        return []
+
+    def solve(self, *args, **kwargs):
+        timeout(self.time_limit)
+
+
+class CPM_gurobi_callback_timeout(CPM_gurobi):
+    def transform(self, *args, **kwargs):
+        return []
+
+    def solve(self, *args, **kwargs):
+        super().solve(*args, **kwargs, solution_callback=lambda *args: timeout(self.time_limit))
+
+
+class CPM_gurobi_solve_memoryout(CPM_gurobi):
+    def transform(self, *args, **kwargs):
+        return []
+
+    def solve(self, *args, **kwargs):
+        time.sleep(TIMEOUT / 2)
+        raise MemoryError
+
+
+class CPM_gurobi_solve_incorrect(CPM_gurobi):
+    def transform(self, cpm_expr):
+        self.constraints = cpm_expr
+        self.user_vars |= set(get_variables(self.constraints))
+        return []
+
+    def solve(self, *args, **kwargs):
+        for x in self.user_vars:
+            x._value = x.lb
+        self.cpm_status.exitstatus = cp.solvers.solver_interface.ExitStatus.OPTIMAL
+        self.objective_value_ = 0
+        return True
+
+
+import pytest
+
+
+def idfn(a):
+    if isinstance(a, dict):
+        return a["solver"]
+
+
+class TestBenchmark:
+    @pytest.mark.parametrize(
+        "experiment, expected_status",
+        [
+            (
+                {
+                    **experiment(
+                        [
+                            [
+                                {
+                                    "alias": "base_gurobi",
+                                    "glob_instance": "Fortress1-08_c25.xml",
+                                    "verbose": True,
+                                    "time_limit": TIMEOUT,
+                                    "check_time_limit": 3,
+                                }
+                            ]
+                        ]
+                    )[0],
+                    **exp,
+                },
+                expected_status,
+            )
+            for exp, expected_status in (
+                ({"solver": CPM_gurobi, "time_limit": 10}, ExitStatus.optimal),
+                ({"solver": CPM_gurobi_transform_error}, ExitStatus.error),
+                ({"solver": CPM_gurobi_transform_timeout}, ExitStatus.unknown),
+                ({"solver": CPM_gurobi_solve_timeout}, ExitStatus.unknown),
+                ({"solver": CPM_gurobi_callback_timeout}, ExitStatus.unknown),
+                ({"solver": CPM_gurobi_solve_error}, ExitStatus.error),
+                ({"solver": CPM_gurobi_solve_memoryout}, ExitStatus.memory),
+                (
+                    {
+                        "solver": CPM_gurobi,
+                        "glob_instance": "SchedulingOS-gp-05-05_c25.xml",
+                        "time_limit": 10,
+                    },
+                    (ExitStatus.unknown, ExitStatus.sat),
+                ),
+                # TODO test the right error is raised
+                ({"solver": CPM_gurobi_solve_incorrect, "time_limit": 10}, ExitStatus.error),
+            )
+        ],
+        ids=idfn,
+    )
+    def test_benchmark(self, experiment, expected_status):
+        if isinstance(expected_status, ExitStatus):
+            expected_status = (expected_status,)
+
+        # x = cp.boolvar(shape=3)
+        # experiment["solver"](cp.Model(2*x + 3*x + 5*x <= 6))
+
+        dt = time.time()
+        out = xcsp3_benchmark(**experiment)
+        dt = time.time() - dt
+
+        df = pd.read_csv(out)
+        status = ExitStatus(df.loc[0]["status"])
+        assert status in expected_status, f"Unexpected status for {experiment['solver']}"
+        assert dt < experiment["time_limit"] + experiment["check_time_limit"] + TIME_BUFFER
