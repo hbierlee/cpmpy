@@ -6,6 +6,7 @@ from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark
 from cpmpy.tools.xcsp3.experiments import experiment
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import ExitStatus, TIME_BUFFER
 from cpmpy.solvers.gurobi import CPM_gurobi
+from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
 import time
 
 TIMEOUT = 5
@@ -19,18 +20,21 @@ def timeout(time_limit):
     time.sleep(5 * time_limit)
 
 
-class CPM_gurobi_transform_error(CPM_gurobi):
+CPM_base_solver = CPM_lazy_gurobi if False else CPM_gurobi
+
+
+class CPM_gurobi_transform_error(CPM_base_solver):
     def transform(self, *args, **kwargs):
         raise_error()
 
 
-class CPM_gurobi_transform_timeout(CPM_gurobi):
+class CPM_gurobi_transform_timeout(CPM_base_solver):
     def transform(self, _):
         timeout(self.time_limit)
         return []
 
 
-class CPM_gurobi_solve_error(CPM_gurobi):
+class CPM_gurobi_solve_error(CPM_base_solver):
     def transform(self, *args, **kwargs):
         return []
 
@@ -38,7 +42,7 @@ class CPM_gurobi_solve_error(CPM_gurobi):
         raise_error()
 
 
-class CPM_gurobi_solve_timeout(CPM_gurobi):
+class CPM_gurobi_solve_timeout(CPM_base_solver):
     def transform(self, *args, **kwargs):
         return []
 
@@ -46,6 +50,7 @@ class CPM_gurobi_solve_timeout(CPM_gurobi):
         timeout(self.time_limit)
 
 
+# TODO make work for lazy_gurobi as base
 class CPM_gurobi_callback_timeout(CPM_gurobi):
     def transform(self, *args, **kwargs):
         return []
@@ -65,7 +70,7 @@ class CPM_gurobi_callback_error(CPM_gurobi):
         super().solve(*args, **kwargs, solution_callback=lambda *args: raise_error())
 
 
-class CPM_gurobi_solve_memoryout(CPM_gurobi):
+class CPM_gurobi_solve_memoryout(CPM_base_solver):
     def transform(self, *args, **kwargs):
         return []
 
@@ -74,7 +79,7 @@ class CPM_gurobi_solve_memoryout(CPM_gurobi):
         raise MemoryError
 
 
-class CPM_gurobi_solve_grb_memoryout(CPM_gurobi):
+class CPM_gurobi_solve_grb_memoryout(CPM_base_solver):
     def transform(self, *args, **kwargs):
         return []
 
@@ -85,7 +90,7 @@ class CPM_gurobi_solve_grb_memoryout(CPM_gurobi):
         raise gurobipy._exception.GurobiError(10001, "Out of memory")
 
 
-class CPM_gurobi_solve_incorrect(CPM_gurobi):
+class CPM_gurobi_solve_incorrect(CPM_base_solver):
     def transform(self, cpm_expr):
         self.constraints = cpm_expr
         self.user_vars |= set(get_variables(self.constraints))
@@ -105,13 +110,16 @@ import pytest
 def idfn(a):
     if isinstance(a, dict):
         return a["solver"]
+    elif isinstance(a, tuple):
+        return ",".join(f"{a.value}" for a in a)
 
 
 class TestBenchmark:
     @pytest.mark.parametrize(
-        "experiment, expected_status",
+        "idx, experiment, expected_status",
         [
             (
+                idx,
                 {
                     **experiment(
                         [
@@ -131,31 +139,42 @@ class TestBenchmark:
                 },
                 expected_status,
             )
-            for exp, expected_status in (
-                ({"solver": CPM_gurobi, "time_limit": 10}, ExitStatus.optimal),
-                ({"solver": CPM_gurobi_transform_error}, ExitStatus.error),
-                ({"solver": CPM_gurobi_transform_timeout}, ExitStatus.unknown),
-                ({"solver": CPM_gurobi_solve_timeout}, ExitStatus.unknown),
-                ({"solver": CPM_gurobi_callback_timeout}, ExitStatus.unknown),
-                ({"solver": CPM_gurobi_callback_error}, ExitStatus.error),
-                ({"solver": CPM_gurobi_solve_error}, ExitStatus.error),
-                ({"solver": CPM_gurobi_solve_memoryout}, ExitStatus.memory),
-                ({"solver": CPM_gurobi_solve_grb_memoryout}, ExitStatus.memory),
-                (
-                    {
-                        "solver": CPM_gurobi,
-                        "glob_instance": "SchedulingOS-gp-05-05_c25.xml",
-                        "time_limit": 10,
-                    },
-                    (ExitStatus.unknown, ExitStatus.sat),
-                ),
-                # TODO test the right error is raised
-                ({"solver": CPM_gurobi_solve_incorrect, "time_limit": 10}, ExitStatus.error),
+            for idx, (exp, expected_status) in enumerate(
+                [
+                    ({"solver": CPM_base_solver, "time_limit": 10}, (ExitStatus.sat, ExitStatus.optimal)),
+                    ({"solver": CPM_gurobi_transform_error}, ExitStatus.error),
+                    ({"solver": CPM_gurobi_transform_timeout}, ExitStatus.unknown),
+                    ({"solver": CPM_gurobi_solve_timeout}, ExitStatus.unknown),
+                    ({"solver": CPM_gurobi_callback_timeout}, ExitStatus.unknown),
+                    ({"solver": CPM_gurobi_callback_error}, ExitStatus.error),
+                    ({"solver": CPM_gurobi_solve_error}, ExitStatus.error),
+                    ({"solver": CPM_gurobi_solve_memoryout}, ExitStatus.memory),
+                    ({"solver": CPM_gurobi_solve_grb_memoryout}, ExitStatus.memory),
+                    (
+                        {
+                            "solver": CPM_base_solver,
+                            "glob_instance": "SchedulingOS-gp-05-05_c25.xml",
+                            "time_limit": 10,
+                        },
+                        (ExitStatus.unknown, ExitStatus.sat),
+                    ),
+                    # TODO test the right error is raised
+                    ({"solver": CPM_gurobi_solve_incorrect, "time_limit": 10}, ExitStatus.error),
+                    ( # small dup. table
+                        {
+                            "solver": CPM_lazy_gurobi,
+                            "time_limit": 20,
+                            "glob_instance": "Fortress1-03_c25.xml",
+                        },
+                        (ExitStatus.sat, ExitStatus.optimal),
+                    ),
+                ],
+                start=1,
             )
         ],
         ids=idfn,
     )
-    def test_benchmark(self, experiment, expected_status):
+    def test_benchmark(self, idx, experiment, expected_status):
         if isinstance(expected_status, ExitStatus):
             expected_status = (expected_status,)
 
