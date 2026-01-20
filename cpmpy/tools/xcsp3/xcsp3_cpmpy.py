@@ -652,7 +652,7 @@ def xcsp3_cpmpy(
         time_parse = time.time()
         parser = _parse_xcsp3(benchname)
         time_parse = time.time() - time_parse
-        if verbose: print_comment(f"took {time_parse:.4f} seconds to parse XCSP3 model [{metadata['name']}]")
+        print_comment(f"took {time_parse:.4f} seconds to parse XCSP3 model [{metadata['name']}]")
 
         if time_limit and time_limit < wall_time(p):
             raise TimeoutError("Time's up after parse")
@@ -662,7 +662,7 @@ def xcsp3_cpmpy(
         time_callback = time.time()
         model = _load_xcsp3(parser)
         time_callback = time.time() - time_callback
-        if verbose: print_comment(f"took {time_callback:.4f} seconds to convert to CPMpy model")
+        print_comment(f"took {time_callback:.4f} seconds to convert to CPMpy model")
         
         if time_limit and time_limit < wall_time(p):
             raise TimeoutError("Time's up after callback")
@@ -712,7 +712,7 @@ def xcsp3_cpmpy(
         else:
             s = cp.SolverLookup.get(name=solver, model=model, **solver_init_args)
         time_post = time.time() - time_post
-        if verbose: print_comment(f"took {time_post:.4f} seconds to post model to {solver}")
+        print_comment(f"took {time_post:.4f} seconds to post model to {solver}")
 
         # ------------------------------- Solve model ------------------------------- #
         
@@ -739,7 +739,7 @@ def xcsp3_cpmpy(
                 raise e
 
         time_solve = time.time() - time_solve
-        if verbose: print_comment(f"took {time_solve:.4f} seconds to solve")
+        print_comment(f"took {time_solve:.4f} seconds to solve")
 
         # ------------------------------- Print result ------------------------------- #
 
