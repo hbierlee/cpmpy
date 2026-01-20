@@ -93,6 +93,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved"):
     df = df[(df['status'].isin(status_filter))]  # only those that reached the desired status
     # print(df[["solver", "instance", "status", metric]])
 
+
     # Count how many instances each solver solved (with correct status)
     solver_counts = df['alias'].value_counts()
 
@@ -216,8 +217,6 @@ def xcsp3_stats(df, time_limit=None):
             if slowest_idx is not None and not pd.isna(slowest_idx):
                 print(f"Slowest {phase}: {df.loc[slowest_idx, f'time_{phase}']}s ({df.loc[slowest_idx, 'instance']}, {df.loc[slowest_idx, 'solver']})")
 
-    df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
-
     print("Problems", df['problem'].unique())
     def get_metadata(x):
         with open(x) as f:
@@ -239,21 +238,26 @@ def xcsp3_stats(df, time_limit=None):
 
     print("RESULTS")
     print(df[["instance", "alias", "status", "time_total", "time_post", "time_solve", "exception", "cb_time"]].sort_values(by=["instance", "alias"]))
+    # print(df[["instance", "status", "is_err"]].sort_values(by=["instance"]))
 
-    TIMES = ("post", "solve")
+    TIMES = ("post", "solve", "total")
 
     if time_limit is not None:
         for t in TIMES:
             df[f"time_{t}_p2"] = df[f"time_{t}"].fillna(value=time_limit * 2)
 
-    for grouping in (['alias', 'problem'], ['problem', 'alias'], ['alias']):
-        PER_PROBLEM = grouping == ['alias', 'problem']
+    for grouping_type, grouping in (
+            # ("per_alias", ['alias', 'problem']),
+            ("per_problem", ['problem', 'alias']),
+            ("per_alias_agg", ['alias'])
+            ):
 
         groups = df.groupby(grouping).agg(
                 alias = ("alias", "first"),
                 insts = ("problem", 'count'),
                 area = ('area', 'mean'),
-                t_totl_hr = ('time_total', 'sum'),
+                # t_totl_hr = ('time_total', 'sum'),
+                t_totl_p2 = ('time_total_p2', 'sum'),
                 t_post_p2 = ('time_post_p2', 'sum'),
                 t_solv_p2 = ('time_solve_p2', 'sum'),
                 # insts = ('status', 'count'),
@@ -267,10 +271,10 @@ def xcsp3_stats(df, time_limit=None):
                 cb_rel = ('cb_rel', 'mean'),
                 )[[
             # *(["insts"] if PER_PROBLEM else ["insts"]),
-            *[
+            *([] if grouping_type == "per_alias_agg" else [
                 "area",
-            ],
-            *([] if PER_PROBLEM else [
+                ]),
+            *([
                 "t_post_p2",
                 "t_solv_p2",
                 "insts",
@@ -288,11 +292,13 @@ def xcsp3_stats(df, time_limit=None):
 
         # groups = groups.sort_index(level=["problem"], by="area")
         # groups = groups.sort_values(by="area", ascending=False)
-        groups["area"] = groups["area"].map(lambda x: f"{x:.1e}")
         if "t_totl_hr" in groups:
             groups["t_totl_hr"] = groups["t_totl_hr"].map(lambda x: x / 3600)
+        if "area" in groups:
+            groups["area"] = groups["area"].map(lambda x: f"{x:.1e}")
         # groups.loc[('Total')] = groups.sum(numeric_only=True)
 
+        print(f"\n== {grouping_type} ==")
         print(groups)
 
     
@@ -315,7 +321,7 @@ def analyze(files, time_limit=None, output=None, sync=None):
     import subprocess
     if sync:
         assert len(files) == 1
-        subprocess.run(["rsync", f"{sync}/*", files[0]])
+        subprocess.run(["rsync", sync / files[0], "."])
     
 
     # Gather all CSV files
@@ -341,6 +347,21 @@ def analyze(files, time_limit=None, output=None, sync=None):
         dfs.append(df)
     
     df = pd.concat(dfs, ignore_index=True)
+
+    # find problem names
+    df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
+
+    # replace time_solve to NaN if not solved
+    df["time_solve"] = df["time_solve"].mask(~df["status"].isin([OPT, UNS]))
+
+    # let solve include post time?
+    df["time_solve"] = df["time_solve"] + df["time_post"]
+
+    # temporarily drop all instances where there are any errors
+    df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
+
+    # df = df[(df['alias']).isin(["base_gurobi", "lazy_gurobi-coverlift"])]
+    df = df[~(df['alias']).isin(["lazy_gurobi-no_shrink"])]
 
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_rows", None)
