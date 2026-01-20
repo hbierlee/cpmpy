@@ -355,7 +355,7 @@ def analyze(files, time_limit=None, output=None, sync=None):
     df["time_solve"] = df["time_solve"].mask(~df["status"].isin([OPT, UNS]))
 
     # let solve include post time?
-    df["time_solve"] = df["time_solve"] + df["time_post"]
+    df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
     # temporarily drop all instances where there are any errors
     df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
