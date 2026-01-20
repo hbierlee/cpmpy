@@ -18,12 +18,10 @@ DEFAULTS = [
     [
         {
             "time_limit": 1 * 60,
-            "check_time_limit": 10,
             "first": False,
             "mem_limit": MEM_LIMIT * 1024,
-            "workers": calculate_workers(
-                MEM_LIMIT, PINAC_42_MEM_LIMIT, PINAC_42_WORKERS
-            ),  # pinac42: 1-12-20, 64Gb
+            # pinac42: 1-12-20, 64Gb
+            "workers": calculate_workers(MEM_LIMIT, PINAC_42_MEM_LIMIT, PINAC_42_WORKERS),
             "check_time_limit": 2 * 60,
             "output_dir": "results",
             "no_timestamp": True,

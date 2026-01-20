@@ -153,6 +153,25 @@ class Heuristic(Enum):
     REDUCE = 3
 
 
+def normalize_table(table):
+    """Merge columns with duplicate variables (removing rows where values are different)"""
+    X, T = table.args
+
+    to_delete = set()
+    for i, x in enumerate(X):
+        for j, y in enumerate(X[i + 1 :], start=i + 1):
+            print(x,y)
+            if x.name == y.name:
+                print("del")
+                T = [r for r in T if r[i] == r[j]]
+                to_delete.add(j)
+    for d in to_delete:
+        table.args[0] = [x for i, x in enumerate(X) if i not in to_delete]
+        table.args[1] = [[ri for i, ri in enumerate(r) if i not in to_delete] for r in T]
+
+    return table
+
+
 class CPM_lazy_gurobi(CPM_gurobi):
     def __init__(self, env=None, cpm_model=None, **kwargs):
         self.env = {
@@ -230,7 +249,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def stats(self):
         self.log(
-            ", ".join(f"{k}={self.env[k]}" for k in ["shrink", "heuristic", "fractional"]),
+            ", ".join(f"{k}={self.env[k]}" for k in ["shrink", "heuristic", "fractional", "coverlift"]),
             verbosity=0,
         )
         self.print_cuts()
@@ -685,7 +704,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         """
 
         if env is not None:
-            self.env = { **self.env, **env }
+            self.env = {**self.env, **env}
 
         self.env["cuts"] = []
         self.env["cb_time"] = 0.0
@@ -734,8 +753,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
         cpm_expressions = super().transform(cpm_expressions)
         for cpm_expr in cpm_expressions:
             if cpm_expr.name == "table":
+                if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
+                    cpm_expr = normalize_table(cpm_expr)
                 X, T = cpm_expr.args
-                # assert len(set(X)) == len(X), "Dup. int vars in table"
+                if len(T) == 0:
+                    return [cp.BoolVal(False)]
+                assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
+
                 self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
                 self.log("T =", verbosity=3)
                 self.log(T, verbosity=3)
@@ -760,6 +784,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 x_encs = [self.ivarmap[x.name]._xs for x in X]
                 parts = [len(x_enc) for x_enc in x_encs]
                 X_enc = [x_enc_i for x_enc in x_encs for x_enc_i in x_enc]
+                assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
                 self.tables.append((X_enc, T_enc, parts, cpm_expr))
             else:
                 cpm_cons.append(cpm_expr)

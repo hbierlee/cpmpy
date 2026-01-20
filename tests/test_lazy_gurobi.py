@@ -8,7 +8,7 @@ import pytest
 
 import cpmpy as cp
 from cpmpy.expressions.utils import show_assignment
-from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
+from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table
 
 
 def generate_table_from_example():
@@ -162,6 +162,17 @@ class TestTables:
 
         print("c", c)
         # TODO assert
+
+    def test_normalize_table(self, env):
+        x = cp.intvar(1, 4, name="x")
+        # y = cp.intvar(1, 4, name="y")
+        z = cp.intvar(2, 4, name="z")
+        c = cp.Table((x, x, z), np.array([(2, 1, 2), (1, 2, 2), (2, 2, 3), (3, 3, 3)]))
+        assert len(set(c.args[0])) < len(c.args[0])
+        c = normalize_table(c)
+        print(c)
+        assert len(set(c.args[0])) == len(c.args[0])
+        assert c.args[1] == [[2, 3], [3, 3]]
 
     def test_explain(self, env):
         slv = CPM_lazy_gurobi(
