@@ -210,26 +210,54 @@ class TestTables:
             (i, j, t)
             for j in range(1)  # to repeat the test
             for i, t in enumerate(
-                (
-                    cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))),
-                    generate_table_from_data([(1, 1), (2, 2)], 3),  # Feasible (often 0 explanations)
-                    generate_table_from_data([(1, 2), (2, 1)], 3),  # Feasible
-                    with_constraints(
-                        generate_table_from_data([(1, 1), (2, 2)], 3), with_alldiff=True
-                    ),  # Infeasible
-                    with_constraints(
-                        generate_table_from_data([(1, 2), (2, 1)], 3), with_alldiff=True, with_min=True
-                    ),
-                    generate_table_from_example(),
-                    generate_two_tables(),
-                    with_constraints(generate_table(2, 2, 3), with_alldiff=True, with_min=True),
-                    with_constraints(generate_table(4, 4, 4), with_alldiff=False, with_min=False),
-                    with_constraints(generate_table(2, 2, 3, k=2)),
-                    with_constraints(generate_table(6, 10, 5), with_alldiff=False, with_min=True),
-                    with_constraints(generate_table(6, 4, 4)),  # minimized 1/1000 bug
-                    with_constraints(generate_table(10, 100, 10)),
-                    with_constraints(generate_table(4, 3, 4, k=2)),  # TRICKY BUG FINDER NO CHIOCE
-                )
+                [
+                    *[
+                        cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))),
+                        generate_table_from_data([(1, 1), (2, 2)], 3),  # Feasible (often 0 explanations)
+                        generate_table_from_data([(1, 2), (2, 1)], 3),  # Feasible
+                        with_constraints(
+                            generate_table_from_data([(1, 1), (2, 2)], 3), with_alldiff=True
+                        ),  # Infeasible
+                        with_constraints(
+                            generate_table_from_data([(1, 2), (2, 1)], 3), with_alldiff=True, with_min=True
+                        ),
+                        generate_table_from_example(),
+                        generate_two_tables(),
+                    ],
+                    *[
+                        table
+                        for allow_duplicate_vars in (False, True)
+                        for table in [
+                            with_constraints(
+                                generate_table(2, 2, 3, allow_duplicate_vars=allow_duplicate_vars),
+                                with_alldiff=True,
+                                with_min=True,
+                            ),
+                            with_constraints(
+                                generate_table(4, 4, 4, allow_duplicate_vars=allow_duplicate_vars),
+                                with_alldiff=False,
+                                with_min=False,
+                            ),
+                            with_constraints(
+                                generate_table(2, 2, 3, k=2, allow_duplicate_vars=allow_duplicate_vars)
+                            ),
+                            with_constraints(
+                                generate_table(6, 10, 5, allow_duplicate_vars=allow_duplicate_vars),
+                                with_alldiff=False,
+                                with_min=True,
+                            ),
+                            with_constraints(
+                                generate_table(6, 4, 4, allow_duplicate_vars=allow_duplicate_vars)
+                            ),  # minimized 1/1000 bug
+                            with_constraints(
+                                generate_table(10, 100, 10, allow_duplicate_vars=allow_duplicate_vars)
+                            ),
+                            with_constraints(
+                                generate_table(4, 3, 4, k=2, allow_duplicate_vars=allow_duplicate_vars)
+                            ),  # TRICKY BUG FINDER NO CHIOCE
+                        ]
+                    ],
+                ]
             )
         ),
         ids=lambda val: val[0],
