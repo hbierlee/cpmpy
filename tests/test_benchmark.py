@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import cpmpy as cp
 from cpmpy.transformations.get_variables import get_variables
 from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark
@@ -52,6 +53,7 @@ class CPM_gurobi_callback_timeout(CPM_gurobi):
     def solve(self, *args, **kwargs):
         super().solve(*args, **kwargs, solution_callback=lambda *args: timeout(self.time_limit))
 
+
 class CPM_gurobi_callback_error(CPM_gurobi):
     def transform(self, *args, **kwargs):
         return []
@@ -59,8 +61,8 @@ class CPM_gurobi_callback_error(CPM_gurobi):
     def solve(self, *args, **kwargs):
         def solution_callback(*args):
             raise_error()
-        super().solve(*args, **kwargs, solution_callback=lambda *args: raise_error())
 
+        super().solve(*args, **kwargs, solution_callback=lambda *args: raise_error())
 
 
 class CPM_gurobi_solve_memoryout(CPM_gurobi):
@@ -71,6 +73,7 @@ class CPM_gurobi_solve_memoryout(CPM_gurobi):
         time.sleep(TIMEOUT / 2)
         raise MemoryError
 
+
 class CPM_gurobi_solve_grb_memoryout(CPM_gurobi):
     def transform(self, *args, **kwargs):
         return []
@@ -78,8 +81,8 @@ class CPM_gurobi_solve_grb_memoryout(CPM_gurobi):
     def solve(self, *args, **kwargs):
         time.sleep(TIMEOUT / 2)
         import gurobipy
-        raise gurobipy._exception.GurobiError(10001, "Out of memory")
 
+        raise gurobipy._exception.GurobiError(10001, "Out of memory")
 
 
 class CPM_gurobi_solve_incorrect(CPM_gurobi):
@@ -119,6 +122,7 @@ class TestBenchmark:
                                     "verbose": True,
                                     "time_limit": TIMEOUT,
                                     "check_time_limit": 3,
+                                    "output_dir": "/tmp/test_benchmark_results",
                                 }
                             ]
                         ]
@@ -162,7 +166,15 @@ class TestBenchmark:
         out = xcsp3_benchmark(**experiment)
         dt = time.time() - dt
 
-        df = pd.read_csv(out)
-        status = ExitStatus(df.loc[0]["status"])
+        df = pd.read_csv(out).loc[0]
+        status = ExitStatus(df["status"])
         assert status in expected_status, f"Unexpected status for {experiment['solver']}"
         assert dt < experiment["time_limit"] + experiment["check_time_limit"] + TIME_BUFFER
+
+        feasible = status in (ExitStatus.unsat, ExitStatus.optimal, ExitStatus.sat)
+        print(df)
+
+        assert not np.isnan(df["time_total"])
+        if feasible:
+            assert not np.isnan(df["time_solve"])
+            assert not np.isnan(df["time_post"])
