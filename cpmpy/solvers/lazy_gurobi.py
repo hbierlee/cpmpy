@@ -261,12 +261,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
         cuts_mipnode_exp = [c for c in cuts_mipnode if c["size"] > 0]
         cuts_mipnode_unexp = [c for c in cuts_mipnode if c["size"] == 0]
         if self.env["debug"]:
-            self.log(f"cb_time = {self.env['cb_time']}")
+            self.log(f"time_cb = {self.env['time_cb']}")
             self.log(f"cuts (MIPSOL) = {len(cuts_mipsol)}")
             self.log(f"cuts (MIPNODE, explained) = {len(cuts_mipnode_exp)}")
             self.log(f"cuts (MIPNODE, unexplainable) = {len(cuts_mipnode_unexp)}")
         return {
-            "cb_time": self.env["cb_time"],
+            "time_cb": self.env["time_cb"],
             "n_cuts": len(cuts_mipsol),
             "n_cuts_explained": len(cuts_mipnode_exp),
             "n_cuts_unexplained": len(cuts_mipnode_unexp),
@@ -524,7 +524,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
 
         def solution_callback(what, where):
-            cb_time = time.time()
+            time_cb = time.time()
 
             try:
                 x_enc_a = None
@@ -594,11 +594,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 what._callback_exception = e
                 what.terminate()
             finally:
-                cb_time = time.time() - cb_time
+                time_cb = time.time() - time_cb
                 if self.env["debug"]:
-                    self.log(f"end callback, dt = {cb_time}", verbosity=2)
-                self.env["cb_time"] += cb_time
-                # assert cb_time < 1.0 or self.env["debug"]
+                    self.log(f"end callback, dt = {time_cb}", verbosity=2)
+                self.env["time_cb"] += time_cb
+                # assert time_cb < 1.0 or self.env["debug"]
 
         return solution_callback
 
@@ -730,7 +730,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env = {**self.env, **env}
 
         self.env["cuts"] = []
-        self.env["cb_time"] = 0.0
+        self.env["time_cb"] = 0.0
 
         assert solution_callback is None, "For now, no solution_callback in `CPM_lazy_gurobi`"
 
