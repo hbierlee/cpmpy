@@ -377,7 +377,7 @@ def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False, 
     # Read and merge all CSV files
     dfs = []
     for i, file in enumerate(csv_files):
-        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1)
+        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
         df["run"] = chr(65 + i)
         dfs.append(df)
     
@@ -395,7 +395,6 @@ def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False, 
     # temporarily drop all instances where there are any errors
     if no_errors:
         df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
-    df = df[~(df['alias']).isin(["lazy_gurobi-no_shrink"])]
 
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_rows", None)
