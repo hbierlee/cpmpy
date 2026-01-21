@@ -184,7 +184,11 @@ class TestTables:
         # slv.add(generate_table_from_example().constraints)
         X_enc, T_enc, parts, table = slv.tables[0]
 
-        assert parts == [4, 3, 3]
+        print(parts)
+        assert (
+            parts
+            == [frozenset(range(0, 4))] * 4 + [frozenset(range(4, 7))] * 3 + [frozenset(range(7, 10))] * 3
+        )
 
         # T_enc = encode(X, T)
         # parts = [4, 3, 3]
