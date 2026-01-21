@@ -93,7 +93,19 @@ def show_ind(a, index=INDEX):
 
 
 def show_set(S, index=INDEX):
-    return f"{{{', '.join(str(show_ind(s, index=index)) for s in sorted(S))}}}"
+    return f"{{{', '.join(str(show(s, index=index)) for s in sorted(S))}}}"
+
+
+import collections
+
+
+def show(S, index=INDEX):
+    if isinstance(S, collections.abc.Iterable):
+        show_set(S, index=index)
+    elif isinstance(S, int):
+        show_ind(S, index=index)
+    else:
+        raise TypeError(f"{S}, {type(S)}")
 
 
 class Infeasible(Exception):
@@ -445,7 +457,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             if not R:
                 break
-            choices = set(range(len(set(parts)))) - V
+            choices = set(parts) - V
             if not choices:
                 # with open("/tmp/failed_cut_nc.pkl", "wb") as f:
                 #     print("store", (A_enc, T_enc, parts, frm))
@@ -453,18 +465,19 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return  # TODO [peter]
 
             l = next(l for l in choices)
+
             if self.env["debug"]:
-                self.log(f"choose integer l = {INDEX + l} in {show_set(choices)}", verbosity=3)
+                self.log(f"choose part l = {show_set(l)} out of choices {show_set(choices)}", verbosity=3)
 
             V.add(l)
             s += 1
 
             def C(v, l):
-                # TODO can be further improve by iterating over the relevant part 
-                c = set(i for i in range(len(v)) if is_gt(v[i], 0.0) and parts[i] == l)
-                # c = set(i for i in range(len(v)) if is_gt(v[i], 0.0) and parts[i] == l)
+                # TODO can be further improve by iterating over the relevant part
+                c = set(i for i in l if is_gt(v[i], 0.0))
                 if self.env["debug"]:
-                    self.log(f"C({v}, {INDEX + l}) = {show_set(c)}", verbosity=3)
+                    self.log(f"C({v}, {show_set(l)}) = {show_set(c)}", verbosity=3)
+
                 return c
 
             C_ = C(A_enc, l)
@@ -636,6 +649,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if explanation:
                     X, C_enc, k = explanation
                     expr = cp.sum(C_enc[i] * X_enc[i] for i in X) <= k
+                    if isinstance(expr, bool):
+                        expr = cp.BoolVal(expr)
                     if self.env["debug"]:
                         self.log(
                             f"cons == {expr}",
@@ -749,9 +764,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
         except Infeasible:
             hassol = False
         except Exception as e:
-            self.log("Exception", e)
+            self.log("Exception in callback", e)
             self.env["verbosity"] = 4
-            self.stats()
+            try:
+                self.stats()
+            except Exception as e_:
+                print("Also exception during stats:", e_)
             raise e
 
         if "PYTEST_CURRENT_TEST" not in os.environ:
@@ -801,7 +819,19 @@ class CPM_lazy_gurobi(CPM_gurobi):
                             self.env["checker"] += c
 
                 x_encs = [self.ivarmap[x.name]._xs for x in X]
-                parts = [i for i, x_enc in enumerate(x_encs) for _ in range(len(x_enc))]
+
+                # for each column i, add a set of indices for its part
+                #    x1    x2   y1   y2
+                #     1     1    2    2 parts
+                # 1,..2  1..2 3..4 3..4 -> parts
+
+                parts = []
+                lst = 0
+                for i, x_enc in enumerate(x_encs):
+                    # TODO maybe tuple is better depending how frozenset(range) is handled (low-priority perf.)
+                    parts += [frozenset(range(lst, lst + len(x_enc)))] * len(x_enc)
+                    lst += len(x_enc)
+
                 X_enc = [x_enc_i for x_enc in x_encs for x_enc_i in x_enc]
                 assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
                 self.tables.append((X_enc, T_enc, parts, cpm_expr))
