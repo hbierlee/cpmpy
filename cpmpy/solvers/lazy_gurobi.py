@@ -369,14 +369,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
-        parts_ = [0]
-        for p in parts:
-            parts_.append(parts_[-1] + p)
-        parts_ = parts_[1:]
-
-        def p(i):
-            return next(l for l in range(len(parts_)) if i < parts_[l])
-
         # TODO convert T_enc to set of tuples?
 
         if self.env["debug"]:
@@ -385,19 +377,19 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if frm == "MIPSOL":
                 self.log("", np.array(assign_mipsol(A_enc)), verbosity=2, indent=0)
             self.log(np.array(T_enc), verbosity=2, indent=0)
-            self.log(
-                "",
-                np.array(
-                    [
-                        i + 1
-                        for i, p in enumerate([0] + parts_)
-                        for _ in range(p, parts_[i] if i < len(parts_) else p)
-                    ]
-                ),
-                verbosity=2,
-                indent=0,
-            )
-            self.log(np.array(parts_), verbosity=2, indent=0)
+            # self.log(
+            #     "",
+            #     np.array(
+            #         [
+            #             i + 1
+            #             for i, p in enumerate([0] + parts_)
+            #             for _ in range(p, parts_[i] if i < len(parts_) else p)
+            #         ]
+            #     ),
+            #     verbosity=2,
+            #     indent=0,
+            # )
+            # self.log(np.array(parts_), verbosity=2, indent=0)
             self.log("", indent=0)
 
         assert len(A_enc) == len(T_enc.T)
@@ -434,7 +426,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # TODO [peter] should be T_hat[i]?
                 R = rows(T_enc, i)
                 X = {i}
-                V = {p(i)}
+                V = {parts[i]}
                 s = 0
         else:
             R = set(range(m))
@@ -453,7 +445,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             if not R:
                 break
-            choices = set(range(len(parts_))) - V
+            choices = set(range(len(set(parts)))) - V
             if not choices:
                 # with open("/tmp/failed_cut_nc.pkl", "wb") as f:
                 #     print("store", (A_enc, T_enc, parts, frm))
@@ -468,7 +460,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
             s += 1
 
             def C(v, l):
-                c = set(i for i in range(len(v)) if is_gt(v[i], 0.0) and p(i) == l)
+                # TODO can be further improve by iterating over the relevant part 
+                c = set(i for i in range(len(v)) if is_gt(v[i], 0.0) and parts[i] == l)
+                # c = set(i for i in range(len(v)) if is_gt(v[i], 0.0) and parts[i] == l)
                 if self.env["debug"]:
                     self.log(f"C({v}, {INDEX + l}) = {show_set(c)}", verbosity=3)
                 return c
@@ -596,7 +590,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             finally:
                 time_cb = time.time() - time_cb
                 if self.env["debug"]:
-                    self.log(f"end callback, dt = {time_cb}", verbosity=2)
+                    self.log(f"end callback, dt = {time_cb}", verbosity=3)
                 self.env["time_cb"] += time_cb
                 # assert time_cb < 1.0 or self.env["debug"]
 
@@ -807,7 +801,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                             self.env["checker"] += c
 
                 x_encs = [self.ivarmap[x.name]._xs for x in X]
-                parts = [len(x_enc) for x_enc in x_encs]
+                parts = [i for i, x_enc in enumerate(x_encs) for _ in range(len(x_enc))]
                 X_enc = [x_enc_i for x_enc in x_encs for x_enc_i in x_enc]
                 assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
                 self.tables.append((X_enc, T_enc, parts, cpm_expr))
