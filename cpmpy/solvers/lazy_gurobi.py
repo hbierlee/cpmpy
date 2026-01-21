@@ -1,9 +1,9 @@
 import itertools
 import json
+import collections
 import logging
 import math
 import os
-import pathlib
 import pickle
 import pprint
 import sys
@@ -15,7 +15,7 @@ import pandas as pd
 
 import cpmpy as cp
 from cpmpy.expressions.core import Comparison, Operator
-from cpmpy.expressions.utils import is_false_cst, show_assignment
+from cpmpy.expressions.utils import is_false_cst, show_assignment, dom_size
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.solvers.gurobi import CPM_gurobi
 
@@ -96,9 +96,6 @@ def show_set(S, index=INDEX):
     return f"{{{', '.join(str(show(s, index=index)) for s in sorted(S))}}}"
 
 
-import collections
-
-
 def show(S, index=INDEX):
     if isinstance(S, collections.abc.Iterable):
         show_set(S, index=index)
@@ -131,32 +128,21 @@ def is_integer_solution(A_enc):
     return all(is_integer(a) for a in A_enc)
 
 
-def encode_x(a, lb, ub):
-    X = (ub - lb + 1) * [0]
-    try:
-        X[a - lb] = 1
-    except IndexError:
-        # Fortress1-03_c25 case
-        # ['0..0', '0..1']
-        # [[0, 1], [1, 0]]
-        pass
-    return X
-
-
 def union(sets):
     sets = tuple(sets)
     return set.union(*sets) if sets else set()
 
 
 def encode(X, T):
-    enc = []
-    for t in T:
-        row_i = []
-        for x, row in zip(X, t):
-            row_i += encode_x(row, x.lb, x.ub)
-        enc += [row_i]
-    return np.array(enc)
-    return np.array([xij for x, t in zip(X, T) for row in t for xij in encode_x(row, x.lb, x.ub)])
+    dom_sizes = [dom_size(x) for x in X]
+    width = sum(dom_sizes)
+    T_enc = np.zeros((len(T), width))
+    for t, t_enc_i in zip(T, T_enc):
+        offset = 0
+        for x, x_width, a in zip(X, dom_sizes, t):
+            t_enc_i[offset + a - x.lb] = 1
+            offset += x_width
+    return T_enc
 
 
 class Heuristic(Enum):
