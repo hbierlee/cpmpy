@@ -20,8 +20,8 @@ Optional Arguments
 --time_limit : float, optional
     Maximum time limit (in seconds) to display on the x-axis of the plot.
 
---output, -o : str, optional
-    Path to save the generated plot image (e.g., "output.png"). If not provided, the plot will be displayed interactively.
+--plot, -o : str, optional
+    Path to save the generated plot image (e.g., "plot.png"). If not provided, the plot will be displayed interactively.
 """
 
 import argparse
@@ -123,7 +123,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved"):
     
     # Set plot properties
     plt.xlabel('Time (seconds)')
-    plt.ylabel(f'Number of instances returning \'{','.join(status_filter)}\'')
+    plt.ylabel(f'Number of {filter_by} instances (status in [{','.join(s[:3] for s in status_filter)}])')
     # Get unique year-track combinations
     year_track_pairs = df[['year', 'track']].drop_duplicates()
     datasets = ', '.join([f'{row.year}:{row.track}' for _, row in year_track_pairs.iterrows()])
@@ -343,14 +343,15 @@ def main():
     parser = argparse.ArgumentParser(description='Analyze XCSP3 solver performance data')
     parser.add_argument('files', nargs='+', help='List of CSV files or directories to analyze')
     parser.add_argument('--time-limit', type=float, default=None, help='Maximum time limit in seconds to show on x-axis')
-    parser.add_argument('--output', '-o', type=str, default=None, help='Path to save the plot image (e.g., output.png)')
+    parser.add_argument('--plot', '-p', type=str, default=None, help='Path to save the plot image (e.g., plot.png)')
     parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
     parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
+    parser.add_argument('--only-solved', action='store_true', help='Only show instances which have been solved by all solvers')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False, save=False):
+def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, only_solved=False):
 
     import subprocess
     if sync:
@@ -396,6 +397,8 @@ def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False, 
     if no_errors:
         df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
 
+    if only_solved:
+        df = df[df['instance'].map(lambda x: set(df[df["instance"] == x]["status"].unique()).issubset((OPT, UNS)))]
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_rows", None)
     pd.set_option("display.expand_frame_repr", False)
@@ -417,9 +420,9 @@ def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False, 
     # fig = xcsp3_objective_performance_profile(merged_df)
 
     # Save or show plot
-    if output:
-        fig.savefig(output, bbox_inches='tight')
-        print(f"Plot saved to {output}")
+    if plot:
+        fig.savefig(plot, bbox_inches='tight')
+        print(f"Plot saved to {plot}")
     # else:
     #     plt.show()
 
