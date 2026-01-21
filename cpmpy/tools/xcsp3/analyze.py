@@ -209,7 +209,7 @@ def xcsp3_objective_performance_profile(df):
 
     return fig
 
-def xcsp3_stats(df, time_limit=None):
+def xcsp3_stats(df, time_limit=None, save=None):
 
     if False:  # TODO FutureWarning: The behavior of Series.idxmax with all-NA values, or any-NA and skipna=False, is deprecated. In a future version this will raise ValueError
         for phase in ['parse', 'model', 'post']:
@@ -222,6 +222,11 @@ def xcsp3_stats(df, time_limit=None):
         with open(x) as f:
             metadata = json.load(f)
         return metadata["area"]
+
+    runs = df['run'].unique()
+    if len(runs) > 1:
+        df['alias'] = df['alias'] + "-" + df['run']
+
     df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["instance"].map(lambda x: x[:-4] + ".json")
     df["area"] = df["file_name"].map(get_metadata)
     pd.set_option('display.float_format', '{:0.1f}'.format)
@@ -235,6 +240,7 @@ def xcsp3_stats(df, time_limit=None):
     df["time_cb"] = df["cb_time"].fillna(value=0.0)
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_solve"])
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
+    df = df.sort_values(by=["instance", "alias"])
 
     print("RESULTS")
     print(df[["instance", "alias", "status", "time_total", "time_post", "time_solve","cuts", "cb_rel"]].sort_values(by=["time_total", "instance", "alias"]))
@@ -301,6 +307,35 @@ def xcsp3_stats(df, time_limit=None):
         print(f"\n== {grouping_type} ==")
         print(groups)
 
+    # Save convenience
+    if save:
+        df[
+                [
+                    'problem',
+                    'instance',
+                    # 'run',
+                    'alias',
+                    'status',
+                    'objective_value',
+                    ] +
+                [f'time_{t}' for t in (
+                    "total",
+                    "parse",
+                    "model",
+                    "post",
+                    "solve",
+                    "cb",
+                )] + [
+                    'cb_rel',
+                    'n_cuts',
+                    'n_cuts_explained',
+                    'n_cuts_unexplained',
+                    'exception',
+                ]].to_csv(save, float_format='%.1f')
+
+def reorder_cols(df, cols):
+    return df[cols + [col for col in df.columns if col not in cols]]
+
     
     
 def main():
@@ -310,11 +345,12 @@ def main():
     parser.add_argument('--time-limit', type=float, default=None, help='Maximum time limit in seconds to show on x-axis')
     parser.add_argument('--output', '-o', type=str, default=None, help='Path to save the plot image (e.g., output.png)')
     parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
+    parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False):
+def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False, save=False):
 
     import subprocess
     if sync:
@@ -340,8 +376,9 @@ def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False):
 
     # Read and merge all CSV files
     dfs = []
-    for file in csv_files:
+    for i, file in enumerate(csv_files):
         df = pd.read_csv(file, names=FIELDNAMES, skiprows=1)
+        df["run"] = chr(65 + i)
         dfs.append(df)
     
     df = pd.concat(dfs, ignore_index=True)
@@ -364,14 +401,13 @@ def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False):
     pd.set_option("display.max_rows", None)
     pd.set_option("display.expand_frame_repr", False)
 
-    # Save convenience
-    if path.is_dir():
-        df.to_csv(pathlib.Path(path.name).with_suffix(".csv"))
+    df["time_cb"] = df["cb_time"]
+
     
     assert not df.empty
 
     # Print some stats
-    xcsp3_stats(df, time_limit=time_limit)
+    xcsp3_stats(df, time_limit=time_limit, save=save)
     
     # Create performance plot
     # df[cb_time] = df[f"time_{t}"].fillna(value=TO*2)
