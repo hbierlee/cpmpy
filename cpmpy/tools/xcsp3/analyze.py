@@ -237,7 +237,7 @@ def xcsp3_stats(df, time_limit=None):
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
 
     print("RESULTS")
-    print(df[["instance", "alias", "status", "time_total", "time_post", "time_solve", "exception", "cb_time"]].sort_values(by=["instance", "alias"]))
+    print(df[["instance", "alias", "status", "time_total", "time_post", "time_solve","cuts", "cb_rel"]].sort_values(by=["time_total", "instance", "alias"]))
     # print(df[["instance", "status", "is_err"]].sort_values(by=["instance"]))
 
     TIMES = ("post", "solve", "total")
@@ -307,21 +307,19 @@ def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Analyze XCSP3 solver performance data')
     parser.add_argument('files', nargs='+', help='List of CSV files or directories to analyze')
-    parser.add_argument('--time-limit', type=float, default=None, 
-                        help='Maximum time limit in seconds to show on x-axis')
-    parser.add_argument('--output', '-o', type=str, default=None,
-                        help='Path to save the plot image (e.g., output.png)')
-    parser.add_argument('--sync', type=pathlib.Path, default=None,
-                        help='Location to sync files from')
+    parser.add_argument('--time-limit', type=float, default=None, help='Maximum time limit in seconds to show on x-axis')
+    parser.add_argument('--output', '-o', type=str, default=None, help='Path to save the plot image (e.g., output.png)')
+    parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
+    parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     args = parser.parse_args()
-    analyze(args.files, time_limit=args.time_limit, output=args.output, sync=args.sync)
+    analyze(**vars(args))
 
-def analyze(files, time_limit=None, output=None, sync=None):
+def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False):
 
     import subprocess
     if sync:
         assert len(files) == 1
-        subprocess.run(["rsync", sync / files[0], "."])
+        subprocess.run(["rsync", "-r", sync / files[0], "."])
     
 
     # Gather all CSV files
@@ -358,9 +356,8 @@ def analyze(files, time_limit=None, output=None, sync=None):
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
     # temporarily drop all instances where there are any errors
-    df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
-
-    # df = df[(df['alias']).isin(["base_gurobi", "lazy_gurobi-coverlift"])]
+    if no_errors:
+        df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
     df = df[~(df['alias']).isin(["lazy_gurobi-no_shrink"])]
 
     pd.set_option("display.max_columns", None)
@@ -371,6 +368,8 @@ def analyze(files, time_limit=None, output=None, sync=None):
     if path.is_dir():
         df.to_csv(pathlib.Path(path.name).with_suffix(".csv"))
     
+    assert not df.empty
+
     # Print some stats
     xcsp3_stats(df, time_limit=time_limit)
     

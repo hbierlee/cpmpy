@@ -1,4 +1,5 @@
 import itertools
+import pathlib
 import math
 
 
@@ -8,7 +9,7 @@ PINAC_42_WORKERS = 12
 
 
 def calculate_workers(mem_limit, pinac_mem_limit, pinac_workers):
-    workers = min(math.floor((pinac_mem_limit - 0.1) / 8), pinac_workers)
+    workers = min(math.floor((pinac_mem_limit - 0.1) / 8), pinac_workers - 2)
     assert workers > 1
     return workers
 
@@ -25,6 +26,7 @@ DEFAULTS = [
             "check_time_limit": 2 * 60,
             "output_dir": "results",
             "no_timestamp": True,
+            "profile": None,
         }
     ],
     # benchmarks

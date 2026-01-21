@@ -36,6 +36,7 @@ Optional Arguments
     If set, report intermediate solutions (if supported by the solver).
 """
 
+import cProfile
 import csv
 import os
 import signal
@@ -112,7 +113,7 @@ class PipeWriter:
         pass  # no buffering
 
 
-def xcsp3_wrapper(conn, kwargs, verbose):
+def xcsp3_wrapper(conn, kwargs, verbose, profile):
     """
     Wraps a call to xcsp3_cpmpy as to correctly 
     forward stdout to the multiprocessing pipe (conn).
@@ -133,7 +134,11 @@ def xcsp3_wrapper(conn, kwargs, verbose):
 
     try:
         init_signal_handlers() # configure OS signal handlers
-        xcsp3_cpmpy(**kwargs, verbose=verbose)
+
+        if profile:
+            cProfile.runctx('xcsp3_cpmpy(**kwargs, verbose=verbose)', globals(), locals(), profile)
+        else:
+            xcsp3_cpmpy(**kwargs, verbose=verbose)
         conn.send({"status": "ok"})
     except TimeoutError as e: # capture exceptions and report in state
         tb_str = traceback.format_exc()
@@ -153,7 +158,7 @@ def xcsp3_wrapper(conn, kwargs, verbose):
         conn.close()
 
 # exec_args = (filename, metadata, solver, time_limit, mem_limit, check_time_limit, output_file, verbose) 
-def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, pathlib.Path, bool, bool, str]) -> None:
+def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, pathlib.Path, bool, bool, str, pathlib.Path]) -> None:
     """
     Solve a single XCSP3 instance and write results to file immediately.
     
@@ -168,9 +173,10 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
         check_time_limit: Check time limit in seconds
         output_file: Path to the output CSV file
         verbose: Whether to show solver output
+        profile: profile
     """
     
-    filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path = args
+    filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path, profile = args
     output_file = pathlib.Path(output_file)
 
     # Fieldnames for the CSV file
@@ -212,7 +218,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
                                                           "cores": cores,
                                                           **solver_kwargs,
                                                         }, 
-                                                    verbose))
+                                                    verbose, profile))
     process.start()
        
     sol_time = None # For annotation intermediate solutions (when they were received)
@@ -399,6 +405,7 @@ def xcsp3_benchmark(
     checker_path: Optional[str] = None,
     glob_instance: Optional[str] = None,
     first: Optional[bool] = False,
+    profile: Optional[pathlib.Path] = False,
 ) -> str:
     """
     Benchmark a solver on XCSP3 instances.
@@ -457,7 +464,7 @@ def xcsp3_benchmark(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         # Submit all tasks and track their futures
         futures = [executor.submit(execute_instance,  # below: args
-                                   (filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path))
+                                   (filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path, profile))
                    for filename, metadata in dataset]
         # Process results as they complete
         for i,future in enumerate(tqdm(futures, total=len(futures), desc=f"Running {alias}")):
@@ -528,6 +535,7 @@ if __name__ == "__main__":
     parser.add_argument('--verbose', action='store_true', help='Show solver output')
     parser.add_argument('--intermediate', action='store_true', help='Report on intermediate solutions')
     parser.add_argument('--checker-path', type=str, help='Path to the XCSP3 solution checker JAR file')
+    parser.add_argument('--profile', type=pathlib.Path, help='Profile')
     parser.add_argument('--analyze', action='store_true', help='Analyze results')
     
     main(parser.parse_args())
