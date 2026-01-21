@@ -511,7 +511,7 @@ def main(args):
     dfs.to_csv(pathlib.Path(output_dir.name).with_suffix(".csv"))
 
     if args.analyze:
-        analyze.analyze([output_dir], time_limit=args.time_limit, output=None)
+        analyze.analyze([output_dir], time_limit=args.time_limit)
     return dfs
 
 if __name__ == "__main__":

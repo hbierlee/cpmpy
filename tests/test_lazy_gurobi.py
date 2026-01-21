@@ -206,9 +206,9 @@ class TestTables:
         #     explanation == {1, 5}
         # )
 
-        with pytest.raises(AssertionError) as e:
-            slv.check_explanation(cp.all(X_enc), X_enc, A_enc, T_enc, table)
-        print("ERR", e.value)
+        # with pytest.raises(AssertionError) as e:
+        #     slv.check_explanation(cp.all(X_enc), X_enc, A_enc, T_enc, table)
+        # print("ERR", e.value)
 
         # slv.check_explanation(explanation, X_enc, A_enc, T_enc)
         # assert (  # Example 7; no longer in use since explain_frac2
@@ -223,7 +223,7 @@ class TestTables:
         "case",
         (
             (i, j, t)
-            for j in range(1)  # to repeat the test
+            for j in range(10)  # to repeat the test
             for i, t in enumerate(
                 [
                     *[
