@@ -56,6 +56,7 @@ import random
 if sys.platform != "win32":
     import resource
     
+import cProfile
 import pathlib
 from pathlib import Path
 from enum import Enum
@@ -600,7 +601,6 @@ def prepend_print():
         # Restore the original stdout
         sys.stdout = original_stdout
 
- 
 # Run the instance; exceptions are caught and printed but also re-raised
 def xcsp3_cpmpy(
         benchname: str,
