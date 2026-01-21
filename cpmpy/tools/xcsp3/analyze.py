@@ -424,6 +424,10 @@ def analyze(files=[], time_limit=None, output=None, sync=None, no_errors=False, 
     # else:
     #     plt.show()
 
+    if len(df) == 1:
+        print(df.loc[0])
+
+
 
 if __name__ == '__main__':
     main()
