@@ -56,16 +56,6 @@ def get_experiments(overrides={}, filters=[]):
                                 "coverlift",
                             ],
                         ),
-                        *[
-                            (
-                                "no_shrink",
-                                {
-                                    "fractional": True,
-                                    "shrink": False,
-                                    "coverlift": True,
-                                },
-                            )
-                        ],
                     ]
                 ],
             ]
@@ -89,9 +79,9 @@ def experiment(experiments, overrides={}, filters=[]):
     ]
 
 
-def ablate(feats, add_all=True):
+def ablate(feats, add_one=True, add_all=True):
     return [
         *[("none", {feat: False for feat in feats})],
-        *[(feat, {feat_: feat_ == feat for feat_ in feats}) for feat in feats],
-        *[("all", {feat: True for feat in feats})],
+        *([(feat, {feat_: feat_ == feat for feat_ in feats}) for feat in feats] if add_one else []),
+        *([("all", {feat: True for feat in feats})] if add_all else []),
     ]
