@@ -181,7 +181,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
-            "checker": cp.Model(),
+            "checker": None,
             "tables": [],
             "found_feasible": False,
             "example2": False,
@@ -202,10 +202,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         self.tables = []
 
-        if self.env["debug"]:
-            self.env["solutions"] = frozenset(
-                cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
-            )
+        # if self.env["debug"]:
+        #     self.env["solutions"] = frozenset(
+        #         cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
+        #     )
 
         super().__init__(lazy=True, cpm_model=cpm_model, **kwargs)
         self.native_model.Params.LazyConstraints = 1
@@ -672,7 +672,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 raise e
 
     def add(self, cons):
-        if self.env["debug"]:
+        if self.env["checker"]:
             self.env["checker"] += [con for con in cons if con.name != "table"]
         return super().add(cons)
 
@@ -800,7 +800,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     cons = self.transform([*exactly_one_con, cp.sum(c * b for c, b in expr) + k == x])
                     cpm_cons += cons
 
-                    if self.env["debug"]:
+                    if self.env["checker"]:
                         for c in cons:
                             self.env["checker"] += c
 
