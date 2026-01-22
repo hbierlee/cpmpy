@@ -53,7 +53,7 @@ def get_experiments(overrides={}, filters=[]):
                             [
                                 ("fractional", (False, True)),
                                 ("shrink", (False, True)),
-                                ("coverlift", (True, False)),
+                                ("coverlift", (False, True)),
                                 ("cutoff", (0, 2000, 500, 5000)),
                             ],
                         ),
