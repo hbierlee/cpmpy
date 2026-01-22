@@ -123,7 +123,7 @@ class CPM_gurobi(SolverInterface):
         except pkg_resources.DistributionNotFound:
             return None
 
-    def __init__(self, cpm_model=None, subsolver=None, lazy=False, **kwargs):
+    def __init__(self, cpm_model=None, subsolver=None, **kwargs):
         """
         Constructor of the native solver object
 
@@ -139,7 +139,6 @@ class CPM_gurobi(SolverInterface):
 
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
         self.grb_model = gp.Model(env=GRB_ENV)
-        self.lazy = lazy
 
         # initialise everything else and post the constraints/objective
         # it is sufficient to implement add() and minimize/maximize() below
@@ -342,7 +341,7 @@ class CPM_gurobi(SolverInterface):
         raise NotImplementedError("gurobi: Not a known supported numexpr {}".format(cpm_expr))
 
 
-    def transform(self, cpm_expr):
+    def transform(self, cpm_expr, lazy=False):
         """
             Transform arbitrary CPMpy expressions to constraints the solver supports
 
@@ -361,7 +360,7 @@ class CPM_gurobi(SolverInterface):
         cpm_cons = toplevel_list(cpm_expr)
         cpm_cons = no_partial_functions(cpm_cons, safen_toplevel={"mod", "div"})  # linearize expects safe exprs
         supported = {"min", "max", "abs", "alldifferent"} # alldiff has a specialized MIP decomp in linearize
-        if self.lazy:
+        if lazy:
             supported.add("table")
         cpm_cons = decompose_in_tree(cpm_cons, supported, csemap=self._csemap)
         cpm_cons = flatten_constraint(cpm_cons, csemap=self._csemap)  # flat normal form
@@ -371,7 +370,7 @@ class CPM_gurobi(SolverInterface):
         cpm_cons = only_implies(cpm_cons, csemap=self._csemap)  # anything that can create full reif should go above...
         # gurobi does not round towards zero, so no 'div' in supported set: https://github.com/CPMpy/cpmpy/pull/593#issuecomment-2786707188
         supported = set({"sum", "wsum","sub","min","max","mul","abs","pow"})
-        if self.lazy:
+        if lazy:
             supported.add("table")
         cpm_cons = linearize_constraint(cpm_cons, supported=supported, csemap=self._csemap)  # the core of the MIP-linearization
         cpm_cons = only_positive_bv(cpm_cons, csemap=self._csemap)  # after linearization, rewrite ~bv into 1-bv

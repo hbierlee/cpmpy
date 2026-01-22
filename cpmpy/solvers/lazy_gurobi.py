@@ -68,6 +68,10 @@ def assign_mipsol(A_enc):
     return [1 if a > 0.5 else 0 for a in A_enc]
 
 
+def get_table_area(c):
+    return len(c.args[1]) * sum(cp.expressions.utils.dom_size(x) for x in c.args[0])
+
+
 class SetEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, set):
@@ -175,6 +179,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "verbosity": 0,
             "log": None,
             "heuristic": Heuristic.GREEDY,
+            "cutoff": 0,
             "shrink": True,
             "fractional": True,
             "coverlift": False,
@@ -207,7 +212,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         #         cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
         #     )
 
-        super().__init__(lazy=True, cpm_model=cpm_model, **kwargs)
+        super().__init__(cpm_model=cpm_model, **kwargs)
         self.native_model.Params.LazyConstraints = 1
         # self.native_model.Params.Threads = 1
         # self.native_model.Params.PreCrush = 1
@@ -771,56 +776,60 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def transform(self, cpm_expressions):
         cpm_cons = []  # all but tables
-        cpm_expressions = super().transform(cpm_expressions)
+        cpm_expressions = super().transform(cpm_expressions, lazy=True)
         for cpm_expr in cpm_expressions:
             if cpm_expr.name == "table":
-                if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
-                    cpm_expr = normalize_table(cpm_expr)
-                X, T = cpm_expr.args
-                if len(T) == 0:
-                    return [cp.BoolVal(False)]
-                assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
+                area = get_table_area(cpm_expr)
+                if area >= self.env["cutoff"]:
+                    if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
+                        cpm_expr = normalize_table(cpm_expr)
+                    X, T = cpm_expr.args
+                    if len(T) == 0:
+                        return [cp.BoolVal(False)]
+                    assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
 
-                T_enc = encode(X, T)
+                    T_enc = encode(X, T)
 
-                if self.env["debug"]:
-                    self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
-                    self.log("T =", verbosity=3)
-                    self.log(T, verbosity=3)
-                    self.log("T_enc =", verbosity=3)
-                    self.log(T_enc, verbosity=3)
+                    if self.env["debug"]:
+                        self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
+                        self.log("T =", verbosity=3)
+                        self.log(T, verbosity=3)
+                        self.log("T_enc =", verbosity=3)
+                        self.log(T_enc, verbosity=3)
 
-                for x in X:
-                    x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
-                        self.ivarmap, x, "direct", csemap=self._csemap
-                    )
-                    expr, k = x_enc.encode_term()
-                    # TODO if only BV, then need to assign (but no need to assign if decoding constraint present)
-                    # Note: do not use self += [..] to avoid poluting user_vars
-                    cons = self.transform([*exactly_one_con, cp.sum(c * b for c, b in expr) + k == x])
-                    cpm_cons += cons
+                    for x in X:
+                        x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
+                            self.ivarmap, x, "direct", csemap=self._csemap
+                        )
+                        expr, k = x_enc.encode_term()
+                        # TODO if only BV, then need to assign (but no need to assign if decoding constraint present)
+                        # Note: do not use self += [..] to avoid poluting user_vars
+                        cons = self.transform([*exactly_one_con, cp.sum(c * b for c, b in expr) + k == x])
+                        cpm_cons += cons
 
-                    if self.env["checker"]:
-                        for c in cons:
-                            self.env["checker"] += c
+                        if self.env["checker"]:
+                            for c in cons:
+                                self.env["checker"] += c
 
-                x_encs = [self.ivarmap[x.name]._xs for x in X]
+                    x_encs = [self.ivarmap[x.name]._xs for x in X]
 
-                # for each column i, add a set of indices for its part
-                #    x1    x2   y1   y2
-                #     1     1    2    2 parts
-                # 1,..2  1..2 3..4 3..4 -> parts
+                    # for each column i, add a set of indices for its part
+                    #    x1    x2   y1   y2
+                    #     1     1    2    2 parts
+                    # 1,..2  1..2 3..4 3..4 -> parts
 
-                parts = []
-                lst = 0
-                for i, x_enc in enumerate(x_encs):
-                    # TODO maybe tuple is better depending how frozenset(range) is handled (low-priority perf.)
-                    parts += [frozenset(range(lst, lst + len(x_enc)))] * len(x_enc)
-                    lst += len(x_enc)
+                    parts = []
+                    lst = 0
+                    for i, x_enc in enumerate(x_encs):
+                        # TODO maybe tuple is better depending how frozenset(range) is handled (low-priority perf.)
+                        parts += [frozenset(range(lst, lst + len(x_enc)))] * len(x_enc)
+                        lst += len(x_enc)
 
-                X_enc = [x_enc_i for x_enc in x_encs for x_enc_i in x_enc]
-                assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
-                self.tables.append((X_enc, T_enc, parts, cpm_expr))
+                    X_enc = [x_enc_i for x_enc in x_encs for x_enc_i in x_enc]
+                    assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
+                    self.tables.append((X_enc, T_enc, parts, cpm_expr))
+                else:
+                    cpm_cons += super().transform(cpm_expressions)
             else:
                 cpm_cons.append(cpm_expr)
 
