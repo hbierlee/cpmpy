@@ -829,7 +829,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
                     self.tables.append((X_enc, T_enc, parts, cpm_expr))
                 else:
-                    cpm_cons += super().transform(cpm_expressions)
+                    cpm_cons += super().transform(cpm_expr)
             else:
                 cpm_cons.append(cpm_expr)
 
