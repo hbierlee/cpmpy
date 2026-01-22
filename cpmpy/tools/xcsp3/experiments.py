@@ -53,8 +53,8 @@ def get_experiments(overrides={}, filters=[]):
                             [
                                 ("fractional", (False, True)),
                                 ("shrink", (False, True)),
-                                ("coverlift", (False, True)),
-                                ("cutoff", (0, 500, 5000, 2000)),
+                                ("coverlift", (True, False)),
+                                ("cutoff", (0, 2000, 500, 5000)),
                             ],
                         ),
                     ]
@@ -95,6 +95,6 @@ def ablate(feats, add_one=True, add_all=True):
             if add_one
             else []
         ),
-        *[("all", {feat: feat_vals[-1] for feat, feat_vals in feats})],
+        *[("all", {feat: feat_vals[1] for feat, feat_vals in feats})],
         # *([("all", {feat: True for feat in feats})] if add_all else []),
     ]
