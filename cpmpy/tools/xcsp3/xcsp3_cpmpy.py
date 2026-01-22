@@ -456,7 +456,7 @@ def gurobi_arguments(model: cp.Model,
                      seed: Optional[int] = None,
                      mem_limit: Optional[int] = None,
                      intermediate: bool = False,
-                     force_mem_limit = None,
+                     force_mem_limit = True,
                      opt: bool = None,
                      **kwargs):
     # Documentation: https://www.gurobi.com/documentation/9.5/refman/parameters.html#sec:Parameters
@@ -615,7 +615,8 @@ def xcsp3_cpmpy(
         time_buffer: int = 0,
         intermediate: bool = False,
         verbose: bool = False,
-        **kwargs,
+        solver_kwargs: Optional[dict] = {},
+        solve_kwargs: Optional[dict] = {},
 ):
     if not verbose:
         warnings.filterwarnings("ignore")
@@ -692,25 +693,25 @@ def xcsp3_cpmpy(
                     model.constraints[i] = added_natives[solver][constraint.name](constraint.args)
 
         # ------------------------ Post CPMpy model to solver ------------------------ #
-
-        solver_args, internal_options = solver_arguments(solver, model=model, seed=seed,
-                                       intermediate=intermediate,
-                                       cores=cores, mem_limit=mib_as_bytes(mem_limit) if mem_limit is not None else None,
-                                       **kwargs)
+        solver_args, internal_options = solver_arguments(
+            solver,
+            model=model,
+            seed=seed,
+            intermediate=intermediate,
+            cores=cores,
+            mem_limit=mib_as_bytes(mem_limit) if mem_limit is not None else None,
+            **solve_kwargs,
+        )
         # time_limit is generic for all, done later
 
         # Post model to solver
         time_post = time.time()
 
 
-        solver_init_args = {"time_limit": time_limit - wall_time(p) - time_buffer}
-        if not isinstance(solver, str):
-            s = solver(cpm_model = model, **solver_init_args)
-        elif solver == "exact": # Exact2 takes its options at creation time
-            s = cp.SolverLookup.get(name=solver, model=model, **solver_init_args, **solver_args)
-            solver_args = dict()  # no more solver args needed
-        else:
-            s = cp.SolverLookup.get(name=solver, model=model, **solver_init_args)
+        solver_kwargs["time_limit"] = time_limit - wall_time(p) - time_buffer
+
+        s = cp.SolverLookup.get(name=solver, model=model, **solver_kwargs) if isinstance(solver, str) else solver(cpm_model = model, **solver_kwargs)
+
         time_post = time.time() - time_post
         print_comment(f"took {time_post:.4f} seconds to post model to {solver}")
 

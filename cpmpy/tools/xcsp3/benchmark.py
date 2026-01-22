@@ -158,7 +158,7 @@ def xcsp3_wrapper(conn, kwargs, verbose, profile):
         conn.close()
 
 # exec_args = (filename, metadata, solver, time_limit, mem_limit, check_time_limit, output_file, verbose) 
-def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, pathlib.Path, bool, bool, str, pathlib.Path]) -> None:
+def execute_instance(args: Tuple[str, dict, str, str, dict, dict, int, int, int, int, pathlib.Path, bool, bool, str, pathlib.Path]) -> None:
     """
     Solve a single XCSP3 instance and write results to file immediately.
     
@@ -167,7 +167,8 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
         metadata: Dictionary containing instance metadata (year, track, name)
         alias: Alias for the solver configto use
         solver: Name of the solver to use
-        solver_kwargs: Solver kwargs
+        solver_kwargs: Solver init kwargs
+        solve_kwargs: Solver solve kwargs
         time_limit: Time limit in seconds
         mem_limit: Memory limit in MB
         check_time_limit: Check time limit in seconds
@@ -176,17 +177,19 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
         profile: profile
     """
     
-    filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path, profile = args
+    filename, metadata, alias, solver, solver_kwargs, solve_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path, profile = args
     output_file = pathlib.Path(output_file)
 
     # Fieldnames for the CSV file
     result = dict.fromkeys(analyze.FIELDNAMES)  # init all fields to None
     result['year'] = metadata['year']
     result['track'] = metadata['track']
-    result['instance'] = metadata['name'] 
+    result['instance'] = metadata['name']
     result['solver'] = solver
     result['alias'] = alias
-    result['solver_kwargs'] = str(solver_kwargs)
+    result['solver_kwargs'] = str(solver_kwargs) + "-" + str(solve_kwargs)
+    # result['solve_kwargs'] = str(solve_kwargs)
+    # TODO result['options'] = str(solver_kwargs)
 
     # Decompress before timers start
     file_path = filename
@@ -213,12 +216,14 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, int, int, int, int, 
                                                           "check_time_limit": check_time_limit, 
                                                           "mem_limit": mem_limit, 
                                                           "intermediate": intermediate, 
-                                                          "force_mem_limit": True,
                                                           "time_buffer": TIME_BUFFER,
                                                           "cores": cores,
-                                                          **solver_kwargs,
+                                                          "solve_kwargs": solve_kwargs,
+                                                          "solver_kwargs": solver_kwargs,
                                                         }, 
-                                                    verbose, profile))
+                                                    verbose,
+                                                    profile)
+                          )
     process.start()
        
     sol_time = None # For annotation intermediate solutions (when they were received)
@@ -395,6 +400,7 @@ def xcsp3_benchmark(
     solver: str,
     alias: Optional[str] = None,
     solver_kwargs: Optional[dict] = {},
+    solve_kwargs: Optional[dict] = {},
     workers: int = 1,
     time_limit: int = 300,
     mem_limit: Optional[int] = 4096, cores: int=1,
@@ -464,7 +470,7 @@ def xcsp3_benchmark(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         # Submit all tasks and track their futures
         futures = [executor.submit(execute_instance,  # below: args
-                                   (filename, metadata, alias, solver, solver_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path, profile))
+                                   (filename, metadata, alias, solver, solver_kwargs, solve_kwargs, time_limit, mem_limit, check_time_limit, cores, output_file, verbose, intermediate, checker_path, profile))
                    for filename, metadata in dataset]
         # Process results as they complete
         for i,future in enumerate(tqdm(futures, total=len(futures), desc=f"Running {alias}")):

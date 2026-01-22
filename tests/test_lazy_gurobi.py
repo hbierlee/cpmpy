@@ -124,6 +124,7 @@ def env():
         "seed": 42,
         "shrink": True,
         "fractional": True,
+        "cutoff": 0,
     }
 
 

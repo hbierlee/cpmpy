@@ -186,8 +186,9 @@ class TestBenchmark:
         dt = time.time() - dt
 
         df = pd.read_csv(out).loc[0]
+        print(df)
         status = ExitStatus(df["status"])
-        assert status in expected_status, f"Unexpected status for {experiment['solver']}"
+        assert status in expected_status, f"Unexpected status for {experiment['solver']}\n\n{df['exception']}"
         assert dt < experiment["time_limit"] + experiment["check_time_limit"] + TIME_BUFFER
 
         feasible = status in (ExitStatus.unsat, ExitStatus.optimal, ExitStatus.sat)
