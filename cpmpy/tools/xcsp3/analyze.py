@@ -78,7 +78,7 @@ MEM = 'MEMORY'
 ERR = 'ERROR'
 UNK = 'UNKNOWN'
 
-def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved"):
+def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", solved_only=False):
     # Get unique solvers
     solvers = df['alias'].unique()
 
@@ -127,7 +127,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved"):
     # Get unique year-track combinations
     year_track_pairs = df[['year', 'track']].drop_duplicates()
     datasets = ', '.join([f'{row.year}:{row.track}' for _, row in year_track_pairs.iterrows()])
-    plt.title(f'Performance Plot ({datasets})')
+    plt.title(f"Performance Plot ({datasets}) {' (solved only)' if solved_only else ''}")
     plt.grid(True)
     plt.legend()
     
@@ -223,9 +223,9 @@ def xcsp3_stats(df, time_limit=None, save=None):
             metadata = json.load(f)
         return metadata["area"]
 
-    runs = df['run'].unique()
-    if len(runs) > 1:
-        df['alias'] = df['alias'] + "-" + df['run']
+    # runs = df['run'].unique()
+    # if len(runs) > 1:
+    #     df['alias'] = df['alias'] + "-" + df['run']
 
     df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["instance"].map(lambda x: x[:-4] + ".json")
     df["area"] = df["file_name"].map(get_metadata)
@@ -243,7 +243,17 @@ def xcsp3_stats(df, time_limit=None, save=None):
     df = df.sort_values(by=["instance", "alias"])
 
     print("RESULTS")
-    print(df[["instance", "alias", "status", "time_total", "time_post", "time_solve","cuts", "cb_rel"]].sort_values(by=["time_total", "instance", "alias"]))
+    print(df[[
+        "instance",
+        "area",
+        "alias",
+        "status",
+        "time_total",
+        "time_post",
+        "time_solve",
+        "cuts",
+        "cb_rel",
+    ]].sort_values(by=["area", "instance", "alias"]))
     # print(df[["instance", "status", "is_err"]].sort_values(by=["instance"]))
 
     TIMES = ("post", "solve", "total")
@@ -347,11 +357,12 @@ def main():
     parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
     parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
-    parser.add_argument('--only-solved', action='store_true', help='Only show instances which have been solved by all solvers')
+    parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
+    parser.add_argument('--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, only_solved=False):
+def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, glob_alias=None):
 
     import subprocess
     if sync:
@@ -361,12 +372,12 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # Gather all CSV files
     csv_files = []
-    for path_str in files:
+    for (i, path_str) in enumerate(files):
         path = pathlib.Path(path_str)
         if path.is_file() and path.suffix == '.csv':
-            csv_files.append(pathlib.Path(path))
+            csv_files.append((i, pathlib.Path(path)))
         elif path.is_dir():
-            csv_files.extend(pathlib.Path(p) for p in path.rglob('*.csv'))
+            csv_files.extend((i, pathlib.Path(p)) for p in path.rglob('*.csv'))
         else:
             print(f"Warning: {path} is not a valid CSV file or directory")
 
@@ -377,7 +388,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # Read and merge all CSV files
     dfs = []
-    for i, file in enumerate(csv_files):
+    for i, file in csv_files:
         df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
         df["run"] = chr(65 + i)
         dfs.append(df)
@@ -393,12 +404,24 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     # let solve include post time?
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
+
+    if False:
+        runs = df['run'].unique()
+        if len(runs) > 1:
+            df['alias'] = df['alias'] + "-" + df['run']
+
+    if glob_alias:
+        df = df.drop(df[~df["alias"].map(lambda alias: any(g in alias for g in glob_alias))].index)
+
+
     # temporarily drop all instances where there are any errors
     if no_errors:
         df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
 
-    if only_solved:
+    if solved_only:
         df = df[df['instance'].map(lambda x: set(df[df["instance"] == x]["status"].unique()).issubset((OPT, UNS)))]
+    df = df[~(df['alias']).isin(["lazy_gurobi-no_shrink"])]
+
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_rows", None)
     pd.set_option("display.expand_frame_repr", False)
@@ -416,7 +439,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     # df["t_solve_wo_cb"] = df["time_solve"] - df["cb_time"].fillna(value=0)
     # fig = xcsp3_plot(df, args.time_limit, metric="t_solve_wo_cb")
 
-    fig = xcsp3_plot(df, time_limit, filter_by="feasible")
+    fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
     # fig = xcsp3_objective_performance_profile(merged_df)
 
     # Save or show plot
