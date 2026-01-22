@@ -199,10 +199,10 @@ class TestBenchmark:
             assert not np.isnan(df["time_post"])
 
     def test_ablate(self):
-        assert ablate([("a", (False, True)), ("b", (0, 5, 2))]) == [
+        assert ablate([("a", (False, True)), ("b", (0, 2, 5))]) == [
             ("none", {"a": False, "b": 0}),
             ("a", {"a": True, "b": 0}),
-            ("b-5", {"a": False, "b": 5}),
             ("b-2", {"a": False, "b": 2}),
+            ("b-5", {"a": False, "b": 5}),
             ("all", {"a": True, "b": 2}),
         ]
