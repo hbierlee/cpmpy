@@ -76,14 +76,9 @@ def check_model(model, env=None):
             )
 
             violations = [c for c in model.constraints if c.value() is False]
-            assert not violations, f"""For assignment:
-
-    {show_assignment(X)}
-
-    The following constraints fail:
-
-    {"\n\n".join(str(v) for v in violations)}
-            """
+            assert not violations, (
+                f"For assignment:\n\n{show_assignment(X)}\n\nThe following constraints fail:\n\n{'\n\n'.join(str(v) for v in violations)}"
+            )
         print("PASS.")
     except AssertionError as e:
         with open("/tmp/bug.pkl", "wb") as f:

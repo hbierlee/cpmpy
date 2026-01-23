@@ -28,6 +28,7 @@ import argparse
 import ast
 import json
 import pathlib
+import statistics
 import re
 import matplotlib
 import pandas as pd
@@ -56,7 +57,7 @@ FIELDNAMES = [
     "n_cuts",
     "n_cuts_explained",
     "n_cuts_unexplained",
-    "cb_time",
+    "time_cb",
 ]
 
 
@@ -221,14 +222,18 @@ def xcsp3_stats(df, time_limit=None, save=None):
     def get_metadata(x):
         with open(x) as f:
             metadata = json.load(f)
-        return metadata["area"]
+        n = len(metadata["tables"])
+        
+        areas = [t["area"] for t in metadata["tables"]]
+        return [metadata["area"], len(areas), statistics.mean(areas), statistics.stdev(areas)]
 
     # runs = df['run'].unique()
     # if len(runs) > 1:
     #     df['alias'] = df['alias'] + "-" + df['run']
 
-    df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["instance"].map(lambda x: x[:-4] + ".json")
-    df["area"] = df["file_name"].map(get_metadata)
+    df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
+    df[["area", "count", "mean", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
+    # df["area"], df["count"] = df["file_name"].map(get_metadata)
     pd.set_option('display.float_format', '{:0.1f}'.format)
 
     df["unknown"] = df["status"] == UNK
@@ -237,23 +242,40 @@ def xcsp3_stats(df, time_limit=None, save=None):
     df["feasible"] = df["status"].isin((OPT, SAT, UNS))
     df["solved"] = df["status"].isin((OPT, UNS))
     df["post"] = ~df["time_post"].isna()
-    df["time_cb"] = df["cb_time"].fillna(value=0.0)
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_solve"])
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
-    df = df.sort_values(by=["instance", "alias"])
+    df = df.sort_values(by=["problem", "instance", "alias"])
+
+    df["diff"] = df.groupby(['instance'])["time_solve"].diff()
+
+    SHOW_DIFF = False
+    if SHOW_DIFF:
+        df = df.drop(df[df["alias"] == "base_gurobi"].index)
 
     print("RESULTS")
     print(df[[
+        "problem",
         "instance",
         "area",
-        "alias",
+        "mean",
+        "stdev",
+        ] + ([] if SHOW_DIFF else ["alias"])
+         + [
+        "diff",
         "status",
-        "time_total",
+        # "time_total",
         "time_post",
         "time_solve",
-        "cuts",
+        "time_cb",
         "cb_rel",
-    ]].sort_values(by=["area", "instance", "alias"]))
+        "cuts",
+    ]].sort_values(by=
+                   ["mean", "problem", "instance"]
+                   + ([] if SHOW_DIFF else ["alias"])
+                   ))
+    if SHOW_DIFF:
+        exit(0)
+
     # print(df[["instance", "status", "is_err"]].sort_values(by=["instance"]))
 
     TIMES = ("post", "solve", "total")
@@ -366,7 +388,6 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     import subprocess
     if sync:
-        assert len(files) == 1
         subprocess.run(["rsync", "-r", sync / files[0], "."])
     
 
@@ -389,6 +410,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     # Read and merge all CSV files
     dfs = []
     for i, file in csv_files:
+        print("Reading", file)
         df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
         df["run"] = chr(65 + i)
         dfs.append(df)
@@ -397,6 +419,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # find problem names
     df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
+    df['instance'] = df['instance'].map(lambda x: "-".join(x.split("-")[1:]).split(".")[0])
 
     # replace time_solve to NaN if not solved
     df["time_solve"] = df["time_solve"].mask(~df["status"].isin([OPT, UNS]))
@@ -405,6 +428,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
 
+    df['alias'] += '.'
     if False:
         runs = df['run'].unique()
         if len(runs) > 1:
@@ -419,26 +443,18 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
         df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
 
     if solved_only:
-        df = df[df['instance'].map(lambda x: set(df[df["instance"] == x]["status"].unique()).issubset((OPT, UNS)))]
+        df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset((OPT, UNS)), axis=1)]
     df = df[~(df['alias']).isin(["lazy_gurobi-no_shrink"])]
 
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_rows", None)
     pd.set_option("display.expand_frame_repr", False)
 
-    df["time_cb"] = df["cb_time"]
-
-    
     assert not df.empty
 
     # Print some stats
     xcsp3_stats(df, time_limit=time_limit, save=save)
     
-    # Create performance plot
-    # df[cb_time] = df[f"time_{t}"].fillna(value=TO*2)
-    # df["t_solve_wo_cb"] = df["time_solve"] - df["cb_time"].fillna(value=0)
-    # fig = xcsp3_plot(df, args.time_limit, metric="t_solve_wo_cb")
-
     fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
     # fig = xcsp3_objective_performance_profile(merged_df)
 

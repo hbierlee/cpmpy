@@ -531,7 +531,7 @@ if __name__ == "__main__":
     parser.add_argument('--workers', type=int, help='Number of parallel workers')
     parser.add_argument('--time-limit', type=int, help='Time limit in seconds per instance')
     parser.add_argument('--check-time-limit', type=int, help='Check time limit in seconds per instance')
-    parser.add_argument('--glob-alias', type=str, default=None, help='Solver config alias (e.g., ortools-par, ...)')
+    parser.add_argument('--glob-alias', type=str, nargs="+", default=None, help='Solver config alias (e.g., ortools-par, ...)')
     parser.add_argument('--glob-instance', type=str, default=None, help='Filter instances according to glob expression')
     parser.add_argument('--first', action='store_true', help='Run only first instance of each problem')
     parser.add_argument('--mem-limit', type=int, help='Memory limit in MB per instance')
