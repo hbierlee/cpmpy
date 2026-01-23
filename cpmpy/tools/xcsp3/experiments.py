@@ -54,8 +54,10 @@ def get_experiments(overrides={}, filters=[]):
                                 ("fractional", (False, True)),
                                 ("shrink", (False, True)),
                                 ("coverlift", (True, False)),
-                                ("cutoff", (0, 2000, 500, 5000)),
+                                ("cutoff", (0, 0, 2000)),
                             ],
+                            add_none=False,
+                            add_all=False,
                         ),
                     ]
                 ],
@@ -80,9 +82,9 @@ def experiment(experiments, overrides={}, filters=[]):
     ]
 
 
-def ablate(feats, add_one=True, add_all=True):
+def ablate(feats, add_one=True, add_none=True, add_all=False):
     return [
-        *[("none", {feat: feat_vals[0] for feat, feat_vals in feats})],
+        *([("none", {feat: feat_vals[0] for feat, feat_vals in feats})] if add_none else []),
         *(
             [
                 (
@@ -95,6 +97,5 @@ def ablate(feats, add_one=True, add_all=True):
             if add_one
             else []
         ),
-        *[("all", {feat: feat_vals[1] for feat, feat_vals in feats})],
-        # *([("all", {feat: True for feat in feats})] if add_all else []),
+        *([("all", {feat: feat_vals[1] for feat, feat_vals in feats})] if add_all else []),
     ]
