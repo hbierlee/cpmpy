@@ -76,7 +76,7 @@ def experiment(experiments, overrides={}, filters=[]):
             }
             for experiment_ in itertools.product(*DEFAULTS, *experiments)
         ]
-        if all(v in experiment[k] for k, v in filters)
+        if all(any(v in experiment[k] for v in vs) for k, vs in filters)
     ]
 
 
