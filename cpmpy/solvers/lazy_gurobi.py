@@ -558,7 +558,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 feasible = True  # assume feasible
                 for explanation in self._explain_assignment(x_enc_a, frm=frm):
                     feasible = False  # any explanation means not feasible
-                    expr = self.transform(explanation)
+                    expr = [explanation]
+                    # expr = self.transform(explanation)
                     assert len(expr) == 1
                     expr = expr[0]
 
