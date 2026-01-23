@@ -9,6 +9,7 @@ import pytest
 import cpmpy as cp
 from cpmpy.expressions.utils import show_assignment
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table
+from cpmpy.solvers.gurobi import CPM_gurobi
 
 
 def generate_table_from_example():
@@ -24,9 +25,10 @@ def generate_two_tables():
     x = cp.intvar(1, 4, name="x")
     y = cp.intvar(1, 3, name="y")
     z = cp.intvar(2, 4, name="z")
+    w = cp.intvar(1, 2, name="w")
     return cp.Model(
         cp.Table((x, y, z), np.array([(2, 1, 2), (3, 2, 2), (4, 3, 3), (1, 2, 3), (2, 1, 4)])),
-        cp.Table((z, y), np.array([(2, 1), (3, 2), (2, 3), (2, 3), (4, 1)])),
+        cp.Table((z, y, w), np.array([(2, 1, 1), (3, 2, 1), (2, 3, 1), (2, 3, 1), (4, 1, 2)])),
     )
 
 
@@ -60,12 +62,16 @@ def assert_integer_solution(A_enc):
 
 
 def check_model(model, env=None):
-    print("Model", model)
+    print("== Model ==")
+    print(model)
     expected_sat = model.deepcopy().solve()
     try:
-        slv = CPM_lazy_gurobi(cpm_model=model, env=env.copy())
+        slv = CPM_lazy_gurobi(cpm_model=model, env=env.copy()) if isinstance(env, dict) else env(cpm_model=model)
+        print(slv)
         actual_sat = slv.solve()
-        slv.stats()
+
+        if hasattr(slv, "stats"):
+            slv.stats()
         if actual_sat is False:
             assert expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
 
@@ -119,8 +125,8 @@ def env():
         "seed": 42,
         "shrink": True,
         "fractional": True,
-        "cutoff": 0,
-    }
+        "cutoff": 45,
+    } if True else  CPM_gurobi
 
 
 def load_model(path):
@@ -219,7 +225,7 @@ class TestTables:
         "case",
         (
             (i, j, t)
-            for j in range(10)  # to repeat the test
+            for j in range(25)  # to repeat the test
             for i, t in enumerate(
                 [
                     *[
@@ -268,14 +274,14 @@ class TestTables:
                             ),  # TRICKY BUG FINDER NO CHIOCE
                         ]
                     ],
-                ]
+                ],
+                start=1,
             )
         ),
         ids=lambda val: val[0],
     )
     def test_models(self, case, env):
         _, _, model = case
-        print("Test model:")
         check_model(model, env=env)
 
     def test_repro_model(self, env):
