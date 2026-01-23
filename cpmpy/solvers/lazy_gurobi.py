@@ -103,7 +103,7 @@ def show_set(S, index=INDEX):
 def show(S, index=INDEX):
     if isinstance(S, collections.abc.Iterable):
         show_set(S, index=index)
-    elif isinstance(S, int):
+    elif isinstance(S, (int, np.integer)):
         show_ind(S, index=index)
     else:
         raise TypeError(f"{S}, {type(S)}")
@@ -115,13 +115,14 @@ class Infeasible(Exception):
 
 def rows(T, i, j=1):
     """Row indices where T[i]==j"""
-    return set(int(i) for i in np.where(T[:, i] == j)[0].flatten())
+    return cols(T.T, i, j=j)
+    # return set(int(i) for i in np.where(T[:, i] == j)[0].flatten())
 
 
 def cols(T, i, j=1):
     """Col indices where T[i]==j"""
     # TODO replace for rows(T.T, ..)?
-    return set(int(i) for i in np.where(T[i, :] == j)[0].flatten())
+    return set(i for i in np.where(T[i, :] == j)[0].flatten())
 
 
 def is_integer(v):
@@ -140,11 +141,11 @@ def union(sets):
 def encode(X, T):
     dom_sizes = [dom_size(x) for x in X]
     width = sum(dom_sizes)
-    T_enc = np.zeros((len(T), width))
+    T_enc = np.zeros((len(T), width), dtype=bool)
     for t, t_enc_i in zip(T, T_enc):
         offset = 0
         for x, x_width, a in zip(X, dom_sizes, t):
-            t_enc_i[offset + a - x.lb] = 1
+            t_enc_i[offset + a - x.lb] = True
             offset += x_width
     return T_enc
 
@@ -180,7 +181,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "log": None,
             "heuristic": Heuristic.GREEDY,
             "cutoff": 0,
-            "shrink": True,
+            "shrink": False,
             "fractional": True,
             "coverlift": False,
             "cuts": [],
@@ -330,7 +331,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # TODO [peter] C missing from alg
 
         def choose(S):
-            self.log("choose from", show_set(S), verbosity=3)
+            if self.env["debug"]:
+                self.log("choose from", show_set(S), verbosity=3)
             return min(S)
 
         i = 0
@@ -400,13 +402,23 @@ class CPM_lazy_gurobi(CPM_gurobi):
         self.env["cuts"].append({"from": frm})
 
         m = len(T_enc)  # number of cols
-        W = set(i for i, a in enumerate(A_enc) if is_eq(a, 1.0))  #
-        # F = set(i for i, a in enumerate(A_enc) if is_gt(a, 0.0) and is_lt(a, 1.0))
-        F = set(i for i, a in enumerate(A_enc) if not is_integral(a))
+        W = set(i for i, a in enumerate(A_enc) if is_ge(a, 1.0))  # find a == 1.0
+        # W = set(i for i, a in enumerate(A_enc) if is_eq(a, 1.0))  # find a == 1.0
+
+        # F = set(i for i, a in enumerate(A_enc) if not is_integral(a))
+        F = set(i for i in set(range(len(A_enc))) - W if is_gt(A_enc[i], 0.0))  # find 0 < a < 1
         # assert not is_integer_solution(A_enc[i] for i in F), f"F should hold only fractional, but was: {F}"
         X = set()  # columns added to cut
         R = set(range(len(T_enc)))  # remaining columns
-        D = set(r for r in range(m) if cols(T_enc, r) <= W.union(F))  # difficult rows; either frac/whole
+
+        # D = set(r for r in range(m) if cols(T_enc, r) <= W.union(F))  # difficult rows; either frac/whole
+        # [   2 3   4     ]
+        # [ 0 1 1 0 1 0 0 ]  Y
+        # [ 0 0 1 0 1 0 0 ]  Y
+        # [ 0 0 1 0 1 1 0 ]  N
+        WF = np.zeros(len(T_enc.T), dtype=bool)
+        WF[list(W.union(F))] = True
+        D = set(r for r in range(m) if T_enc[r, :] in WF)  # difficult rows; either frac/whole
         U = set(i for i in F if all(T_enc[r, i] == 0 for r in D))  # frac except difficult
 
         if self.env["debug"]:
@@ -437,6 +449,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             V = set()
             s = -1
 
+        choices = set(parts) - V
+
         for iteration in itertools.count(start=1):
             self.check_max_iterations(iteration)
             self.indent = 1
@@ -448,23 +462,25 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             if not R:
                 break
-            choices = set(parts) - V
+
             if not choices:
                 # with open("/tmp/failed_cut_nc.pkl", "wb") as f:
                 #     print("store", (A_enc, T_enc, parts, frm))
                 #     pickle.dump((A_enc, T_enc, parts, frm), f)
                 return  # TODO [peter]
 
-            l = next(l for l in choices)
+            # TODO [peter] Heuristic, and V cna be removed
+            l = choices.pop()
 
             if self.env["debug"]:
                 self.log(f"choose part l = {show_set(l)} out of choices {show_set(choices)}", verbosity=3)
 
-            V.add(l)
             s += 1
 
             def C(v, l):
                 # TODO can be further improve by iterating over the relevant part
+                # return v == is_gt(v[i], 0.0)
+                # c = list(i for i in l if is_gt(v[i], 0.0))
                 c = set(i for i in l if is_gt(v[i], 0.0))
                 if self.env["debug"]:
                     self.log(f"C({v}, {show_set(l)}) = {show_set(c)}", verbosity=3)
@@ -472,10 +488,20 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return c
 
             C_ = C(A_enc, l)
-            sets = union(rows(T_enc, i) for i in C_)
-            if self.env["debug"]:
-                self.log(f"Union = {show_set(sets)}", verbosity=3)
-            R = R.intersection(sets)
+            # C = {}
+            # R = {2,3}
+            # [     3   4     ]
+            # [ 0 1 1 0 1 0 0 ]  Y
+            # [ 0 0 1 0 1 0 0 ]  Y
+            # [ 0 0 1 0 1 1 0 ]  N
+            # keep the rows which have
+            # R = set(r for r in R if np.any(T_enc[r, C_]))
+            R = set(r for r in R if any(T_enc[r, i] for i in C_))
+            # sets = union(rows(T_enc, i) for i in C_)
+            # print("C", sets)
+            # if self.env["debug"]:
+            #     self.log(f"Union = {show_set(sets)}", verbosity=3)
+            # R = R.intersection(sets)
             X = X.union(C_)
 
         if self.env["debug"]:
@@ -604,6 +630,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def _explain_assignment(self, x_enc_a, frm=None):
         # If fully integer, we can check if the tables are feasible yet
         for i, (X_enc, T_enc, parts, table) in enumerate(self.tables, start=INDEX):
+            # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
             A_enc = [x_enc_a[x_enc_i] for x_enc_i in X_enc]
             A_enc_ = assign_mipsol(A_enc)
 
@@ -781,6 +808,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         for cpm_expr in cpm_expressions:
             if cpm_expr.name == "table":
                 area = get_table_area(cpm_expr)
+                if self.env["debug"]:
+                    print(f"table of {area}:", cpm_expr)
                 if area >= self.env["cutoff"]:
                     if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
                         cpm_expr = normalize_table(cpm_expr)
