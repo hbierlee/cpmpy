@@ -491,7 +491,7 @@ def main(args):
     args_ = {
         k: v
         for k, v in vars(args).items()
-        if v is not None and k not in ("cp_cuts", "analyze", "glob_alias")
+        if v is not None and k not in ("cp_cuts", "analyze", "glob_alias", "dry")
     }
 
     if not args_["verbose"]:
@@ -504,6 +504,8 @@ def main(args):
 
     print("Experiments:")
     pprint.pprint(experiments)
+    if args.dry:
+        exit(0)
 
     for experiment in experiments:
         print("Run", experiment)
@@ -543,5 +545,6 @@ if __name__ == "__main__":
     parser.add_argument('--checker-path', type=str, help='Path to the XCSP3 solution checker JAR file')
     parser.add_argument('--profile', type=pathlib.Path, help='Profile')
     parser.add_argument('--analyze', action='store_true', help='Analyze results')
+    parser.add_argument('--dry','-d', action='store_true', help='Dry run')
     
     main(parser.parse_args())

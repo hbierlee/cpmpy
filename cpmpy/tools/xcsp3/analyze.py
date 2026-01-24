@@ -227,10 +227,6 @@ def xcsp3_stats(df, time_limit=None, save=None):
         areas = [t["area"] for t in metadata["tables"]]
         return [metadata["area"], len(areas), statistics.mean(areas), statistics.stdev(areas)]
 
-    # runs = df['run'].unique()
-    # if len(runs) > 1:
-    #     df['alias'] = df['alias'] + "-" + df['run']
-
     df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
     df[["area", "count", "mean", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
     # df["area"], df["count"] = df["file_name"].map(get_metadata)
@@ -428,11 +424,12 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
 
-    df['alias'] += '.'
-    if False:
-        runs = df['run'].unique()
-        if len(runs) > 1:
+    if True:
+        if len(df['run'].unique()) > 1:
             df['alias'] = df['alias'] + "-" + df['run']
+
+    df['alias'] += '.'
+
 
     if glob_alias:
         df = df.drop(df[~df["alias"].map(lambda alias: any(g in alias for g in glob_alias))].index)
@@ -444,7 +441,6 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     if solved_only:
         df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset((OPT, UNS)), axis=1)]
-    df = df[~(df['alias']).isin(["lazy_gurobi-no_shrink"])]
 
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_rows", None)
