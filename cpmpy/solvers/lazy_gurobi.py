@@ -339,7 +339,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         while C - X:
             j = [3, 7, 0][i] if self.env["example2"] else choose(C - X)
 
-            a_j = min((k - RS[r] for r in R - R_tight if T_enc[r, j] == 1), default=None)
+            a_j = min((k - RS[r] for r in R if T_enc[r, j] == 1), default=None)
             if a_j is None:
                 break
 
@@ -351,8 +351,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # assert j not in C_enc # TODO [peter] can happen?
             C_enc[j] = a_j
             RS = RS + a_j * T_enc.T[j]
-            N_tight = tight(R - R_tight, RS)
-            R_tight = R_tight.union(N_tight)
+            N_tight = tight(R, RS)
+
+            R_tight |= N_tight
+            R -= R_tight
 
             X = X.union(union(cols(T_enc, r) for r in N_tight))
 
@@ -402,11 +404,17 @@ class CPM_lazy_gurobi(CPM_gurobi):
         self.env["cuts"].append({"from": frm})
 
         m = len(T_enc)  # number of cols
-        W = set(i for i, a in enumerate(A_enc) if is_ge(a, 1.0))  # find a == 1.0
+        W = np.argwhere(is_ge(A_enc, 1.0))  # find a == 1.0
+
+        # W = set(i for i, a in enumerate(A_enc) if is_ge(a, 1.0))  # find a == 1.0
         # W = set(i for i, a in enumerate(A_enc) if is_eq(a, 1.0))  # find a == 1.0
 
         # F = set(i for i, a in enumerate(A_enc) if not is_integral(a))
+        W = set(W.flatten())
         F = set(i for i in set(range(len(A_enc))) - W if is_gt(A_enc[i], 0.0))  # find 0 < a < 1
+        # F = set(np.argwhere(is_gt(np.delete(A_enc, W), 0.0)).flatten())  # much slower
+        # F = set(np.argwhere(is_gt(A_enc, 0.0) & is_lt(A_enc, 1.0)).flatten())  # slightly slower
+
         # assert not is_integer_solution(A_enc[i] for i in F), f"F should hold only fractional, but was: {F}"
         X = set()  # columns added to cut
         R = set(range(len(T_enc)))  # remaining columns
@@ -477,18 +485,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             s += 1
 
-            def C(v, l):
-                # TODO can be further improve by iterating over the relevant part
-                # return v == is_gt(v[i], 0.0)
-                # c = list(i for i in l if is_gt(v[i], 0.0))
-                c = set(i for i in l if is_gt(v[i], 0.0))
-                if self.env["debug"]:
-                    self.log(f"C({v}, {show_set(l)}) = {show_set(c)}", verbosity=3)
+            def C(A_enc, l):
+                return set(i for i in l if is_gt(A_enc[i], 0.0))
 
-                return c
+                # TODO much slower but ..
+                # l = np.fromiter(l, dtype=int)
+                # c = l[np.argwhere(is_gt(A_enc[l], 0.0))]
+                # return set(c.flatten())
+
+                # if self.env["debug"]:
+                #     self.log(f"C({A_enc}, {show_set(l)}) = {show_set(c)}", verbosity=3)
 
             C_ = C(A_enc, l)
-            # C = {}
             # R = {2,3}
             # [     3   4     ]
             # [ 0 1 1 0 1 0 0 ]  Y
@@ -496,13 +504,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # [ 0 0 1 0 1 1 0 ]  N
             # keep the rows which have
             # R = set(r for r in R if np.any(T_enc[r, C_]))
+            # T_enc[].argwhere
             R = set(r for r in R if any(T_enc[r, i] for i in C_))
             # sets = union(rows(T_enc, i) for i in C_)
             # print("C", sets)
             # if self.env["debug"]:
             #     self.log(f"Union = {show_set(sets)}", verbosity=3)
             # R = R.intersection(sets)
-            X = X.union(C_)
+            X |= C_
 
         if self.env["debug"]:
             self.log(f"by explanation of size ({len(X)}): {show_set(X)}")
@@ -631,13 +640,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # If fully integer, we can check if the tables are feasible yet
         for i, (X_enc, T_enc, parts, table) in enumerate(self.tables, start=INDEX):
             # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
-            A_enc = [x_enc_a[x_enc_i] for x_enc_i in X_enc]
-            A_enc_ = assign_mipsol(A_enc)
+            A_enc = np.fromiter((x_enc_a[x_enc_i] for x_enc_i in X_enc), dtype=float)
+            A_enc_ = A_enc > 0.5
+            # A_enc_ = assign_mipsol(A_enc)
 
             # TODO figure out when can be skipped
             # if frm == "MIPNODE-OPT" and is_integer_solution(A_enc) and
             if frm == "MIPSOL":
-                if A_enc_ in T_enc.tolist():
+                if any((A_enc_ == T_enc_i).all() for T_enc_i in T_enc):
                     if self.env["debug"]:
                         self.log(f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{T_enc}")
                     # assert False
