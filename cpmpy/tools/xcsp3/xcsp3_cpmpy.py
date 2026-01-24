@@ -617,6 +617,7 @@ def xcsp3_cpmpy(
         verbose: bool = False,
         solver_kwargs: Optional[dict] = {},
         solve_kwargs: Optional[dict] = {},
+        tmpdir: Optional[pathlib.Path] = None,
 ):
     if not verbose:
         warnings.filterwarnings("ignore")
