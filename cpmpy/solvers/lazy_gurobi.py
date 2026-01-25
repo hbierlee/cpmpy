@@ -18,8 +18,8 @@ from cpmpy.expressions.core import Comparison, Operator
 from cpmpy.expressions.utils import is_true_cst, is_false_cst, show_assignment, dom_size
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.solvers.gurobi import CPM_gurobi
-from line_profiler import profile
-from memory_profiler import profile as mem_profile
+# from line_profiler import profile
+# from memory_profiler import profile as mem_profile
 
 # https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
 # Functions for approximate comparison of floating point numbers
@@ -322,6 +322,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C = C - {i}
         return C
 
+    # @profile
     def gencoverlift(self, S, C_enc, k, T_enc):
         if self.env["debug"]:
             self.log("gencoverlift", verbosity=3)
@@ -433,6 +434,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
+    # @profile
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
@@ -706,6 +708,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return solution_callback
 
+    # @profile
     def explanation_to_expr(self, explanation, A_enc, X_enc, T_enc, frm, A_enc_):
         (X, C_enc, k) = explanation
         expr = cp.sum(C_enc[X] * X_enc[X]) <= k
@@ -839,6 +842,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         # assert len(sols) >= len(T_enc), f"{sols} != {len(T_enc)} for checker {self.env['checker']}"
 
+    # @mem_profile
     def solve(self, time_limit=None, solution_callback=None, env=None, **kwargs):
         """
         Call the gurobi solver with cut generation
