@@ -502,7 +502,7 @@ def main(args):
         filters=[("alias", args.glob_alias)] if args.glob_alias else []
     ) if args.cp_cuts else [args_]
 
-    print("Experiments:")
+    print("Experiments:", ", ".join(e['alias'] for e in experiments))
     pprint.pprint(experiments)
     assert experiments
 
