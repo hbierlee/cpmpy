@@ -102,9 +102,9 @@ def show_set(S, index=INDEX):
 
 def show(S, index=INDEX):
     if isinstance(S, collections.abc.Iterable):
-        show_set(S, index=index)
+        return show_set(S, index=index)
     elif isinstance(S, (int, np.integer)):
-        show_ind(S, index=index)
+        return show_ind(S, index=index)
     else:
         raise TypeError(f"{S}, {type(S)}")
 
@@ -141,7 +141,11 @@ def union(sets):
 def encode(X, T):
     dom_sizes = [dom_size(x) for x in X]
     width = sum(dom_sizes)
-    T_enc = np.zeros((len(T), width), dtype=bool)
+    T_enc = np.zeros((len(T), width), dtype=np.bool)
+
+    # from scipy.sparse import bsr_array, csr_matrix
+    # return csr_matrix(T_enc)
+
     for t, t_enc_i in zip(T, T_enc):
         offset = 0
         for x, x_width, a in zip(X, dom_sizes, t):
@@ -182,7 +186,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "heuristic": Heuristic.GREEDY,
             "cutoff": 0,
             "shrink": False,
-            "fractional": True,
+            "fractional": False,
             "coverlift": False,
             "cuts": [],
             "max_iterations": None,
@@ -247,8 +251,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["debug"]:
             self.log(show_df, verbosity=2)
 
-        with open("cuts.json", mode="w") as f:
-            json.dump(self.env["cuts"], f, cls=SetEncoder, ensure_ascii=False, indent=2)
+        # with open("cuts.json", mode="w") as f:
+        #     json.dump(self.env["cuts"], f, cls=SetEncoder, ensure_ascii=False, indent=2)
 
     def stats(self):
         if self.env["debug"]:
@@ -316,6 +320,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         def tight(R, RS):
             # TODO [peter] incorrect def in alg?
             # return {r for r in R if sum(T_enc[r, i] for i in S) == k}
+            # return {r for r in R if is_eq(RS[r], k)}
             return {r for r in R if is_eq(RS[r], k)}
 
         RS = [sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc]
@@ -380,10 +385,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["debug"]:
             self.log("Explain", end="\n")
-            self.log(" ", np.array(A_enc), verbosity=2, indent=0)
-            if frm == "MIPSOL":
-                self.log("", np.array(assign_mipsol(A_enc)), verbosity=2, indent=0)
-            self.log(np.array(T_enc), verbosity=2, indent=0)
+            self.log(" ", np.astype(A_enc, int), verbosity=2, indent=0)
+            # if frm == "MIPSOL":
+            #     self.log("", np.array(assign_mipsol(A_enc)), verbosity=2, indent=0)
+            self.log(np.astype(T_enc, int), verbosity=2, indent=0)
             # self.log(
             #     "",
             #     np.array(
@@ -415,34 +420,36 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # F = set(np.argwhere(is_gt(np.delete(A_enc, W), 0.0)).flatten())  # much slower
         # F = set(np.argwhere(is_gt(A_enc, 0.0) & is_lt(A_enc, 1.0)).flatten())  # slightly slower
 
-        # assert not is_integer_solution(A_enc[i] for i in F), f"F should hold only fractional, but was: {F}"
-        X = set()  # columns added to cut
-        R = set(range(len(T_enc)))  # remaining columns
+        # # assert not is_integer_solution(A_enc[i] for i in F), f"F should hold only fractional, but was: {F}"
+        # X = set()  # columns added to cut
+        # R = set(range(m))  # remaining columns
 
         # D = set(r for r in range(m) if cols(T_enc, r) <= W.union(F))  # difficult rows; either frac/whole
         # [   2 3   4     ]
         # [ 0 1 1 0 1 0 0 ]  Y
         # [ 0 0 1 0 1 0 0 ]  Y
         # [ 0 0 1 0 1 1 0 ]  N
-        WF = np.zeros(len(T_enc.T), dtype=bool)
-        WF[list(W.union(F))] = True
-        D = set(r for r in range(m) if T_enc[r, :] in WF)  # difficult rows; either frac/whole
-        U = set(i for i in F if all(T_enc[r, i] == 0 for r in D))  # frac except difficult
-
+        # WF = np.zeros(len(T_enc.T), dtype=bool)
         if self.env["debug"]:
             self.log(f"W = {show_set(W)}", verbosity=3)
             self.log(f"F = {show_set(F)}", verbosity=3)
-            self.log(f"D = {show_set(D)}", verbosity=3)
-            self.log(f"U = {show_set(U)}", verbosity=3)
 
         if F:
+            WF = np.zeros(T_enc.shape[1], dtype=bool)
+            WF[list(W.union(F))] = True
+            D = set(r for r in range(m) if T_enc[r, :] in WF)  # difficult rows; either frac/whole
+            U = set(i for i in F if all(T_enc[r, i] == 0 for r in D))  # frac except difficult
+            if self.env["debug"]:
+                self.log(f"D = {show_set(D)}", verbosity=3)
+                self.log(f"U = {show_set(U)}", verbosity=3)
+
             if not U:
                 if self.env["debug"]:
                     self.log("unexplainable", indent=2)
                     self.log("because U is empty", verbosity=3, indent=4)
                 return
             else:
-                i = self.choose(U, T_enc, R, heuristic=self.env["heuristic"])
+                i = self.choose(U, T_enc, set(range(m)), heuristic=self.env["heuristic"])
                 if self.env["debug"]:
                     self.log(f"chosen {i + INDEX}", verbosity=3, indent=self.indent + 2)
 
@@ -459,22 +466,20 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         choices = set(parts) - V
 
+        R = np.ones(m, dtype=np.bool)
         for iteration in itertools.count(start=1):
-            self.check_max_iterations(iteration)
-            self.indent = 1
             if self.env["debug"]:
+                self.check_max_iterations(iteration)
+                self.indent = 1
                 self.log(f"X = {show_set(X)}", verbosity=3)
                 self.log(f"V = {show_set(V)}", verbosity=3)
-                self.log(f"R = {show_set(R)}", verbosity=3)
+                # self.log(f"R = {show_set(R)}", verbosity=3)
                 self.log(f"s = {s}", verbosity=3)
 
-            if not R:
+            if not R.any():
                 break
 
             if not choices:
-                # with open("/tmp/failed_cut_nc.pkl", "wb") as f:
-                #     print("store", (A_enc, T_enc, parts, frm))
-                #     pickle.dump((A_enc, T_enc, parts, frm), f)
                 return  # TODO [peter]
 
             # TODO [peter] Heuristic, and V cna be removed
@@ -497,20 +502,21 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 #     self.log(f"C({A_enc}, {show_set(l)}) = {show_set(c)}", verbosity=3)
 
             C_ = C(A_enc, l)
-            # R = {2,3}
-            # [     3   4     ]
-            # [ 0 1 1 0 1 0 0 ]  Y
-            # [ 0 0 1 0 1 0 0 ]  Y
-            # [ 0 0 1 0 1 1 0 ]  N
-            # keep the rows which have
-            # R = set(r for r in R if np.any(T_enc[r, C_]))
-            # T_enc[].argwhere
-            R = set(r for r in R if any(T_enc[r, i] for i in C_))
-            # sets = union(rows(T_enc, i) for i in C_)
-            # print("C", sets)
-            # if self.env["debug"]:
-            #     self.log(f"Union = {show_set(sets)}", verbosity=3)
-            # R = R.intersection(sets)
+            # R = {3,5}
+            # [     1   1     ]
+            # [ 0 1 1 0 0 0 0 ]  Y
+            # [ 0 0 0 0 1 0 0 ]  Y
+            # [ 0 0 0 0 1 1 0 ]  Y
+            # [ 0 0 0 1 0 1 0 ]  N
+            # [ 0 0 0 0 0 1 0 ]  N
+            #       -   -
+            # [     1   0     ]  Y
+            # [     0   1     ]  Y
+            # [     0   1     ]  Y
+            # [     0   0     ]  N
+            # [     0   0     ]  N
+            # keep only rows which are in R and which have an 1 where A_enc has a 1
+            R = R & np.any(T_enc[:, list(C_)], axis=1)
             X |= C_
 
         if self.env["debug"]:
@@ -630,7 +636,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             finally:
                 time_cb = time.time() - time_cb
                 if self.env["debug"]:
-                    self.log(f"end callback, dt = {time_cb}", verbosity=3)
+                    self.log(f"end callback, dt = {time_cb}", verbosity=4)
                 self.env["time_cb"] += time_cb
                 # assert time_cb < 1.0 or self.env["debug"]
 
@@ -647,7 +653,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # TODO figure out when can be skipped
             # if frm == "MIPNODE-OPT" and is_integer_solution(A_enc) and
             if frm == "MIPSOL":
-                if any((A_enc_ == T_enc_i).all() for T_enc_i in T_enc):
+                if (T_enc[:] == A_enc_).all(1).any():
                     if self.env["debug"]:
                         self.log(f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{T_enc}")
                     # assert False
@@ -824,7 +830,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
                         cpm_expr = normalize_table(cpm_expr)
                     X, T = cpm_expr.args
-                    if len(T) == 0:
+                    # only check after normalize, since normalize may remove all rows
+                    if not len(T):
                         return [cp.BoolVal(False)]
                     assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
 
