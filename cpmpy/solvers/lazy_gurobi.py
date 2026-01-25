@@ -105,6 +105,8 @@ def show(S, index=INDEX):
         return show_set(S, index=index)
     elif isinstance(S, (int, np.integer)):
         return show_ind(S, index=index)
+    elif isinstance(S, (bool, np.bool)):
+        return "T" if S else "F"
     else:
         raise TypeError(f"{S}, {type(S)}")
 
@@ -187,7 +189,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "cutoff": 0,
             "shrink": False,
             "fractional": False,
-            "coverlift": False,
+            "coverlift": True,
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
@@ -260,7 +262,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 ", ".join(f"{k}={self.env[k]}" for k in ["shrink", "heuristic", "fractional", "coverlift"]),
                 verbosity=0,
             )
-        self.print_cuts()
+
+        if self.env["verbosity"] >= 4:
+            self.print_cuts()
 
         cuts = [c for c in self.env["cuts"] if "size" in c]
         cuts_mipsol = [c for c in cuts if c["from"] == "MIPSOL"]
@@ -314,23 +318,31 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def gencoverlift(self, S, C_enc, k, T_enc):
         if self.env["debug"]:
             self.log("gencoverlift", verbosity=3)
-        R = set(range(len(T_enc)))  # rows
+
         C = set(range(len(T_enc.T)))  # cols
+        R = np.ones(len(T_enc), dtype=np.bool)
 
         def tight(R, RS):
             # TODO [peter] incorrect def in alg?
-            # return {r for r in R if sum(T_enc[r, i] for i in S) == k}
-            # return {r for r in R if is_eq(RS[r], k)}
-            return {r for r in R if is_eq(RS[r], k)}
+            return R & is_eq(RS, k)
 
-        RS = [sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc]
+        # RS = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
+        RS = T_enc[:, list(S)].sum(axis=1)
+        if self.env["debug"]:
+            RS_ = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
+            assert (
+                RS == RS_
+            ).all(), f"{RS} !+ {RS_}"
+
         R_tight = tight(R, RS)
-        X = union(cols(T_enc, r) for r in R_tight)
+        X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
+        C -= X
+
         if self.env["debug"]:
             self.log("S", show_set(S), verbosity=3)
             self.log("C_enc, k", C_enc, k, verbosity=3)
             self.log("RS", RS, verbosity=3)
-            self.log("R", show_set(R_tight), verbosity=3)
+            self.log("R_tight", R_tight, verbosity=3)
             self.log("X", show_set(X), verbosity=3)
             self.log("C", show_set(C), verbosity=3)
         # TODO [peter] C missing from alg
@@ -341,41 +353,81 @@ class CPM_lazy_gurobi(CPM_gurobi):
             return min(S)
 
         i = 0
-        while C - X:
-            j = [3, 7, 0][i] if self.env["example2"] else choose(C - X)
+        while C:
+            assert (
+                not self.env["example2"]
+                or (
+                    R_tight
+                    == [
+                        [False, True, False, False, True],
+                        [False, True, True, False, True],
+                        [True, True, True, False, True],
+                    ][i]
+                ).all()
+            ), f"{i}; {R_tight}"
 
-            a_j = min((k - RS[r] for r in R if T_enc[r, j] == 1), default=None)
-            if a_j is None:
+            assert not self.env["example2"] or (
+                X
+                == {
+                    i - 1
+                    for i in [{2, 3, 5, 6, 9}, {2, 3, 4, 5, 6, 7, 9, 10}, {2, 3, 4, 5, 6, 7, 8, 9, 10}][i]
+                }
+            ), f"{i}; {show_set(X)}"
+
+            j = [3, 7, 0][i] if self.env["example2"] else choose(C)
+
+            # TODO just ~R_tight?
+            RT = (R > R_tight) & T_enc[:, j]
+            if (~RT).all():
                 break
+            KRS = k - RS[RT]
+            a_j = np.min(KRS)
+
+            assert not self.env["example2"] or a_j == [2, 1, 1][i]
 
             S.add(j)  # S = S + {j}
-            if self.env["debug"]:
-                self.log("j", show_ind(j), verbosity=3)
-                self.log("S", show_set(S), verbosity=3)
-
             # assert j not in C_enc # TODO [peter] can happen?
             C_enc[j] = a_j
+
+            assert (
+                not self.env["example2"]
+                or (RS == [[1.0, 2.0, 0.0, 1.0, 2.0], [1.0, 2.0, 2.0, 1.0, 2.0], RS][i]).all()
+            ), f"{i}; {RS}"
+
             RS = RS + a_j * T_enc.T[j]
-            N_tight = tight(R, RS)
 
+            N_tight = tight(R > R_tight, RS)
+
+            # R_tight &= N_tight
+
+            # R -= R_tight
             R_tight |= N_tight
-            R -= R_tight
+            # 11 -> 0
+            # 10 -> 1
+            # 01 -> 0
+            # 00 -> 0
 
-            X = X.union(union(cols(T_enc, r) for r in N_tight))
+            X |= union(cols(T_enc, r) for r in N_tight.nonzero()[0])
+
+            cl = len(C)
+            C -= X
+            assert len(C) < cl
 
             if self.env["debug"]:
+                self.log(f"j = {show(j)}", verbosity=3)
+                self.log("S", show_set(S), verbosity=3)
+                self.log("terms", C_enc, verbosity=3)
                 self.log("a_j", a_j, verbosity=3)
                 self.log("A", a_j * T_enc.T[j], verbosity=3)
                 self.log("RS", RS, verbosity=3)
-                self.log("N_tight", show_set(N_tight), verbosity=3)
-                self.log("R_tight", show_set(R_tight), verbosity=3)
+                self.log("R_tight", R_tight, verbosity=3)
+                self.log("N_tight", N_tight, verbosity=3)
                 self.log("X", show_set(X), verbosity=3)
+                self.log("C", show_set(C), verbosity=3)
                 i += 1
                 self.check_max_iterations(i)
+            break
 
-        if self.env["debug"]:
-            self.log("S", show_set(S), verbosity=3)
-            self.log("terms", C_enc, verbosity=3)
         return S, C_enc, k
 
     def explain(self, A_enc, T_enc, parts, frm=None):
@@ -555,7 +607,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def check_max_iterations(self, i):
         # Loop termination for debug purposes
         if self.env["max_iterations"] is not None:
-            assert i <= self.env["max_iterations"]
+            assert i <= self.env["max_iterations"], "Out of iterations"
 
     def get_solution_callback(self):
         from gurobipy import GRB
@@ -597,21 +649,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["debug"]:
                     self.log(frm, x_enc_a, verbosity=2)
                 feasible = True  # assume feasible
-                for explanation in self._explain_assignment(x_enc_a, frm=frm):
-                    feasible = False  # any explanation means not feasible
-                    expr = [explanation]
-                    # expr = self.transform(explanation)
-                    assert len(expr) == 1
-                    expr = expr[0]
+                for expr in self._explain_assignment(x_enc_a, frm=frm):
+                    feasible = False  # any expr means not feasible
 
                     if isinstance(expr, Comparison) and expr.name == "<=":
                         assert isinstance(expr.args[0], Operator)
-                        expr, k = explanation.args
-                        cut = (
-                            self._make_numexpr(expr) <= k
-                            # gp.quicksum([self.solver_var(x) for x in expr.args[0].args])
-                            # <= explanation.args[1]
-                        )
+                        expr, k = expr.args
+                        cut = self._make_numexpr(expr) <= k
                         what.cbLazy(cut)
                     elif is_false_cst(expr):
                         raise Infeasible
@@ -641,6 +685,39 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # assert time_cb < 1.0 or self.env["debug"]
 
         return solution_callback
+
+    def explanation_to_expr(self, explanation, A_enc, X_enc, T_enc, frm, A_enc_):
+        (X, C_enc, k) = explanation
+        expr = cp.sum(C_enc[i] * X_enc[i] for i in X) <= k
+        if isinstance(expr, bool):
+            expr = cp.BoolVal(expr)
+
+        if self.env["debug"]:
+            self.log(
+                f"cons == {expr}",
+                indent=2,
+            )
+
+        self.env["cuts"][-1]["expr"] = expr
+
+        # if self.env["debug"]:
+        #     self.check_explanation(expr, X_enc, A_enc, T_enc, table)
+
+        if frm == "MIPSOL" and self.env["debug"]:
+            for x, a in zip(X_enc, A_enc_):
+                x._value = a
+            assert expr.value() is False, (
+                f"Did not cut off assignment:\n\n{show_assignment(X_enc)}\n\nwith exp {expr} for table:\n\n {np.array(A_enc_)}\n{T_enc}"
+            )
+            for T_enc_i in T_enc:
+                if True:
+                    for x_i, a_i_j in zip(X_enc, T_enc_i):
+                        x_i._value = bool(a_i_j)
+                    assert expr.value() is True, (
+                        f"Explanation:\n\n{expr}\n\ncut off row\n\n{T_enc_i}\n({show_assignment(X_enc)})\n\nfor failure {A_enc_}"
+                    )
+
+        return expr
 
     def _explain_assignment(self, x_enc_a, frm=None):
         # If fully integer, we can check if the tables are feasible yet
@@ -682,42 +759,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         ]
                     ]
                 if explanation:
-                    X, C_enc, k = explanation
-                    expr = cp.sum(C_enc[i] * X_enc[i] for i in X) <= k
-                    if isinstance(expr, bool):
-                        expr = cp.BoolVal(expr)
-                    if self.env["debug"]:
-                        self.log(
-                            f"cons == {expr}",
-                            indent=2,
-                        )
-                    self.env["cuts"][-1]["expr"] = expr
-
-                    # if self.env["debug"]:
-                    #     self.check_explanation(expr, X_enc, A_enc, T_enc, table)
-
-                    if frm == "MIPSOL" and self.env["debug"]:
-                        for x, a in zip(X_enc, A_enc_):
-                            x._value = a
-                        assert expr.value() is False, (
-                            f"Did not cut off assignment:\n\n{show_assignment(X_enc)}\n\nwith exp {expr} for table:\n\n {np.array(A_enc_)}\n{T_enc}"
-                        )
-                        for T_enc_i in T_enc:
-                            if True:
-                                for x_i, a_i_j in zip(X_enc, T_enc_i):
-                                    x_i._value = bool(a_i_j)
-                                assert expr.value() is True, (
-                                    f"Explanation:\n\n{expr}\n\ncut off row\n\n{T_enc_i}\n({show_assignment(X_enc)})\n\nfor failure {A_enc_}"
-                                )
-
-                    yield expr
+                    yield self.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm, A_enc_)
                 elif frm == "MIPSOL":  # unsat
                     raise Infeasible
             except Infeasible:
                 raise Infeasible
             except Exception as e:
                 with open("/tmp/failed_cut.pkl", "wb") as f:
-                    pickle.dump((A_enc, T_enc, parts, frm), f)
+                    pickle.dump((X_enc, A_enc, T_enc, parts, frm, A_enc_), f)
                 raise e
 
     def add(self, cons):
@@ -842,7 +891,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         self.log("T =", verbosity=3)
                         self.log(T, verbosity=3)
                         self.log("T_enc =", verbosity=3)
-                        self.log(T_enc, verbosity=3)
+                        self.log(np.astype(T_enc, int), verbosity=3)
 
                     for x in X:
                         x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(

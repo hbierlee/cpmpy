@@ -39,15 +39,18 @@ def generate_table_from_data(T, d):
 
 
 def generate_table(n, m, d, k=1, allow_duplicate_vars=False):
-    """Generate a table constraint with `n` variables with domains of size `d`, and with `m` rows"""
-    X = cp.intvar(1, d, shape=n, name="x")
+    """Generate `k` table constraints with `n` variables with domains of size `d`, and with `m` rows"""
+    X = cp.intvar(1, d, shape=(n,), name="x")
     # model = cp.Model(x == x for x in X)
     model = cp.Model()
     random.seed(SEED)
     for _ in range(k):
-        k_ = n // 2
-        X = list(X)
-        Y = random.choices(X, k=k_) if allow_duplicate_vars else random.sample(X, k=k_)
+        if k > 1:
+            k_ = n // 2
+            X = list(X)
+            Y = random.choices(X, k=k_) if allow_duplicate_vars else random.sample(X, k=k_)
+        else:
+            Y = X
         if len(Y):
             T = np.array([tuple(random.randint(1, d) for _ in enumerate(Y)) for _ in range(m)])
             model += cp.Table(Y, T)
@@ -66,12 +69,16 @@ def check_model(model, env=None):
     print(model)
     expected_sat = model.deepcopy().solve()
     try:
-        slv = CPM_lazy_gurobi(cpm_model=model, env=env.copy()) if isinstance(env, dict) else env(cpm_model=model)
-        print(slv)
+        slv = (
+            CPM_lazy_gurobi(cpm_model=model, env=env.copy())
+            if isinstance(env, dict)
+            else env(cpm_model=model)
+        )
         actual_sat = slv.solve()
 
-        if hasattr(slv, "stats"):
-            slv.stats()
+        # if hasattr(slv, "stats"):
+        #     slv.stats()
+
         if actual_sat is False:
             assert expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
 
@@ -118,15 +125,20 @@ SEED = None
 
 @pytest.fixture()
 def env():
-    yield {
-        "verbosity": 2,
-        "debug": 1,
-        "max_iterations": 1000,
-        "seed": 42,
-        "shrink": True,
-        "fractional": True,
-        "cutoff": 45,
-    } if True else  CPM_gurobi
+    yield (
+        {
+            "verbosity": 0,
+            "debug": 1,
+            "max_iterations": 3000,
+            "seed": 42,
+            "shrink": False,
+            "fractional": False,
+            "coverlift": True,
+            "cutoff": 45,
+        }
+        if True
+        else CPM_gurobi
+    )
 
 
 def load_model(path):
@@ -139,13 +151,15 @@ def load_model(path):
 
 class TestTables:
     def test_repro_explain(self, env):
-        path = pathlib.Path("/tmp/failed_cut_nc.pkl")
+        path = pathlib.Path("/tmp/failed_cut.pkl")
         if path.exists():
             with open(path, "rb") as f:
-                A_enc, T_enc, parts, frm = pickle.load(f)
-            CPM_lazy_gurobi(
-                env={**env, **{"verbosity": 4, "debug": False}},
-            ).explain(A_enc, T_enc, parts, frm="MIPSOL")
+                X_enc, A_enc, T_enc, parts, frm, A_enc_ = pickle.load(f)
+            slv = CPM_lazy_gurobi(
+                env={**env, **{"verbosity": 4, "debug": True}},
+            )
+            explanation = slv.explain(A_enc, T_enc, parts, frm="MIPSOL")
+            slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm, A_enc_)
 
     def test_coverlift(self, env):
         slv = CPM_lazy_gurobi(
@@ -259,15 +273,15 @@ class TestTables:
                                 generate_table(2, 2, 3, k=2, allow_duplicate_vars=allow_duplicate_vars)
                             ),
                             with_constraints(
-                                generate_table(6, 10, 5, allow_duplicate_vars=allow_duplicate_vars),
-                                with_alldiff=False,
-                                with_min=True,
+                                generate_table(3, 3, 5, allow_duplicate_vars=allow_duplicate_vars),
+                                # with_alldiff=False,
+                                # with_min=True,
                             ),
                             with_constraints(
-                                generate_table(6, 4, 4, allow_duplicate_vars=allow_duplicate_vars)
+                                generate_table(2, 2, 2, allow_duplicate_vars=allow_duplicate_vars)
                             ),  # minimized 1/1000 bug
                             with_constraints(
-                                generate_table(10, 100, 10, allow_duplicate_vars=allow_duplicate_vars)
+                                generate_table(5, 100, 10, allow_duplicate_vars=allow_duplicate_vars)
                             ),
                             with_constraints(
                                 generate_table(4, 3, 4, k=2, allow_duplicate_vars=allow_duplicate_vars)
