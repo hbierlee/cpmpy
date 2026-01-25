@@ -426,7 +426,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log("C", show_set(C), verbosity=3)
                 i += 1
                 self.check_max_iterations(i)
-            break
 
         return S, C_enc, k
 
