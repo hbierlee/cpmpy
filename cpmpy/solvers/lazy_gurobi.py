@@ -24,6 +24,10 @@ from cpmpy.solvers.gurobi import CPM_gurobi
 EPS = 1e-6
 
 
+def none(A):
+    return not A.any()
+
+
 def is_eq(x, y):
     return abs(x - y) <= EPS
 
@@ -234,6 +238,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["feasible"] = cpm_model.solve()
 
     def log(self, *mess, verbosity=1, end="\n", indent=None):
+        assert self.env["debug"]
         if verbosity <= self.env["verbosity"]:
             indent = self.indent if indent is None else indent
             mess = " " * indent * 2 + " ".join(str(m) for m in mess) + end
@@ -319,7 +324,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["debug"]:
             self.log("gencoverlift", verbosity=3)
 
-        C = set(range(len(T_enc.T)))  # cols
         R = np.ones(len(T_enc), dtype=np.bool)
 
         def tight(R, RS):
@@ -329,19 +333,16 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # RS = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
         # X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
 
-        RS = T_enc[:, list(S)].sum(axis=1)
+        RS = T_enc[:, S].sum(axis=1)
         R_tight = tight(R, RS)
         X = (T_enc.T & R_tight).any(1)
 
-        # C -= X
-
         if self.env["debug"]:
-            self.log("S", show_set(S), verbosity=3)
+            self.log("S", S, verbosity=3)
             self.log("C_enc, k", C_enc, k, verbosity=3)
             self.log("RS", RS, verbosity=3)
             self.log("R_tight", R_tight, verbosity=3)
             self.log("X", show_set(X.nonzero()), verbosity=3)
-            # self.log("C", show_set(C), verbosity=3)
         # TODO [peter] C missing from alg
 
         def choose(S):
@@ -388,7 +389,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             assert not self.env["example2"] or a_j == [2, 1, 1][i]
 
-            S.add(j)  # S = S + {j}
+            S[j] = True
             # assert j not in C_enc # TODO [peter] can happen?
             C_enc[j] = a_j
 
@@ -415,7 +416,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             X |= T_enc[N_tight, :].any(0)
             # X = T_enc[R_tight, :].any(0)  # slightly slower
 
-
             if self.env["debug"]:
                 self.log(f"j = {show(j)}", verbosity=3)
                 self.log("S", show_set(S), verbosity=3)
@@ -426,7 +426,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log("R_tight", R_tight, verbosity=3)
                 self.log("N_tight", N_tight, verbosity=3)
                 self.log("X", show_set(X.nonzero()), verbosity=3)
-                self.log("C", show_set(C), verbosity=3)
                 i += 1
                 self.check_max_iterations(i)
 
@@ -463,14 +462,17 @@ class CPM_lazy_gurobi(CPM_gurobi):
         self.env["cuts"].append({"from": frm})
 
         m = len(T_enc)  # number of cols
-        W = np.argwhere(is_ge(A_enc, 1.0))  # find a == 1.0
+        # W = np.argwhere(is_ge(A_enc, 1.0))  # find a == 1.0
+        W = is_ge(A_enc, 1.0)
 
         # W = set(i for i, a in enumerate(A_enc) if is_ge(a, 1.0))  # find a == 1.0
         # W = set(i for i, a in enumerate(A_enc) if is_eq(a, 1.0))  # find a == 1.0
 
         # F = set(i for i, a in enumerate(A_enc) if not is_integral(a))
-        W = set(W.flatten())
-        F = set(i for i in set(range(len(A_enc))) - W if is_gt(A_enc[i], 0.0))  # find 0 < a < 1
+        # W = set(W.flatten())
+        # F = set(i for i in set(range(len(A_enc))) - W if is_gt(A_enc[i], 0.0))  # find 0 < a < 1
+        F = (~W) & is_gt(A_enc, 0.0)
+
         # F = set(np.argwhere(is_gt(np.delete(A_enc, W), 0.0)).flatten())  # much slower
         # F = set(np.argwhere(is_gt(A_enc, 0.0) & is_lt(A_enc, 1.0)).flatten())  # slightly slower
 
@@ -488,11 +490,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"W = {show_set(W)}", verbosity=3)
             self.log(f"F = {show_set(F)}", verbosity=3)
 
-        if F:
+        if F.any():
             WF = np.zeros(T_enc.shape[1], dtype=bool)
             WF[list(W.union(F))] = True
             D = set(r for r in range(m) if T_enc[r, :] in WF)  # difficult rows; either frac/whole
             U = set(i for i in F if all(T_enc[r, i] == 0 for r in D))  # frac except difficult
+            # D = T_enc[W | F, :] # TODO
             if self.env["debug"]:
                 self.log(f"D = {show_set(D)}", verbosity=3)
                 self.log(f"U = {show_set(U)}", verbosity=3)
@@ -509,54 +512,44 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                 # TODO [peter] should be T_hat[i]?
                 R = rows(T_enc, i)
-                X = {i}
-                V = {parts[i]}
+                # X = {i}
+                X = np.zeros(len(T_enc.T), dtype=bool)
+                assert False
+                X[i] = True
                 s = 0
+                # choices = np.unique(parts) - parts[i]
+                choices = np.ones(parts, dtype=bool)
+                choices[parts == i] = False
         else:
-            R = set(range(m))
-            X = set()
-            V = set()
+            R = np.ones(m, dtype=np.bool)
+            X = np.zeros(len(T_enc.T), dtype=bool)
             s = -1
+            choices = np.ones(len(T_enc.T), dtype=bool)
 
-        choices = set(parts) - V
-
-        R = np.ones(m, dtype=np.bool)
         for iteration in itertools.count(start=1):
             if self.env["debug"]:
                 self.check_max_iterations(iteration)
                 self.indent = 1
-                self.log(f"X = {show_set(X)}", verbosity=3)
-                self.log(f"V = {show_set(V)}", verbosity=3)
+                self.log(f"R = {R}", verbosity=3)
+                self.log(f"X = {X}", verbosity=3)
                 # self.log(f"R = {show_set(R)}", verbosity=3)
                 self.log(f"s = {s}", verbosity=3)
+                self.log(f"choices = {choices}", verbosity=3)
 
-            if not R.any():
+            if none(R):
                 break
 
-            if not choices:
-                return  # TODO [peter]
+            if none(choices):
+                return None
 
             # TODO [peter] Heuristic, and V cna be removed
-            l = choices.pop()
-
-            if self.env["debug"]:
-                self.log(f"choose part l = {show_set(l)} out of choices {show_set(choices)}", verbosity=3)
-
-            s += 1
-
-            def C(A_enc, l):
-                return set(i for i in l if is_gt(A_enc[i], 0.0))
-
-                # TODO much slower but ..
-                # l = np.fromiter(l, dtype=int)
-                # c = l[np.argwhere(is_gt(A_enc[l], 0.0))]
-                # return set(c.flatten())
-
-                # if self.env["debug"]:
-                #     self.log(f"C({A_enc}, {show_set(l)}) = {show_set(c)}", verbosity=3)
-
-            C_ = C(A_enc, l)
-            # R = {3,5}
+            choice = choices.argmax()
+            l_parts = parts[choice] == parts
+            choices[l_parts] = False
+            C_ = l_parts & is_gt(A_enc, 0.0)
+            # R = T_enc[R, C_].any(1)
+            R &= T_enc[:, C_].any(1)
+            X |= C_
             # [     1   1     ]
             # [ 0 1 1 0 0 0 0 ]  Y
             # [ 0 0 0 0 1 0 0 ]  Y
@@ -570,11 +563,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # [     0   0     ]  N
             # [     0   0     ]  N
             # keep only rows which are in R and which have an 1 where A_enc has a 1
-            R = R & np.any(T_enc[:, list(C_)], axis=1)
-            X |= C_
+
+            # R = R & np.any(T_enc[:, C_], axis=1)
+            # R &= T_enc[:, C_].any(1)
+            # R &= T_enc[R, list(C_)].any(1)
+
+        # X = X.nonzero()[0]
 
         if self.env["debug"]:
-            self.log(f"by explanation of size ({len(X)}): {show_set(X)}")
+            self.log(f"by explanation of size ({len(X)}): {X}")
 
         if self.env["debug"]:
             self.env["cuts"][-1]["cut"] = X.copy()
@@ -592,8 +589,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     }
             self.env["cuts"][-1]["shrunk"] = shrunk
 
-        C_enc = {s: 1 for s in X}
-        k = len(X) - 1
+        C_enc = np.zeros(len(X), dtype=int)
+        C_enc[X] = 1
+
+        k = X.sum() - 1
 
         def show_cut():
             if self.env["debug"]:
@@ -631,9 +630,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 frm = None
 
                 def cbGetVal(cpm_var, cbGet):
-                    if isinstance(cpm_var, NegBoolView):
-                        return 1.0 - cbGet(self.solver_var(~cpm_var))
-                    return cbGet(self.solver_var(cpm_var))
+                    # if isinstance(cpm_var, NegBoolView):
+                    #     return 1.0 - cbGet(self.solver_var(~cpm_var))
+                    # return cbGet(self.solver_var(cpm_var))
+                    # shortcut some stuff from solver_var ; we know the var exists
+                    return (
+                        (1.0 - cbGet(self._varmap[cpm_var._bv]))
+                        if isinstance(cpm_var, NegBoolView)
+                        else cbGet(self._varmap[cpm_var])
+                    )
 
                 match where:
                     case GRB.Callback.MIPNODE:
@@ -697,7 +702,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def explanation_to_expr(self, explanation, A_enc, X_enc, T_enc, frm, A_enc_):
         (X, C_enc, k) = explanation
-        expr = cp.sum(C_enc[i] * X_enc[i] for i in X) <= k
+        expr = cp.sum(C_enc[X] * X_enc[X]) <= k
         if isinstance(expr, bool):
             expr = cp.BoolVal(expr)
 
@@ -836,7 +841,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         assert solution_callback is None, "For now, no solution_callback in `CPM_lazy_gurobi`"
 
-        self.log("Solving.. ")
+        if self.env["debug"]:
+            self.log("Solving.. ")
 
         try:
             solution_callback = self.get_solution_callback()
@@ -923,14 +929,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     #     1     1    2    2 parts
                     # 1,..2  1..2 3..4 3..4 -> parts
 
-                    parts = []
-                    lst = 0
-                    for i, x_enc in enumerate(x_encs):
-                        # TODO maybe tuple is better depending how frozenset(range) is handled (low-priority perf.)
-                        parts += [frozenset(range(lst, lst + len(x_enc)))] * len(x_enc)
-                        lst += len(x_enc)
+                    parts = np.fromiter((i for i, x_enc in enumerate(x_encs) for _ in x_enc), dtype=int)
 
-                    X_enc = [x_enc_i for x_enc in x_encs for x_enc_i in x_enc]
+                    X_enc = np.fromiter((x_enc_i for x_enc in x_encs for x_enc_i in x_enc), _BoolVarImpl)
                     assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
                     self.tables.append((X_enc, T_enc, parts, cpm_expr))
                 else:
