@@ -327,24 +327,21 @@ class CPM_lazy_gurobi(CPM_gurobi):
             return R & is_eq(RS, k)
 
         # RS = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
-        RS = T_enc[:, list(S)].sum(axis=1)
-        if self.env["debug"]:
-            RS_ = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
-            assert (
-                RS == RS_
-            ).all(), f"{RS} !+ {RS_}"
+        # X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
 
+        RS = T_enc[:, list(S)].sum(axis=1)
         R_tight = tight(R, RS)
-        X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
-        C -= X
+        X = (T_enc.T & R_tight).any(1)
+
+        # C -= X
 
         if self.env["debug"]:
             self.log("S", show_set(S), verbosity=3)
             self.log("C_enc, k", C_enc, k, verbosity=3)
             self.log("RS", RS, verbosity=3)
             self.log("R_tight", R_tight, verbosity=3)
-            self.log("X", show_set(X), verbosity=3)
-            self.log("C", show_set(C), verbosity=3)
+            self.log("X", show_set(X.nonzero()), verbosity=3)
+            # self.log("C", show_set(C), verbosity=3)
         # TODO [peter] C missing from alg
 
         def choose(S):
@@ -353,7 +350,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             return min(S)
 
         i = 0
-        while C:
+        while not X.all():
             assert (
                 not self.env["example2"]
                 or (
@@ -366,18 +363,24 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 ).all()
             ), f"{i}; {R_tight}"
 
-            assert not self.env["example2"] or (
-                X
-                == {
-                    i - 1
-                    for i in [{2, 3, 5, 6, 9}, {2, 3, 4, 5, 6, 7, 9, 10}, {2, 3, 4, 5, 6, 7, 8, 9, 10}][i]
-                }
-            ), f"{i}; {show_set(X)}"
+            assert (
+                not self.env["example2"]
+                or (
+                    X
+                    == [
+                        [False, True, True, False, True, True, False, False, True, False],
+                        [False, True, True, True, True, True, True, False, True, True],
+                        [False, True, True, True, True, True, True, True, True, True],
+                        # [i in s for i in range(len(T_enc.T))]
+                        # for s in [{2, 3, 5, 6, 9}, {2, 3, 4, 5, 6, 7, 9, 10}, {2, 3, 4, 5, 6, 7, 8, 9, 10}]
+                    ][i]
+                ).all()
+            ), f"{i}; {[i + 1 for i in X.nonzero()[0]]}"
 
-            j = [3, 7, 0][i] if self.env["example2"] else choose(C)
+            j = [3, 7, 0][i] if self.env["example2"] else (~X).argmax()
 
             # TODO just ~R_tight?
-            RT = (R > R_tight) & T_enc[:, j]
+            RT = (~R_tight) & T_enc[:, j]
             if (~RT).all():
                 break
             KRS = k - RS[RT]
@@ -396,7 +399,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             RS = RS + a_j * T_enc.T[j]
 
-            N_tight = tight(R > R_tight, RS)
+            N_tight = tight(~R_tight, RS)
 
             # R_tight &= N_tight
 
@@ -407,11 +410,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # 01 -> 0
             # 00 -> 0
 
-            X |= union(cols(T_enc, r) for r in N_tight.nonzero()[0])
+            # X |= union(cols(T_enc, r) for r in N_tight.nonzero()[0])
 
-            cl = len(C)
-            C -= X
-            assert len(C) < cl
+            X |= T_enc[N_tight, :].any(0)
+            # X = T_enc[R_tight, :].any(0)  # slightly slower
+
 
             if self.env["debug"]:
                 self.log(f"j = {show(j)}", verbosity=3)
@@ -422,7 +425,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log("RS", RS, verbosity=3)
                 self.log("R_tight", R_tight, verbosity=3)
                 self.log("N_tight", N_tight, verbosity=3)
-                self.log("X", show_set(X), verbosity=3)
+                self.log("X", show_set(X.nonzero()), verbosity=3)
                 self.log("C", show_set(C), verbosity=3)
                 i += 1
                 self.check_max_iterations(i)
@@ -592,15 +595,22 @@ class CPM_lazy_gurobi(CPM_gurobi):
         C_enc = {s: 1 for s in X}
         k = len(X) - 1
 
-        if self.env["debug"]:
-            self.log(f"cut == {show_set(X)}, {C_enc}, {k}", indent=2)
+        def show_cut():
+            if self.env["debug"]:
+                self.log(f"cut == {'+'.join(f'{C_enc[i]}*x_{i + 1}' for i in sorted(X))} <= {k}", indent=2)
+
+        show_cut()
+
         if self.env["coverlift"]:
+            Xl = len(X)
             X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc)
+            if self.env["debug"]:
+                self.log("coverlift added ", len(X) - Xl)
 
         self.env["cuts"][-1]["size"] = len(X)
 
-        if self.env["debug"]:
-            self.log(f"gcut== {show_set(X)}, {C_enc}, {k}", indent=2)
+        show_cut()
+
         return X, C_enc, k
 
     def check_max_iterations(self, i):
