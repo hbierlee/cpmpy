@@ -52,12 +52,18 @@ def get_experiments(overrides={}, filters=[]):
                         *ablate(
                             [
                                 ("fractional", (False, True)),
-                                ("shrink", (False, True)),
-                                ("coverlift", (True, False)),
-                                ("cutoff", (0, 0, 2000)),
+                                # ("shrink", (False, True)),
+                                ("coverlift", (False, True)),
+                                (
+                                    "cutoff",
+                                    (
+                                        0,
+                                        125,
+                                    ),
+                                ),
                             ],
-                            add_none=False,
-                            add_all=False,
+                            add_none=True,
+                            add_all=True,
                         ),
                     ]
                 ],
