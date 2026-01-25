@@ -504,8 +504,11 @@ def main(args):
 
     print("Experiments:")
     pprint.pprint(experiments)
+    assert experiments
+
     if args.dry:
         exit(0)
+
 
     for experiment in experiments:
         print("Run", experiment)
