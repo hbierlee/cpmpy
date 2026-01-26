@@ -222,6 +222,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "found_feasible": False,
             "model": None,
             "example2": False,
+            "feasible": None,
             **({} if env is None else env),
         }
         self.indent = 0
@@ -622,7 +623,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         show_cut()
 
         if self.env["coverlift"]:
-            Xl = X.sum()
+            if self.env["debug"]:
+                Xl = X.sum()
             X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc)
             if self.env["debug"]:
                 self.log("coverlift added ", X.sum() - Xl)
@@ -835,7 +837,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     f"Explanation:\n\n{expr}\n\ncut off row\n\n{T_enc_i}\n({show_assignment(X_enc)})\n\nfor failure {A_enc}"
                 )
 
-        if self.env["feasible"] and self.env["checker"]:
+        if self.env["checker"] and self.env["feasible"]:
             self.env["checker"] += expr
 
             # nsols = self.env["checker"].solveAll()
@@ -987,12 +989,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                                 self.env["checker"] += c
 
                     x_encs = [self.ivarmap[x.name]._xs for x in X]
-
-                    # for each column i, add a set of indices for its part
-                    #    x1    x2   y1   y2
-                    #     1     1    2    2 parts
-                    # 1,..2  1..2 3..4 3..4 -> parts
-
                     parts = np.fromiter((i for i, x_enc in enumerate(x_encs) for _ in x_enc), dtype=int)
 
                     X_enc = np.fromiter((x_enc_i for x_enc in x_encs for x_enc_i in x_enc), _BoolVarImpl)

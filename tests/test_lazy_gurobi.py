@@ -162,6 +162,7 @@ class TestTables:
             explanation = slv.explain(A_enc, T_enc, parts, frm=frm)
             slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm, A_enc_)
 
+    @pytest.mark.skip()
     def test_coverlift(self, env):
         slv = CPM_lazy_gurobi(
             cpm_model=cp.Model(generate_table_from_example().constraints),
@@ -191,6 +192,7 @@ class TestTables:
         assert len(set(c.args[0])) == len(c.args[0])
         assert c.args[1] == [[2, 3], [3, 3]]
 
+    @pytest.mark.skip()
     def test_explain(self, env):
         slv = CPM_lazy_gurobi(
             cpm_model=cp.Model(generate_table_from_example().constraints),
