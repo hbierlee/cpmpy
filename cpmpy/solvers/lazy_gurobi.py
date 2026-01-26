@@ -957,8 +957,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["debug"]:
                     self.log(f"table of {area}:", cpm_expr, verbosity=2)
                 if area >= self.env["cutoff"]:
-                    # if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
-                    #     cpm_expr = normalize_table(cpm_expr)
+                    if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
+                        cpm_expr = normalize_table(cpm_expr)
                     X, T = cpm_expr.args
                     # only check after normalize, since normalize may remove all rows
                     if not len(T):
