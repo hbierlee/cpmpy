@@ -491,7 +491,7 @@ def main(args):
     args_ = {
         k: v
         for k, v in vars(args).items()
-        if v is not None and k not in ("cp_cuts", "analyze", "glob_alias", "dry")
+        if v is not None and k not in ("cp_cuts", "analyze", "glob_alias", "dry", "reverse_experiments")
     }
 
     if not args_["verbose"]:
@@ -501,6 +501,9 @@ def main(args):
         overrides=args_,
         filters=[("alias", args.glob_alias)] if args.glob_alias else []
     ) if args.cp_cuts else [args_]
+
+    if args.reverse_experiments:
+        experiments.reverse()
 
     print("Experiments:", ", ".join(e['alias'] for e in experiments))
     pprint.pprint(experiments)
@@ -549,5 +552,6 @@ if __name__ == "__main__":
     parser.add_argument('--profile', type=pathlib.Path, help='Profile')
     parser.add_argument('--analyze', action='store_true', help='Analyze results')
     parser.add_argument('--dry','-d', action='store_true', help='Dry run')
+    parser.add_argument('--reverse-experiments', action='store_true', help='Reverse experiment order')
     
     main(parser.parse_args())
