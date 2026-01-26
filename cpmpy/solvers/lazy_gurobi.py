@@ -211,8 +211,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "heuristic": Heuristic.GREEDY,
             "cutoff": 0,
             "shrink": False,
-            "fractional": True,
-            "coverlift": True,
+            "fractional": False,
+            "coverlift": False,
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
@@ -231,10 +231,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
             np.set_printoptions(**DEBUG_NP_PRINTOPTIONS)
             pprint.pprint(env)
 
-        self.logger = logging.getLogger(__name__)
-        logging.basicConfig(
-            filename=self.env["log"], level=logging.DEBUG, filemode="w", force=True, format="%(message)s"
-        )
+        # self.logger = logging.getLogger(__name__)
+        # logging.basicConfig(
+        #     filename=self.env["log"], level=logging.DEBUG, filemode="w", force=True, format="%(message)s"
+        # )
 
         self.ivarmap = {}
 
@@ -462,7 +462,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # TODO convert T_enc to set of tuples?
 
         if self.env["debug"]:
-            self.log("Explain", end="\n")
+            self.log("Explain", end="\n", verbosity=2)
             self.log("", np.astype(A_enc, int) if frm == "MIPSOL" else A_enc, verbosity=2, indent=0)
             # if frm == "MIPSOL":
             #     self.log("", np.array(assign_mipsol(A_enc)), verbosity=2, indent=0)
@@ -514,8 +514,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # [ 0 0 1 0 1 1 0 ]  N
         # WF = np.zeros(len(T_enc.T), dtype=bool)
         if self.env["debug"]:
-            self.log(f"W = {W}", verbosity=2)
-            self.log(f"F = {F}", verbosity=2)
+            self.log(f"W = {W}", verbosity=3)
+            self.log(f"F = {F}", verbosity=3)
 
         if F.any():
             # WF = np.zeros(T_enc.shape[1], dtype=bool)
@@ -525,13 +525,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
             D = T_enc[:, W | F].any(1)
             U = F > ~(T_enc[D, :].all(0))
             if self.env["debug"]:
-                self.log(f"D = {D} {T_enc[D, :]}", verbosity=2)
-                self.log(f"U = {U}", verbosity=2)
+                self.log(f"D = {D} {T_enc[D, :]}", verbosity=3)
+                self.log(f"U = {U}", verbosity=3)
 
             if none(U):
                 if self.env["debug"]:
-                    self.log("unexplainable", indent=2)
-                    self.log("because U is empty", verbosity=2, indent=4)
+                    self.log("unexplainable, because U is empty", indent=2, verbosity=3)
                 return True
             else:
                 # i = self.choose(U, T_enc, set(range(m)), heuristic=self.env["heuristic"])
@@ -618,6 +617,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(
                     f"cut == {' + '.join(f'{c} * x_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
                     indent=2,
+                    verbosity=3,
                 )
 
         show_cut()
@@ -627,7 +627,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 Xl = X.sum()
             X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc)
             if self.env["debug"]:
-                self.log("coverlift added ", X.sum() - Xl)
+                self.log("coverlift added ", X.sum() - Xl, verbosity=3)
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -762,13 +762,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if (T_enc[:] == A_enc_).all(1).any():
                     if self.env["debug"]:
                         self.log(
-                            f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{np.astype(T_enc, int)}"
+                            f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{np.astype(T_enc, int)}", verbosity=3
                         )
                     # assert False
                     # assert table.value() # TODO after assigning _value
                     continue
                 elif self.env["debug"]:
-                    self.log(f"table {i}/{len(self.tables)} INfeasible by {A_enc}\n\n{np.astype(T_enc, int)}")
+                    self.log(f"table {i}/{len(self.tables)} INfeasible by {A_enc}\n\n{np.astype(T_enc, int)}", verbosity=3)
 
             try:
                 # encode assignment
@@ -955,10 +955,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if cpm_expr.name == "table":
                 area = get_table_area(cpm_expr)
                 if self.env["debug"]:
-                    self.log(f"table of {area}:", cpm_expr)
+                    self.log(f"table of {area}:", cpm_expr, verbosity=2)
                 if area >= self.env["cutoff"]:
-                    if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
-                        cpm_expr = normalize_table(cpm_expr)
+                    # if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
+                    #     cpm_expr = normalize_table(cpm_expr)
                     X, T = cpm_expr.args
                     # only check after normalize, since normalize may remove all rows
                     if not len(T):
