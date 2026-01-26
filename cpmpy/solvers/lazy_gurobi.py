@@ -692,7 +692,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         cut = self._make_numexpr(expr) <= k
                         what.cbLazy(cut)
                     elif is_true_cst(expr):
-                        self.log("true const")
                         continue
                     elif is_false_cst(expr):
                         if self.env["debug"]:
