@@ -555,7 +555,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             k = -1
 
         for iteration in itertools.count(start=1):
-            assert A_enc[X].sum() > k
+            if self.env["debug"]:
+                assert A_enc[X].sum() > k
             if none(R):
                 break
 
