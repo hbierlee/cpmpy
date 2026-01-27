@@ -18,8 +18,7 @@ from cpmpy.expressions.core import Comparison, Operator
 from cpmpy.expressions.utils import is_true_cst, is_false_cst, show_assignment, dom_size
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.solvers.gurobi import CPM_gurobi
-from line_profiler import profile
-# from memory_profiler import profile as mem_profile
+from cpmpy.transformations.linearize import only_positive_bv
 
 # https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
 # Functions for approximate comparison of floating point numbers
@@ -113,6 +112,10 @@ DEBUG_NP_PRINTOPTIONS = {
     "linewidth": np.inf,
     "formatter": {"float_kind": "{:.2f}".format},
 }
+
+
+def show_table(T_enc, index=INDEX):
+    return np.astype(T_enc, int) if T_enc.dtype in (bool, np.bool) else T_enc
 
 
 def show_ind(a, index=INDEX):
@@ -343,7 +346,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C = C - {i}
         return C
 
-    @profile
+    # @profile
     def gencoverlift(self, S, C_enc, k, T_enc):
         if self.env["debug"]:
             self.log("gencoverlift", verbosity=3)
@@ -455,15 +458,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
-    @profile
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
         # TODO convert T_enc to set of tuples?
 
         if self.env["debug"]:
-            self.log("Explain", end="\n", verbosity=2)
-            self.log("", np.astype(A_enc, int) if frm == "MIPSOL" else A_enc, verbosity=2, indent=0)
+            self.log(f"Explain {frm}", end="\n", verbosity=2)
+            self.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc, verbosity=2, indent=0)
+            # self.log("", A_enc, verbosity=2, indent=0)
             # if frm == "MIPSOL":
             #     self.log("", np.array(assign_mipsol(A_enc)), verbosity=2, indent=0)
             self.log(np.astype(T_enc, int), verbosity=2, indent=0)
@@ -518,12 +521,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"F = {F}", verbosity=3)
 
         if F.any():
-            # WF = np.zeros(T_enc.shape[1], dtype=bool)
-            # WF[list(W.union(F))] = True
-            # D = set(r for r in range(m) if T_enc[r, :] in WF)  # difficult rows; either frac/whole
-            # U = set(i for i in F if all(T_enc[r, i] == 0 for r in D))  # frac except difficult
             D = T_enc[:, W | F].any(1)
-            U = F > ~(T_enc[D, :].all(0))
+            U = F > ~((~T_enc[D, :]).all(0))  # tricky
+
             if self.env["debug"]:
                 self.log(f"D = {D} {T_enc[D, :]}", verbosity=3)
                 self.log(f"U = {U}", verbosity=3)
@@ -556,7 +556,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         for iteration in itertools.count(start=1):
             if self.env["debug"]:
-                assert A_enc[X].sum() > k
+                assert A_enc[X].sum() > k, f"For {A_enc[X]}, {A_enc[X].sum()} should be >{k}"
             if none(R):
                 break
 
@@ -571,6 +571,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
             X |= C_
             k += 1
 
+            if self.env["debug"]:
+                self.log(f"Ak = {A_enc[X].sum()} < {k}")
+                self.log(
+                    f"chosen {show(choice)} (part {parts[choice]} -> {parts[choice] == parts})",
+                    verbosity=3,
+                    indent=self.indent + 2,
+                )
+                self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
+                self.log(f"C_ {C_}", verbosity=3, indent=self.indent + 2)
+                self.log(f"&R {T_enc[:, C_].any(1)}", verbosity=3, indent=self.indent + 2)
+                self.log(f"R {R}", verbosity=3, indent=self.indent + 2)
+                self.log(f"X {X}", verbosity=3, indent=self.indent + 2)
             # [     1   1     ]
             # [ 0 1 1 0 0 0 0 ]  Y
             # [ 0 0 0 0 1 0 0 ]  Y
@@ -745,7 +757,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         #     self.check_explanation(expr, X_enc, A_enc, T_enc, table)
 
         if self.env["debug"]:
-            self.check_explanation(expr, X_enc, A_enc, T_enc)
+            self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
 
         return expr
 
@@ -763,13 +775,17 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if (T_enc[:] == A_enc_).all(1).any():
                     if self.env["debug"]:
                         self.log(
-                            f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{np.astype(T_enc, int)}", verbosity=3
+                            f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{np.astype(T_enc, int)}",
+                            verbosity=3,
                         )
                     # assert False
                     # assert table.value() # TODO after assigning _value
                     continue
                 elif self.env["debug"]:
-                    self.log(f"table {i}/{len(self.tables)} INfeasible by {A_enc}\n\n{np.astype(T_enc, int)}", verbosity=3)
+                    self.log(
+                        f"table {i}/{len(self.tables)} INfeasible by {A_enc}\n\n{np.astype(T_enc, int)}",
+                        verbosity=3,
+                    )
 
             try:
                 # encode assignment
@@ -814,29 +830,27 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     __add__ = add  # avoid redirect in superclass
 
-    def check_explanation(self, expr, X_enc, A_enc, T_enc):
+    def check_explanation(self, expr, X_enc, A_enc, T_enc, frm):
+        # A_enc = A_enc > 0.5
         for x, a in zip(X_enc, A_enc):
             x._value = a
 
+        def value(expr):
+            (expr,) = only_positive_bv([expr])
+            ws, xs, k = terms(expr)  # sum(ws*xs) <= k
+            lhs = sum(w * x.value() for w, x in zip(ws, xs))
+            return bool(is_le(lhs, k))  # np -> python bool
+
+        case = f"The explanation\n\n{expr}\n{value(expr)}\n\n from assignment {frm} {show_assignment(X_enc)} for table:\n\n {A_enc}\n{show_table(T_enc)}\n\n  "
+
         if not is_true_cst(expr):
-
-            def value(expr):
-                ws, xs, k = terms(expr)
-                lhs = sum(w * x.value() for w, x in zip(ws, xs))
-                return bool(is_le(lhs, k))  # np -> python bool
-
-            assert value(expr) is False, (
-                f"Did not cut off assignment:\n\n{show_assignment(X_enc)}\n\nwith exp {expr} = {value(expr)} for table:\n\n {A_enc}\n{T_enc}"
-            )
+            assert value(expr) is False, f"Did not cut off assignment:\n\n{case}"
 
         for T_enc_i in T_enc:
             if True:
-                # TODO [peter] ask about this invariant
                 for x_i, a_i_j in zip(X_enc, T_enc_i):
                     x_i._value = a_i_j
-                assert value(expr) is True, (
-                    f"Explanation:\n\n{expr}\n\ncut off row\n\n{T_enc_i}\n({show_assignment(X_enc)})\n\nfor failure {A_enc}"
-                )
+                assert value(expr) is True, f"Cut off row for case:\n\n{case}"
 
         if self.env["checker"] and self.env["feasible"]:
             self.env["checker"] += expr

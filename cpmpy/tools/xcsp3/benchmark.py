@@ -491,7 +491,7 @@ def main(args):
     args_ = {
         k: v
         for k, v in vars(args).items()
-        if v is not None and k not in ("cp_cuts", "analyze", "glob_alias", "dry", "reverse_experiments")
+        if v is not None and k not in ("cp_cuts", "analyze", "glob_alias", "dry", "reverse_experiments", "debug")
     }
 
     if not args_["verbose"]:
@@ -501,6 +501,10 @@ def main(args):
         overrides=args_,
         filters=[("alias", args.glob_alias)] if args.glob_alias else []
     ) if args.cp_cuts else [args_]
+    if args.debug:
+        for e in experiments:
+            e["solver_kwargs"]["env"]["debug"] = True
+            e["solver_kwargs"]["env"]["verbosity"] = 0
 
     if args.reverse_experiments:
         experiments.reverse()
@@ -551,7 +555,8 @@ if __name__ == "__main__":
     parser.add_argument('--checker-path', type=str, help='Path to the XCSP3 solution checker JAR file')
     parser.add_argument('--profile', type=pathlib.Path, help='Profile')
     parser.add_argument('--analyze', action='store_true', help='Analyze results')
-    parser.add_argument('--dry','-d', action='store_true', help='Dry run')
+    parser.add_argument('--dry', action='store_true', help='Dry run')
+    parser.add_argument('--debug','-d', action='store_true', help='Debug run')
     parser.add_argument('--reverse-experiments', action='store_true', help='Reverse experiment order')
     
     main(parser.parse_args())
