@@ -157,10 +157,26 @@ class TestTables:
             with open(path, "rb") as f:
                 X_enc, A_enc, T_enc, parts, frm, A_enc_ = pickle.load(f)
             slv = CPM_lazy_gurobi(
-                env={**env, **{"verbosity": 4, "debug": True}},
+                env={**env, **{"verbosity": 3, "debug": True}},
             )
+
+            COLS = None
+
+            print("parts", len(np.unique(parts)))
+            # COLS = np.isin(parts, range(83,85))
+            if COLS is not None:
+                A_enc = A_enc[COLS]
+                T_enc = T_enc[:, COLS]
+                parts = parts[COLS]
+                A_enc_ = A_enc_[COLS]
+                X_enc = X_enc[COLS]
+
+            print(" ", np.array(X_enc))
             explanation = slv.explain(A_enc, T_enc, parts, frm=frm)
-            slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm, A_enc_)
+            if explanation is None:
+                print("Infeasible")
+            else:
+                slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm, A_enc_)
 
     @pytest.mark.skip()
     def test_coverlift(self, env):

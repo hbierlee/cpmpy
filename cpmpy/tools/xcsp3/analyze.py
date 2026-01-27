@@ -221,10 +221,8 @@ def xcsp3_stats(df, time_limit=None, save=None):
     def get_metadata(x):
         with open(x) as f:
             metadata = json.load(f)
-        n = len(metadata["tables"])
-        
         areas = [t["area"] for t in metadata["tables"]]
-        return [metadata["area"], len(areas), statistics.mean(areas), statistics.stdev(areas)]
+        return [metadata["area"], len(areas), statistics.mean(areas), statistics.stdev(areas) if len(areas) > 1 else None]
 
 
     diff = "Δ"
@@ -271,8 +269,13 @@ def xcsp3_stats(df, time_limit=None, save=None):
         "cuts",
         # "exception",
     ]].sort_values(by=
-                   # ["mean", "problem", "instance"]
-                   ["time_total"]
+                   [
+                       # "mean",
+                       "problem",
+                       "instance",
+                       "alias"
+                       ]
+                   # ["time_total"]
                    + ([] if SHOW_DIFF else ["alias"])
                    ))
     if SHOW_DIFF:
@@ -290,6 +293,7 @@ def xcsp3_stats(df, time_limit=None, save=None):
 
     for grouping_type, grouping in (
             # ("per_alias", ['alias', 'problem']),
+            ("per_inst", ['problem','instance','alias']),
             ("per_problem", ['problem', 'alias']),
             ("per_alias_agg", ['alias'])
             ):
@@ -311,6 +315,7 @@ def xcsp3_stats(df, time_limit=None, save=None):
                 solv = ('solved', 'sum'),
                 cuts = ('cuts', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
+                obj = ('obj', 'first'),
                 )[[
             # *(["insts"] if PER_PROBLEM else ["insts"]),
             *([] if grouping_type == "per_alias_agg" else [
@@ -319,6 +324,9 @@ def xcsp3_stats(df, time_limit=None, save=None):
             *([
                 "t_post_p2",
                 "t_solv_p2",
+                ]),
+            *(["obj"] if grouping_type == "per_inst" else []),
+            *([
                 "insts",
                 "err",
                 "unk",
@@ -342,6 +350,12 @@ def xcsp3_stats(df, time_limit=None, save=None):
 
         print(f"\n== {grouping_type} ==")
         print(groups)
+
+    print("== Exceptions ==")
+    exc = df[df["exception"].notna()]
+    exc = df[df["status"] == ERR]
+    exc["file"] = exc["problem"] + "-" + exc["instance"]
+    print(exc[["file","alias","status","time_total", "exception"]].head())
 
     # Save convenience
     if save:
