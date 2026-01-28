@@ -492,6 +492,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
+    # @profile
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
@@ -567,9 +568,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     self.log("unexplainable, because U is empty", indent=2, verbosity=3)
                 return True
             else:
-                # i = self.choose(U, T_enc, set(range(m)), heuristic=self.env["heuristic"])
-                # choice = U.argmax()
-                choice = self.choose(U, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
+                # R = np.ones(m, dtype=np.bool)
+                # choice = self.choose(U, T_enc, set(range(m)), heuristic=self.env["heuristic"])
+                choice = U.argmax()
+                # choice = self.choose(U, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
 
                 # TODO [peter] should be T_hat[choice]?
                 choices = np.ones(len(T_enc.T), dtype=bool)
