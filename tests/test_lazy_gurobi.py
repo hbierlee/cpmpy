@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 
 import cpmpy as cp
-from cpmpy.expressions.utils import show_assignment
-from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table
+from cpmpy.expressions.utils import show_assignment, dom_size
+from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic
 from cpmpy.solvers.gurobi import CPM_gurobi
 
 
@@ -18,6 +18,7 @@ def generate_table_from_example():
     z = cp.intvar(1, 3, name="z")
     X = (x, y, z)
     T = np.array([(2, 1, 1), (3, 2, 2), (4, 3, 3), (1, 2, 3), (2, 1, 2)])
+
     return cp.Model(cp.Table(X, T))
 
 
@@ -135,6 +136,8 @@ def env():
             "shrink": False,
             "fractional": True,
             "coverlift": True,
+            "heuristic": Heuristic.INPUT,
+            # "heuristic": Heuristic.GREEDY,
             "cutoff": 0,
         }
         if True
@@ -208,41 +211,91 @@ class TestTables:
         assert len(set(c.args[0])) == len(c.args[0])
         assert c.args[1] == [[2, 3], [3, 3]]
 
-    @pytest.mark.skip()
-    def test_explain(self, env):
-        slv = CPM_lazy_gurobi(
-            cpm_model=cp.Model(generate_table_from_example().constraints),
-            env={**env, **{"shrink": False, "debug": True}},
-        )
-        # X, T = generate_table_from_example().constraints[0].args
-        slv += generate_table_from_example().constraints
-        # slv.add(generate_table_from_example().constraints)
-        X_enc, T_enc, parts, table = slv.tables[0]
+    #
+    # 0100 100 100
+    # 0010 010 010
+    # 0001 001 001
+    # 1000 010 001
+    # 1111 222 333
+    #
 
+    def test_playground(self, env):
+        # x = np.arange(8).reshape(2, 4)
+        x = np.array([[0, 1, 0, 1], [0, 1, 1, 0]], dtype=bool)
+        x = x & [1, 0, 1, 1]
+        parts = np.array(
+            [
+                0,
+                0,
+                1,
+                1,
+            ]
+        )
+        parts_ = np.add.accumulate(np.unique_counts(parts).counts)
+        parts_ -= parts_[0]
         print(parts)
-        assert (
-            parts
-            == [frozenset(range(0, 4))] * 4 + [frozenset(range(4, 7))] * 3 + [frozenset(range(7, 10))] * 3
+
+        print(x.astype(int))
+        y = np.bitwise_or.reduceat(
+            x,
+            parts_,
+            axis=1,
         )
+        print(y)
 
-        # T_enc = encode(X, T)
-        # parts = [4, 3, 3]
-        A_enc = [0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+    def test_explain(self, env):
+        random.seed(SEED)
+        for e, A_enc in [
+            # (generate_table_from_data([(2, 1), (2, 1), (2, 1), (1, 2)], 2), np.array([0, 1, 0, 1])),
+            # (generate_table(3, 3, 3), None),
+            (generate_table(10, 2000, 10), None),
+            # (generate_table(100, 500, 25), None),
+        ]:
+            # found feasible
+            # shrink=False, heuristic=input, fractional=False, coverlift=True
+            # time_cb = 28.54794931411743
+            # cuts (MIPSOL) = 790
+            # cuts (MIPNODE, explained) = 0
+            # cuts (MIPNODE, unexplainable) = 0
+            # .
 
-        def list_to_A_enc(A_enc):
-            return dict(zip(X_enc, A_enc))
+            if A_enc is None:
+                A_enc = []
+                for x in e.constraints[0].args[0]:
+                    A = dom_size(x) * [False]
+                    A[random.randint(x.lb, x.ub) - 1] = True
+                    A_enc += A
+            A_enc = np.array(A_enc)
+            # print("A_enc", A_enc)
 
-        A_enc = list_to_A_enc(A_enc)
+            slv = CPM_lazy_gurobi(
+                # cpm_model=cp.Model(generate_table_from_example().constraints),
+                # cpm_model=cp.Model(cp.Table((cp.intvar(1, 1), cp.intvar(1, 2)), [(1, 2)])),
+                cpm_model=e,
+                env={
+                    **env,
+                    **{
+                        "fractional": False,
+                        "coverlift": True,
+                        "max_iterations": None,
+                        "heuristic": Heuristic.INPUT,
+                        # "heuristic": Heuristic.GREEDY,
+                        "shrink": False,
+                        "debug": True,
+                        "verbosity": 2,
+                    },
+                },
+            )
+            slv.solve()
+            slv.stats()
+            X_enc, T_enc, parts, table = slv.tables[0]
+            def list_to_A_enc(A_enc):
+                return dict(zip(X_enc, A_enc))
 
-        explanations = slv._explain_assignment(A_enc)
-        print("E", list(explanations))
-        # explanation = slv.explain(A_enc, T_enc, parts)
-        # assert (  # Example 1 from assignment [2,2,2]
-        #     explanation == {1, 5}
-        # )
+            A_enc = list_to_A_enc(A_enc)
 
-        # with pytest.raises(AssertionError) as e:
-        #     slv.check_explanation(cp.all(X_enc), X_enc, A_enc, T_enc, table)
+            explanations = list(slv._explain_assignment(A_enc))
+            print("E", explanations)
         # print("ERR", e.value)
 
         # slv.check_explanation(explanation, X_enc, A_enc, T_enc)
@@ -322,6 +375,13 @@ class TestTables:
         m = load_model("/tmp/failed_model.pkl")
         print("Repro model:", m)
         check_model(m, env=env)
+
+    def test_enc(self, env):
+        x = cp.intvar(1, 5, name="x")
+        y = cp.intvar(1, 5, name="y")
+        m = cp.Model(cp.Table([x, y], [[1, 2]]), cp.InDomain(x, [2, 4]))
+        slv = CPM_lazy_gurobi(cpm_model=m)
+        print("Repro model:", slv.transform(m.constraints))
 
     def test_table_enc(self, env):
         x = cp.intvar(1, 4, name="x")

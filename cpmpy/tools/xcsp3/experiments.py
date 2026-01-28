@@ -1,5 +1,6 @@
 import itertools
 import math
+from cpmpy.solvers.lazy_gurobi import Heuristic
 
 
 MEM_LIMIT = 8
@@ -51,6 +52,7 @@ def get_experiments(overrides={}, filters=[]):
                     for alias, kw in [
                         *ablate(
                             [
+                                ("heuristic", (Heuristic.INPUT, Heuristic.GREEDY)),
                                 ("fractional", (False, True)),
                                 # ("shrink", (False, True)),
                                 ("coverlift", (False, True)),
@@ -64,6 +66,7 @@ def get_experiments(overrides={}, filters=[]):
                             ],
                             add_none=True,
                             add_all=True,
+                            filters=["heuristic"],
                         ),
                     ]
                 ],
@@ -88,7 +91,7 @@ def experiment(experiments, overrides={}, filters=[]):
     ]
 
 
-def ablate(feats, add_one=True, add_none=True, add_all=False):
+def ablate(feats, add_one=True, add_none=True, add_all=False, filters=[]):
     return [
         *([("none", {feat: feat_vals[0] for feat, feat_vals in feats})] if add_none else []),
         *(
@@ -98,6 +101,7 @@ def ablate(feats, add_one=True, add_none=True, add_all=False):
                     {feat_: feat_val if feat == feat_ else feat_vals_[0] for feat_, feat_vals_ in feats},
                 )
                 for feat, feat_vals in feats
+                if feat in filters
                 for feat_val in feat_vals[1:]
             ]
             if add_one
