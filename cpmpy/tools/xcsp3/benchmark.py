@@ -575,7 +575,7 @@ if __name__ == "__main__":
     parser.add_argument('--profile', type=pathlib.Path, help='Profile')
     parser.add_argument('--analyze', action='store_true', help='Analyze results')
     parser.add_argument('--dry', action='store_true', help='Dry run')
-    parser.add_argument('--debug','-d', action='store_true', help='Debug run')
+    parser.add_argument('--debug', action='store_true', help='Debug run')
     parser.add_argument('--reverse-experiments', action='store_true', help='Reverse experiment order')
     
     main(parser.parse_args())
