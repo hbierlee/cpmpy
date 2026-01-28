@@ -390,7 +390,17 @@ def get_table_metadata(model):
             cols = [cp.expressions.utils.dom_size(x) for x in X]
             rows = len(tab)
             tables.append({"cols": cols, "rows": rows, "area": rows * sum(cols)})
-    return { "area": sum(t["area"] for t in tables), "tables": tables}
+    match model.objective_is_min:
+        case True:
+            method = "minimize"
+        case False:
+            method = "maximize"
+        case None:
+            method = "satisfy"
+        case _:
+            raise ValueError(model.objective_is_min)
+
+    return { "method": method, "area": sum(t["area"] for t in tables), "tables": tables}
 
 
 
@@ -456,7 +466,12 @@ def xcsp3_benchmark(
         metadata["problem"] = metadata["name"].split("-")[0]
         return metadata
 
-    dataset = XCSP3Dataset(year=year, track=track, download=True, target_transform=update_metadata_table)
+    dataset = XCSP3Dataset(
+            year=year,
+            track=track,
+            download=True,
+            target_transform=update_metadata_table
+            )
     if glob_instance is not None:
         dataset = ((filename, metadata) for filename, metadata in dataset if glob_instance in filename)
     if first:
@@ -465,6 +480,7 @@ def xcsp3_benchmark(
             dataset_.append(min(g, key=lambda g_:g_[0]))
         dataset = dataset_
     dataset = [(filename, metadata) for filename, metadata in dataset if metadata['area'] > 0]
+    assert dataset
 
     # Process instances in parallel
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -501,10 +517,10 @@ def main(args):
         overrides=args_,
         filters=[("alias", args.glob_alias)] if args.glob_alias else []
     ) if args.cp_cuts else [args_]
-    if args.debug:
-        for e in experiments:
+    for e in experiments:
+        if args.debug:
             e["solver_kwargs"]["env"]["debug"] = True
-            e["solver_kwargs"]["env"]["verbosity"] = 0
+        e["solver_kwargs"]["env"]["verbosity"] = 0
 
     if args.reverse_experiments:
         experiments.reverse()
@@ -524,8 +540,10 @@ def main(args):
 
 
     output_dir = pathlib.Path(next(e["output_dir"] for e in experiments))
+    csvs = list(output_dir.glob("*.csv"))
+    assert csvs
     import pandas as pd
-    dfs = pd.concat([pd.read_csv(f) for f in output_dir.glob("*.csv")], ignore_index=True)
+    dfs = pd.concat([pd.read_csv(f) for f in csvs], ignore_index=True)
     dfs.to_csv(pathlib.Path(output_dir.name).with_suffix(".csv"))
 
     if args.analyze:

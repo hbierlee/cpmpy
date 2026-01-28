@@ -218,17 +218,10 @@ def xcsp3_stats(df, time_limit=None, save=None):
                 print(f"Slowest {phase}: {df.loc[slowest_idx, f'time_{phase}']}s ({df.loc[slowest_idx, 'instance']}, {df.loc[slowest_idx, 'solver']})")
 
     print("Problems", df['problem'].unique())
-    def get_metadata(x):
-        with open(x) as f:
-            metadata = json.load(f)
-        areas = [t["area"] for t in metadata["tables"]]
-        return [metadata["area"], len(areas), statistics.mean(areas), statistics.stdev(areas) if len(areas) > 1 else None]
 
 
     diff = "Δ"
     df.insert(df.columns.get_loc("time_solve"), diff, df.groupby(['instance'])["time_solve"].diff())
-    df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
-    df[["area", "count", "mean", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
     # df["area"], df["count"] = df["file_name"].map(get_metadata)
     pd.set_option('display.float_format', '{:0.1f}'.format)
 
@@ -254,7 +247,8 @@ def xcsp3_stats(df, time_limit=None, save=None):
         "problem",
         "instance",
         "area",
-        "mean",
+        # "mean",
+        "median",
         "stdev",
         ] + ([] if SHOW_DIFF else ["alias"])
          + [
@@ -270,7 +264,8 @@ def xcsp3_stats(df, time_limit=None, save=None):
         # "exception",
     ]].sort_values(by=
                    [
-                       # "mean",
+                       # "area",
+                       "median",
                        "problem",
                        "instance",
                        "alias"
@@ -351,11 +346,12 @@ def xcsp3_stats(df, time_limit=None, save=None):
         print(f"\n== {grouping_type} ==")
         print(groups)
 
-    print("== Exceptions ==")
-    exc = df[df["exception"].notna()]
-    exc = df[df["status"] == ERR]
-    exc["file"] = exc["problem"] + "-" + exc["instance"]
-    print(exc[["file","alias","status","time_total", "exception"]].head())
+    errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception"]]
+    if not errors.empty:
+        print("== ERRORS ==")
+        # exc = df[df["status"] == ERR]
+        # exc["file"] = exc["problem"] + "-" + exc["instance"]
+        print(errors)
 
     # Save convenience
     if save:
@@ -441,6 +437,16 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # rename
     df = df.rename(columns={"objective_value": "obj"})
+
+    df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
+    def get_metadata(x):
+        with open(x) as f:
+            metadata = json.load(f)
+        areas = [t["rows"] for t in metadata["tables"]]
+        return [metadata.get("method", None), sum(areas), len(areas), statistics.mean(areas), statistics.median(areas), statistics.stdev(areas) if len(areas) > 1 else None]
+    df[["method", "area", "count", "mean","median", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
+
+    # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
 
     # replace time_solve to NaN if not solved
     solved = [OPT, UNS]

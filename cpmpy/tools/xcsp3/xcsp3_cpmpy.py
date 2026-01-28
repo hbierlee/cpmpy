@@ -670,6 +670,10 @@ def xcsp3_cpmpy(
         model = _load_xcsp3(parser)
         time_callback = time.time() - time_callback
         print_comment(f"took {time_callback:.4f} seconds to convert to CPMpy model")
+
+        # if verbose:
+        #     print_comment("==MODEL==")
+        #     print_comment(repr(model))
         
         if time_limit and time_limit < wall_time(p):
             raise TimeoutError("Time's up after callback")
@@ -768,6 +772,8 @@ def xcsp3_cpmpy(
             print_comment(f"Checking solution within check time limit {check_time_limit}")
             time_check = time.time()
             try:
+                # print_comment("MODEL2:")
+                # print_comment(repr(model))
                 for c in model.constraints:
                     assert c.value(), f"Constraint {c} failed for assignment {show_assignment(get_variables(c))}"
                     # stop in time; we are in danger of being killed
