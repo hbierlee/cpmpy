@@ -518,9 +518,10 @@ def main(args):
         filters=[("alias", args.glob_alias)] if args.glob_alias else []
     ) if args.cp_cuts else [args_]
     for e in experiments:
-        if args.debug:
-            e["solver_kwargs"]["env"]["debug"] = True
-        e["solver_kwargs"]["env"]["verbosity"] = 0
+        if e["solver"] == "lazy_gurobi":
+            if args.debug:
+                e["solver_kwargs"]["env"]["debug"] = True
+            e["solver_kwargs"]["env"]["verbosity"] = 0
 
     if args.reverse_experiments:
         experiments.reverse()
