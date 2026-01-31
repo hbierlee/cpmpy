@@ -292,17 +292,18 @@ def xcsp3_stats(df, time_limit=None, save=None):
             # ("per_alias", ['alias', 'problem']),
             ("per_inst", ['problem','instance','alias']),
             ("per_problem", ['problem', 'alias']),
-            ("per_alias_agg", ['alias'])
+            ("per_alias", ['alias'])
             ):
+
 
         groups = df.groupby(grouping).agg(
                 alias = ("alias", "first"),
                 insts = ("problem", 'count'),
                 area = ('area', 'mean'),
                 # t_totl_hr = ('time_total', 'sum'),
-                t_totl_p2 = ('time_total_p2', 'sum'),
-                t_post_p2 = ('time_post_p2', 'sum'),
-                t_solv_p2 = ('time_solve_p2', 'sum'),
+                t_totl_p2 = ('time_total_p2', 'mean'),
+                t_post_p2 = ('time_post_p2', 'mean'),
+                t_solv_p2 = ('time_solve_p2', 'mean'),
                 # insts = ('status', 'count'),
                 err = ('error', 'sum'),
                 unk = ('unknown', 'sum'),
@@ -313,9 +314,14 @@ def xcsp3_stats(df, time_limit=None, save=None):
                 cuts = ('cuts', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
                 obj = ('obj', 'first'),
-                )[[
+                )
+
+        track, = df["track"].unique()
+        is_cop = "COP" in track
+
+        groups = groups[[
             # *(["insts"] if PER_PROBLEM else ["insts"]),
-            *([] if grouping_type == "per_alias_agg" else [
+            *([] if grouping_type == "per_alias" else [
                 "area",
                 ]),
             *([
@@ -329,7 +335,11 @@ def xcsp3_stats(df, time_limit=None, save=None):
                 "unk",
                 "mem",
                 "post",
+                ]),
+            *([
                 "feas",
+            ] if is_cop else []),
+            *([
                 "solv",
                 "cuts",
                 "cb_rel",
@@ -347,6 +357,44 @@ def xcsp3_stats(df, time_limit=None, save=None):
 
         print(f"\n== {grouping_type} ==")
         print(groups)
+
+        if save and grouping_type == "per_alias":
+            n_instances = len((df["problem"] + "-" + df["instance"]).unique())
+
+            # n_instances = df.groupby(['problem','instance']).nunique()
+
+            track, = df["track"].unique()
+            track = track[:3]
+            print(groups.index)
+            def rename_idx(x):
+                if "base" in x:
+                    return "\\baseline"
+                elif "cutoff" in x:
+                    return "\\cutoff"
+                elif "none" in x:
+                    return "\\explain"
+                else:
+                    print(x)
+                    return f"\\{x.split('-')[1:][0]}"
+
+            print(groups.rename(index=rename_idx)[
+                [
+                    *(["unk", "mem", "post"]),
+                    *(["feas"] if is_cop else [] ),
+                    *(["solv", "t_solv_p2", "cuts", "cb_rel"])
+                ]
+            ].to_latex(
+                na_rep="",
+                header=[
+                    *(["\\unk", "\\mem", "\\pst"]),
+                    *(["\sat"] if is_cop else []),
+                    *(["\sol", "time [s]", "cuts", "CB [\%]"]),
+                ],
+                float_format="%.1f",
+                caption=f"{n_instances} {track} instances",
+                label=f"tbl:res:{track.lower()}",
+                # escape=True,
+            ))
 
     errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception"]]
     if not errors.empty:
@@ -394,16 +442,17 @@ def main():
     parser = argparse.ArgumentParser(description='Analyze XCSP3 solver performance data')
     parser.add_argument('files', nargs='+', help='List of CSV files or directories to analyze')
     parser.add_argument('--time-limit', type=float, default=None, help='Maximum time limit in seconds to show on x-axis')
-    parser.add_argument('--plot', '-p', type=str, default=None, help='Path to save the plot image (e.g., plot.png)')
+    parser.add_argument('--plot', '-p', type=pathlib.Path, default=None, help='Path to save the plot image (e.g., plot.png)')
     parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
     parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
     parser.add_argument('--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
+    parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, glob_alias=None):
+def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, glob_alias=None, glob_instance=None):
 
     import subprocess
     if sync:
@@ -448,7 +497,19 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
         with open(x) as f:
             metadata = json.load(f)
         areas = [t["rows"] for t in metadata["tables"]]
-        return [metadata.get("method", None), sum(areas), len(areas), statistics.mean(areas), statistics.median(areas), statistics.stdev(areas) if len(areas) > 1 else None]
+
+        def mean(a):
+            return statistics.mean(a) if a else None
+
+        def median(a):
+            return statistics.median(a) if a else None
+
+        def stdev(a):
+            return statistics.stdev(a) if a else None
+
+
+        return [metadata.get("method", None), sum(areas), len(areas), mean(areas), median(areas), stdev(areas) if len(areas) > 1 else None]
+
     df[["method", "area", "count", "mean","median", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
 
     # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
@@ -463,15 +524,16 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
         df['alias'] = df['alias'] + "-" + df['run']
 
+
     # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
     # print(df.mask(df["status"] == OPT).groupby(by=['problem', 'instance']).agg(lambda x: ','.join(str(x_) for x_ in x.unique()))['obj'])
 
     df['alias'] += '.'
 
 
-    if glob_alias:
-        df = df.drop(df[~df["alias"].map(lambda alias: any(g in alias for g in glob_alias))].index)
-
+    for col, glob in [("alias", glob_alias), ("problem", glob_instance)]:
+        if glob:
+            df = df.drop(df[~df[col].map(lambda g_: any(g in g_ for g in glob))].index)
 
     # temporarily drop all instances where there are any errors
     if no_errors:
@@ -495,8 +557,9 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # Save or show plot
     if plot:
-        fig.savefig(plot, bbox_inches='tight')
-        print(f"Plot saved to {plot}")
+        fig.savefig(plot.with_suffix(".png"), bbox_inches='tight')
+        fig.savefig(plot.with_suffix(".svg"), bbox_inches='tight')
+        print(f"Plot saved to {plot}.{{.png,.svg}}")
     # else:
     #     plt.show()
 
