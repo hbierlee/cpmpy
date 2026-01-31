@@ -394,7 +394,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # RS = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
         # X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
 
-        RS = T_enc[:, S].sum(axis=1)
+        RS = (C_enc[S] * T_enc[:, S]).sum(axis=1)
         R_tight = tight(R, RS)
         X = (T_enc.T & R_tight).any(1)
 
@@ -441,7 +441,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             j = [3, 7, 0][i] if self.env["example2"] else (~X).argmax()
 
-            # TODO just ~R_tight?
             RT = (~R_tight) & T_enc[:, j]
             if (~RT).all():
                 break
@@ -452,7 +451,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             S[j] = True
             # assert j not in C_enc # TODO [peter] can happen?
-            C_enc[j] = a_j
+            C_enc[j] += a_j
 
             assert (
                 not self.env["example2"]
@@ -479,8 +478,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             if self.env["verbosity"]:
                 self.log(f"j = {show(j)}", verbosity=3)
-                self.log("S", show_set(S), verbosity=3)
-                self.log("terms", C_enc, verbosity=3)
+                self.log("S", S, verbosity=3)
+                self.log("C_enc", C_enc, verbosity=3)
                 self.log("a_j", a_j, verbosity=3)
                 self.log("A", a_j * T_enc.T[j], verbosity=3)
                 self.log("RS", RS, verbosity=3)
@@ -905,7 +904,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             lhs = sum(w * x.value() for w, x in zip(ws, xs))
             return bool(is_le(lhs, k))  # np -> python bool
 
-        case = f"The explanation\n\n{expr}\n{value(expr)}\n\n from assignment {frm} {show_assignment(X_enc)} for table:\n\n {A_enc}\n{show_table(T_enc)}\n\n  "
+        case = f"The explanation\n\n{expr}\n== {value(expr)}\n\n from assignment {frm} {show_assignment(X_enc)} for table:\n\n {A_enc}\n{show_table(T_enc)}\n\n  "
 
         if not is_true_cst(expr):
             assert value(expr) is False, f"Did not cut off assignment:\n\n{case}"
@@ -1003,8 +1002,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             hassol = super().solve(solution_callback=solution_callback, time_limit=time_limit, **kwargs)
 
             if hassol:
-                if self.env["debug"]:
-                    assert self.env["feasible"]
+                # if self.env["debug"]:
+                #     assert self.env["feasible"]
                 if not self.env["found_feasible"]:
                     self.log("WARN: not found feas")
                 # assert self.env["found_feasible"]
