@@ -381,15 +381,17 @@ def run_solution_checker(JAR, instance_location, out_file, verbose, cpm_time):
     return test_res_str.stdout.split("\n")[-2], checker_time
 
 
+def get_table_metadata_(table):
+    X, tab = table.args
+    cols = [cp.expressions.utils.dom_size(x) for x in X]
+    rows = len(tab)
+    return {"cols": cols, "rows": rows, "area": rows * sum(cols)}
+
 def get_table_metadata(model):
     tables = []
     for c in model.constraints:
         if isinstance(c, cp.expressions.core.Expression) and c.name == "table":
-            # TODO involve int var doms
-            X, tab = c.args
-            cols = [cp.expressions.utils.dom_size(x) for x in X]
-            rows = len(tab)
-            tables.append({"cols": cols, "rows": rows, "area": rows * sum(cols)})
+            tables.append(get_table_metadata_(c))
     match model.objective_is_min:
         case True:
             method = "minimize"
