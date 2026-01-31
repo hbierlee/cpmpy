@@ -278,7 +278,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if verbosity <= self.env["verbosity"]:
             indent = self.indent if indent is None else indent
             mess = " " * indent * 2 + " ".join(str(m) for m in mess) + end
-            assert verbosity > 2 or len(mess) < 100, f"Long message {mess}"
+            assert verbosity >= 3 or len(mess) < 100, f"Long message {mess}"
             # self.logger.debug(mess)
             print(mess, end="")
             # print(mess, end="", flush=self.env["debug"])
@@ -334,20 +334,19 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("", A_enc.astype(int), "A_enc", verbosity=3)
             self.log("", choices.astype(int), "choices", verbosity=3)
 
-        C = choices & is_gt(A_enc, 0.0)
         if none(choices):
             return None
         match heuristic:
             case Heuristic.INPUT:
-                return np.min(parts[choices & is_gt(A_enc, 0.0)])
+                return np.argmax(choices)
             case Heuristic.GREEDY:
-                parts_ = np.add.accumulate(np.unique_counts(parts[C]).counts)
+                parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
                 parts_ -= parts_[0]
                 # map back to the right part index
-                return parts[C][
+                return choices.nonzero()[0][
                     np.bitwise_or.reduceat(
                         # get only the relevant rows and columns
-                        T_enc[R, :][:, C],
+                        T_enc[R, :][:, choices],  # TODO play nice with neg choices
                         # for the columns of each part
                         parts_,
                         # see if there is any 1 in the row
@@ -358,6 +357,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     # find the sm
                     .argmin()
                 ]
+
             case Heuristic.REDUCE:
                 assert False
                 # choice = min(
@@ -594,9 +594,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["verbosity"]:
             self.log(f"R ({R.sum()})", verbosity=2, indent=self.indent + 2)
 
-        for iteration in itertools.count(start=1):
-            # assert is_gt(A_enc[X].sum(), k), f"For {A_enc[X]}, {A_enc[X].sum()} should be >{k}"
+        C_enc = np.zeros(len(X), dtype=int)
+        A_enc_pos = is_gt(A_enc, 0.0)
 
+        for iteration in itertools.count():
             if none(R):
                 if self.env["verbosity"]:
                     self.log(f"cuts = {iteration}")
@@ -607,42 +608,55 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C_ = l_parts & is_gt(A_enc, 0.0)
                 return C_, l_parts, T_enc[:, C_].any(1)
 
-            # choice = choices.argmax()
-            # choice = np.argmax(np.sum(choices & T_enc[R, :], axis=0))
+            neg_choices = choices & ~A_enc_pos
+            choice = self.choose(
+                # neg_choices if neg_choices.any() else choices,
+                (choices & A_enc_pos) if R.sum() > 5 or not neg_choices.any() else neg_choices,
+                T_enc,
+                R,
+                parts,
+                A_enc,
+                heuristic=self.env["heuristic"],
+            )
+            # choice, is_pos = [(1, True), (4, False)][iteration]
+            is_pos = A_enc_pos[choice]
 
-            choice = self.choose(choices, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
             if choice is None:
                 return None
 
-            # choice = [0, 9][iteration]
-
-            # choice = choices.argmin(np.fromiter(len(covered(c)[2]) for c in choices))
-
-            # C_, l_parts, R_ = covered(choice)
-
-            # l_parts = parts[choice] == parts
-            l_parts = choice == parts
-            # TODO move up  is_gt
-            C_ = l_parts & is_gt(A_enc, 0.0)
-            choices[l_parts] = False
-            R = R & T_enc[:, C_].any(1)
-            X |= C_
-            k += 1
+            l_parts = parts[choice] == parts
+            assert not C_enc[choice], f"chosen {choice}"
+            if is_pos:
+                C_ = l_parts & A_enc_pos
+                choices[l_parts] = False
+                R = R & T_enc[:, C_].any(1)
+                X |= C_
+                C_enc[choice] = 1
+                k += 1
+            else:
+                C_ = choice
+                choices[choice] = False
+                R = R & (~T_enc[:, choice])
+                X[choice] = True
+                C_enc[choice] = -1
 
             self.check_max_iterations(iteration)
 
             if self.env["verbosity"]:
                 self.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
                 self.log(
-                    f"chosen part {choice} ({choice == parts})",
+                    f"chosen {'pos' if is_pos else 'neg'} col. {show_ind(choice)} of part {parts[choice]}",
                     verbosity=3,
                     indent=self.indent + 2,
                 )
                 self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
                 self.log(f"C_ {C_}", verbosity=3, indent=self.indent + 2)
-                self.log(f"R ({R.sum()})", verbosity=2, indent=self.indent + 2)
+                self.log(f"is_pos {is_pos} {choice}", verbosity=2, indent=self.indent + 2)
+                self.log(f"R {choice} ({R.sum()})", verbosity=2, indent=self.indent + 2)
+                self.log(f"= {show_set(R.nonzero())}", verbosity=3, indent=self.indent + 3)
                 self.log(f"== {R}", verbosity=3, indent=self.indent + 4)
                 self.log(f"X {X}", verbosity=3, indent=self.indent + 2)
+                self.log(f"C {C_enc}", verbosity=3, indent=self.indent + 2)
             # [     1   1     ]
             # [ 0 1 1 0 0 0 0 ]  Y
             # [ 0 0 0 0 1 0 0 ]  Y
@@ -656,12 +670,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # [     0   0     ]  N
             # [     0   0     ]  N
             # keep only rows which are in R and which have an 1 where A_enc has a 1
-
-            # R = R & np.any(T_enc[:, C_], axis=1)
-            # R &= T_enc[:, C_].any(1)
-            # R &= T_enc[R, list(C_)].any(1)
-
-        # X = X.nonzero()[0]
 
         if self.env["verbosity"]:
             self.log(f"by explanation of size ({sum(X)})", verbosity=2)
@@ -680,9 +688,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         "cut": X_shrunk,
                     }
             self.env["cuts"][-1]["shrunk"] = shrunk
-
-        C_enc = np.zeros(len(X), dtype=int)
-        C_enc[X] = 1
 
         def show_cut():
             if self.env["verbosity"]:
@@ -1015,8 +1020,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if self.env["debug"]:
                 with open("/tmp/failed_model.pkl", "wb") as f:
                     pickle.dump(self.env["model"], f)
-                if self.env["verbosity"]:
-                    self.log("Exception in callback", e)
             self.env["verbosity"] = 4
             try:
                 self.stats()
