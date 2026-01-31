@@ -522,6 +522,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         assert len(A_enc) == len(T_enc.T)
 
+        C_enc = np.zeros(len(A_enc), dtype=int)
+        A_enc_pos = is_gt(A_enc, 0.0)
+
         self.env["cuts"].append({"from": frm})
 
         m = len(T_enc)  # number of cols
@@ -535,7 +538,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # W = set(W.flatten())
         # F = set(i for i in set(range(len(A_enc))) - W if is_gt(A_enc[i], 0.0))  # find 0 < a < 1
         # TODO check only if MIPNODE-OPT
-        F = (~W) & is_gt(A_enc, 0.0)
+        F = (~W) & A_enc_pos
 
         # F = set(np.argwhere(is_gt(np.delete(A_enc, W), 0.0)).flatten())  # much slower
         # F = set(np.argwhere(is_gt(A_enc, 0.0) & is_lt(A_enc, 1.0)).flatten())  # slightly slower
@@ -577,6 +580,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 choices[parts[choice] == parts] = False
                 X = np.zeros(len(T_enc.T), dtype=bool)
                 X[choice] = True
+                C_enc[choice] = 1
                 R = T_enc[:, choice]
                 k = 0
                 # if self.env["debug"]:
@@ -592,9 +596,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["verbosity"]:
             self.log(f"R ({R.sum()})", verbosity=2, indent=self.indent + 2)
-
-        C_enc = np.zeros(len(X), dtype=int)
-        A_enc_pos = is_gt(A_enc, 0.0)
 
         for iteration in itertools.count():
             if none(R):
