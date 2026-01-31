@@ -1041,14 +1041,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
         cpm_expressions = super().transform(cpm_expressions, lazy=True)
         for cpm_expr in cpm_expressions:
             if cpm_expr.name == "table":
-                area = get_table_area(cpm_expr)
+                rows = len(cpm_expr.args[1])
                 if self.env["verbosity"]:
-                    self.log(f"table of {area}:", cpm_expr, verbosity=3)
-                if area >= self.env["cutoff"]:
+                    self.log(f"table of {rows} rows:", cpm_expr, verbosity=3)
+                if rows >= self.env["cutoff"]:
                     if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
                         cpm_expr = normalize_table(cpm_expr)
                         if self.env["verbosity"]:
-                            self.log("norm to", area, get_table_area(cpm_expr), verbosity=2)
+                            self.log("norm to", rows, get_table_area(cpm_expr), verbosity=2)
                     X, T = cpm_expr.args
                     # only check after normalize, since normalize may remove all rows
                     if not len(T):
