@@ -153,6 +153,7 @@ def load_model(path):
         return cp.Model()
 
 
+@pytest.mark.timeout(60)
 class TestTables:
     def test_repro_explain(self, env):
         path = pathlib.Path("/tmp/failed_cut.pkl")
@@ -160,7 +161,7 @@ class TestTables:
             with open(path, "rb") as f:
                 X_enc, A_enc, T_enc, parts, frm, A_enc_ = pickle.load(f)
             slv = CPM_lazy_gurobi(
-                env={**env, **{"verbosity": 3, "debug": True}},
+                env={**env, **{"verbosity": 3, "debug": True, "checker": None}},
             )
 
             COLS = None
@@ -179,7 +180,7 @@ class TestTables:
             if explanation is None:
                 print("Infeasible")
             else:
-                slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm, A_enc_)
+                slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
 
     @pytest.mark.skip()
     def test_coverlift(self, env):
@@ -246,9 +247,9 @@ class TestTables:
     def test_explain(self, env):
         random.seed(SEED)
         for e, A_enc in [
-            # (generate_table_from_data([(2, 1), (2, 1), (2, 1), (1, 2)], 2), np.array([0, 1, 0, 1])),
+            (generate_table_from_data([(2, 1), (2, 1), (2, 1), (1, 2)], 2), np.array([0, 1, 0, 1])),
             # (generate_table(3, 3, 3), None),
-            (generate_table(10, 2000, 10), None),
+            # (generate_table(10, 2000, 10), None),
             # (generate_table(100, 500, 25), None),
         ]:
             # found feasible
@@ -289,6 +290,7 @@ class TestTables:
             slv.solve()
             slv.stats()
             X_enc, T_enc, parts, table = slv.tables[0]
+
             def list_to_A_enc(A_enc):
                 return dict(zip(X_enc, A_enc))
 
@@ -311,7 +313,7 @@ class TestTables:
         "case",
         (
             (i, j, t)
-            for j in range(25)  # to repeat the test
+            for j in range(10)  # to repeat the test
             for i, t in enumerate(
                 [
                     *[

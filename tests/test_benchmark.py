@@ -7,6 +7,7 @@ from cpmpy.tools.xcsp3.experiments import experiment, ablate
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import ExitStatus, TIME_BUFFER
 from cpmpy.solvers.gurobi import CPM_gurobi
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
+import test_lazy_gurobi
 import time
 
 TIMEOUT = 5
