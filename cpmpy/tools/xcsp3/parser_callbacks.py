@@ -712,7 +712,7 @@ class CallbacksCPMPy(Callbacks):
         self._unimplemented(lst, balance, arcs, capacities, weights, condition)
 
     def ctr_instantiation(self, lst: list[Variable], values: list[int]):
-        self.cpm_model += xglobals.NonReifiedTable(self.get_cpm_vars(lst), [values])
+        self.cpm_model += cp.all(self.get_cpm_vars(lst) == cpm_array(values))
 
     def ctr_clause(self, pos: list[Variable], neg: list[Variable]):  # not in XCSP3-core
         self._unimplemented(pos, neg)
