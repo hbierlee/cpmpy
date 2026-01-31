@@ -928,8 +928,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return "\n".join(repr(a) for a in As)
 
             expected_solutions = self.env["solutions"]
-            self.log(self.env["checker"])
-            self.log("SOLS", len(expected_solutions), len(actual_solutions))
+            self.log(self.env["checker"], verbosity=3)
+            self.log("SOLS", len(expected_solutions), len(actual_solutions), verbosity=3)
             self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
             assert expected_solutions <= actual_solutions, (
                 f"Missing sols:\n\n{show_assignments(expected_solutions)}\n\n {show_assignments(actual_solutions)}\n\n{self.env['checker']}"
