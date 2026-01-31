@@ -83,15 +83,15 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
     # Get unique solvers
     solvers = df['alias'].unique()
 
-    # Determine the status to plot (Opt if at least one opt, otherwise sat)
-    if filter_by == "solved":
-        status_filter = (OPT, UNS)
-    elif filter_by == "feasible":
-        status_filter = (OPT, UNS, SAT)
-    else:
-        raise Exception
+    # # Determine the status to plot (Opt if at least one opt, otherwise sat)
+    # if filter_by == "solved":
+    #     status_filter = solved
+    # elif filter_by == "feasible":
+    #     status_filter = (OPT, UNS, SAT)
+    # else:
+    #     raise Exception
 
-    df = df[(df['status'].isin(status_filter))]  # only those that reached the desired status
+    df = df[df["solved"]]  # only those that reached the desired status
     # print(df[["solver", "instance", "status", metric]])
 
     # Count how many instances each solver solved (with correct status)
@@ -123,7 +123,8 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
     
     # Set plot properties
     plt.xlabel('Time (seconds)')
-    plt.ylabel(f'Number of {filter_by} instances (status in [{','.join(s[:3] for s in status_filter)}])')
+    # plt.ylabel(f'Number of {filter_by} instances (status in [{','.join(s[:3] for s in status_filter)}])')
+    plt.ylabel(f'Number of solved instances')
     # Get unique year-track combinations
     year_track_pairs = df[['year', 'track']].drop_duplicates()
     datasets = ', '.join([f'{row.year}:{row.track}' for _, row in year_track_pairs.iterrows()])
@@ -209,7 +210,7 @@ def xcsp3_objective_performance_profile(df):
 
     return fig
 
-def xcsp3_stats(df, time_limit=None, save=None):
+def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
 
     if False:  # TODO FutureWarning: The behavior of Series.idxmax with all-NA values, or any-NA and skipna=False, is deprecated. In a future version this will raise ValueError
         for phase in ['parse', 'model', 'post']:
@@ -224,14 +225,9 @@ def xcsp3_stats(df, time_limit=None, save=None):
 
     diff = "Δ"
     df.insert(df.columns.get_loc("time_solve"), diff, df.groupby(['instance'])["time_solve"].diff())
-    # df["area"], df["count"] = df["file_name"].map(get_metadata)
+    # df["rows"], df["count"] = df["file_name"].map(get_metadata)
     pd.set_option('display.float_format', '{:0.1f}'.format)
 
-    df["unknown"] = df["status"] == UNK
-    df["error"] = df["status"] == ERR
-    df["memory"] = df["status"] == MEM
-    df["feasible"] = df["status"].isin((OPT, SAT, UNS))
-    df["solved"] = df["status"].isin((OPT, UNS))
     df["post"] = ~df["time_post"].isna()
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_solve"])
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
@@ -249,7 +245,7 @@ def xcsp3_stats(df, time_limit=None, save=None):
               [[
             "problem",
             "instance",
-            "area",
+            "rows",
             # "mean",
             "median",
             "stdev",
@@ -265,11 +261,10 @@ def xcsp3_stats(df, time_limit=None, save=None):
             "time_cb",
             "cb_rel",
             "cuts",
-            "exception",
+            # "exception",
         ]].sort_values(by=
                        [
-                           # "area",
-                           "median",
+                           "rows",
                            "problem",
                            "instance",
                            "alias"
@@ -299,7 +294,8 @@ def xcsp3_stats(df, time_limit=None, save=None):
         groups = df.groupby(grouping).agg(
                 alias = ("alias", "first"),
                 insts = ("problem", 'count'),
-                area = ('area', 'mean'),
+                median = ('median', 'first'),
+                stdev = ('stdev', 'first'),
                 # t_totl_hr = ('time_total', 'sum'),
                 t_totl_p2 = ('time_total_p2', 'mean'),
                 t_post_p2 = ('time_post_p2', 'mean'),
@@ -319,10 +315,12 @@ def xcsp3_stats(df, time_limit=None, save=None):
         track, = df["track"].unique()
         is_cop = "COP" in track
 
+
         groups = groups[[
             # *(["insts"] if PER_PROBLEM else ["insts"]),
             *([] if grouping_type == "per_alias" else [
-                "area",
+                "median",
+                "stdev",
                 ]),
             *([
                 "t_post_p2",
@@ -347,12 +345,12 @@ def xcsp3_stats(df, time_limit=None, save=None):
         ]]
 
 
-        # groups = groups.sort_index(level=["problem"], by="area")
-        # groups = groups.sort_values(by="area", ascending=False)
+        # groups = groups.sort_index(level=["problem"], by="rows")
+        # groups = groups.sort_values(by="rows", ascending=False)
         if "t_totl_hr" in groups:
             groups["t_totl_hr"] = groups["t_totl_hr"].map(lambda x: x / 3600)
-        if "area" in groups:
-            groups["area"] = groups["area"].map(lambda x: f"{x:.1e}")
+        if "rows" in groups:
+            groups["rows"] = groups["rows"].map(lambda x: f"{x:.1e}")
         # groups.loc[('Total')] = groups.sum(numeric_only=True)
 
         print(f"\n== {grouping_type} ==")
@@ -395,6 +393,7 @@ def xcsp3_stats(df, time_limit=None, save=None):
                 label=f"tbl:res:{track.lower()}",
                 # escape=True,
             ))
+
 
     errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception"]]
     if not errors.empty:
@@ -496,7 +495,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     def get_metadata(x):
         with open(x) as f:
             metadata = json.load(f)
-        areas = [t["rows"] for t in metadata["tables"]]
+        rowss = [t["rows"] for t in metadata["tables"]]
 
         def mean(a):
             return statistics.mean(a) if a else None
@@ -508,14 +507,26 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
             return statistics.stdev(a) if a else None
 
 
-        return [metadata.get("method", None), sum(areas), len(areas), mean(areas), median(areas), stdev(areas) if len(areas) > 1 else None]
+        return [metadata.get("method", None), sum(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
 
-    df[["method", "area", "count", "mean","median", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
+    df[["method", "rows", "count", "mean","median", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
 
     # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
 
     # replace time_solve to NaN if not solved
-    solved = [OPT, UNS]
+
+    track, = df["track"].unique()
+    is_cop = "COP" in track
+
+    solved = [OPT, UNS] if is_cop else [SAT, UNS]
+
+    df["unknown"] = df["status"] == UNK
+    df["error"] = df["status"] == ERR
+    df["memory"] = df["status"] == MEM
+    df["feasible"] = df["status"].isin((OPT, SAT, UNS))
+    df["solved"] = df["status"].isin(solved)
+
+
     df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
 
     # let solve include post time?
@@ -533,14 +544,21 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     for col, glob in [("alias", glob_alias), ("problem", glob_instance)]:
         if glob:
-            df = df.drop(df[~df[col].map(lambda g_: any(g in g_ for g in glob))].index)
+            df = df.drop(df[~df[col].map(lambda g: any(g_ in g for g_ in glob))].index)
 
-    # temporarily drop all instances where there are any errors
-    if no_errors:
-        df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x]["status"].unique())].index)
+    # # temporarily drop all instances where there are any errors
+    # print(df)
+    # print(df.columns)
+    # # statuses = df.apply(lambda x: df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique())
+    # statuses = df.group(by=["problem", "instance"]).unique()
+    # print(statuses)
+    # assert False
+
+    # if no_errors:
+    #     df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x & df["instance"] == x]["status"].unique())].index)
 
     if solved_only:
-        df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset((OPT, UNS)), axis=1)]
+        df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset(solved), axis=1)]
 
     pd.set_option("display.max_colwidth", None)
     pd.set_option("display.max_columns", None)
