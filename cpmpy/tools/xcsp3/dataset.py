@@ -35,6 +35,7 @@ Since the dataset is PyTorch compatible, it can be used with a DataLoader:
 """
 
 import json
+import itertools
 import pathlib
 from typing import Tuple, Any
 import xml.etree.ElementTree as ET
@@ -130,7 +131,10 @@ class XCSP3Dataset(object):  # torch.utils.data.Dataset compatible
         
     def __len__(self) -> int:
         """Return the total number of instances."""
-        return len(list(self.track_dir.glob("*.xml.lzma")))
+        return len(list(self._glob()))
+    def _glob(self):
+        return itertools.chain(self.track_dir.glob("*.xml.lzma"), self.track_dir.glob("*.xml"))
+
     
     def __getitem__(self, index: int) -> Tuple[Any, Any]:
         """
@@ -148,7 +152,7 @@ class XCSP3Dataset(object):  # torch.utils.data.Dataset compatible
             raise IndexError("Index out of range")
 
         # Get all compressed XML files and sort for deterministic behavior
-        files = sorted(list(self.track_dir.glob("*.xml.lzma")))
+        files = sorted(list(self._glob()))
         file_path = files[index]
 
         filename = str(file_path)

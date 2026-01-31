@@ -458,12 +458,20 @@ def xcsp3_benchmark(
     output_file.unlink(missing_ok=True)
     
     # Initialize dataset
-    def update_metadata_table(metadata):
-        if 'tables' not in metadata:
-            print(f"Updating table metadata for {metadata['name']}")
-            metadata = { **metadata, **get_table_metadata(read_xcsp3(metadata['path'])) }
+    problems = set()
 
+    areas = dict()
+    def update_metadata_table(metadata):
         metadata["problem"] = metadata["name"].split("-")[0]
+        if 'tables' not in metadata and (metadata["problem"] not in areas or areas[metadata["problem"]]):
+            print(f"Updating table metadata for {metadata['name']}", end=None)
+            metadata = { **metadata, **get_table_metadata(read_xcsp3(metadata['path'])) }
+            print(metadata["area"])
+            areas[metadata["problem"]] = metadata["area"]
+        else:
+            metadata["area"] = 0
+            metadata["tables"] = []
+
         return metadata
 
     dataset = XCSP3Dataset(
