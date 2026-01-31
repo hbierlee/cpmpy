@@ -123,7 +123,7 @@ class CPM_gurobi(SolverInterface):
         except pkg_resources.DistributionNotFound:
             return None
 
-    def __init__(self, cpm_model=None, subsolver=None, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, **kwargs):
         """
         Constructor of the native solver object
 
@@ -142,7 +142,7 @@ class CPM_gurobi(SolverInterface):
 
         # initialise everything else and post the constraints/objective
         # it is sufficient to implement add() and minimize/maximize() below
-        super().__init__(name="gurobi", cpm_model=cpm_model, **kwargs)
+        super().__init__(name=name, cpm_model=cpm_model, **kwargs)
 
     @property
     def native_model(self):
