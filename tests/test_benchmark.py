@@ -4,12 +4,13 @@ import sys
 import numpy as np
 import cpmpy as cp
 from cpmpy.transformations.get_variables import get_variables
-from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark
+from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark, get_table_metadata_
 from cpmpy.tools.xcsp3.experiments import experiment, ablate
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import ExitStatus, TIME_BUFFER
 from cpmpy.solvers.gurobi import CPM_gurobi
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
 import test_lazy_gurobi
+import pandas as pd
 import time
 
 TIMEOUT = 5
@@ -219,20 +220,67 @@ class TestBenchmark:
             # "2025/COP25-dev/dev-1.xml",
             # "2025/CSP25/Accordion-11-01_c25.xml.lzma",
             # "2025/COP25/Fortress1-03_c25.xml.lzma",
-            test_lazy_gurobi.with_constraints(
-                test_lazy_gurobi.generate_table_from_example(), with_alldiff=True
-            ),
+            # test_lazy_gurobi.with_constraints(
+            #     test_lazy_gurobi.generate_table_from_example(), with_alldiff=True
+            # ),
+            # "2025/COP25/IHTC-i01_c25.xml",
+            # "2025/COP25/RoadefPlaning2-2021-04_c25.xml",
+            # "2025/COP25/FAPP-aux-ex1_c25.xml",
         ):
             if isinstance(m, str):
                 m = read_xcsp3(m)
             # slv = CPM_lazy_gurobi()
-            slvs = (CPM_gurobi(), CPM_lazy_gurobi())
+            import scalene
+
+            import psutil
+
+            import humanfriendly
+
+            process = psutil.Process()
+
+            # scalene.scalene_profiler.start()
+            PRINT = False
+            slvs = (
+                # CPM_gurobi(),
+                CPM_lazy_gurobi(),
+            )
             for slv in slvs:
+                t = time.time()
                 print(slv.name)
-                for i, c in enumerate(m.constraints[:10]):
-                    print(f"C{i}", repr(c)[:100])
+                rows=[]
+                for i, c in enumerate(m.constraints[:]):
+                    row = {}
+                    mem = process.memory_info().rss
+                    rep = repr(c)[:100]
+                    print(f"C{i}", rep)
+                    row["c"] = rep
+                    if c.name == "table":
+                        md = get_table_metadata_(c)
+                        print(md)
+                        del md["cols"]
+                        row |= md
                     for c_ in slv.transform(c):
-                        print("  ", c_)
+                        if PRINT:
+                            print("  ", c_)
+                    if time.time() - t > 60:
+                        return
+                    diff = process.memory_info().rss - mem
+                    row["mem"] = diff
+                    rows.append(row)
+                    print(f"  M = {humanfriendly.format_size(diff)}")
+
+                pd.set_option("display.max_colwidth", None)
+                pd.set_option("display.max_columns", None)
+                pd.set_option("display.max_rows", None)
+                pd.set_option("display.expand_frame_repr", False)
+
+                df = pd.DataFrame(data=rows)
+                df["mem_hf"] = df["mem"].map(humanfriendly.format_size)
+                df = df.sort_values(by="mem")
+                # df["mem"] = humanfriendly.format_size(df["mem"])
+                print(df)
+                print(humanfriendly.format_size(df["mem"].sum()))
+            print("done")
 
         # m.solve(solver="gurobi")
         # parser = _parse_xcsp3("../2025/COP25-dev/dev-1.xml")
