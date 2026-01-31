@@ -1,4 +1,6 @@
 import pandas as pd
+from cpmpy.tools.xcsp3 import _parse_xcsp3, _load_xcsp3, read_xcsp3
+import sys
 import numpy as np
 import cpmpy as cp
 from cpmpy.transformations.get_variables import get_variables
@@ -209,3 +211,29 @@ class TestBenchmark:
             ("b-5", {"a": False, "b": 5}),
             ("all", {"a": True, "b": 2}),
         ]
+
+    def test_dev(self):
+        # Parse and create CPMpy model
+        sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
+        for m in (
+            # "2025/COP25-dev/dev-1.xml",
+            # "2025/CSP25/Accordion-11-01_c25.xml.lzma",
+            # "2025/COP25/Fortress1-03_c25.xml.lzma",
+            test_lazy_gurobi.with_constraints(
+                test_lazy_gurobi.generate_table_from_example(), with_alldiff=True
+            ),
+        ):
+            if isinstance(m, str):
+                m = read_xcsp3(m)
+            # slv = CPM_lazy_gurobi()
+            slvs = (CPM_gurobi(), CPM_lazy_gurobi())
+            for slv in slvs:
+                print(slv.name)
+                for i, c in enumerate(m.constraints[:10]):
+                    print(f"C{i}", repr(c)[:100])
+                    for c_ in slv.transform(c):
+                        print("  ", c_)
+
+        # m.solve(solver="gurobi")
+        # parser = _parse_xcsp3("../2025/COP25-dev/dev-1.xml")
+        # model = _load_xcsp3(parser)
