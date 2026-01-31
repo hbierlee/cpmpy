@@ -66,7 +66,7 @@ def get_experiments(overrides={}, filters=[]):
                             ],
                             add_none=True,
                             add_all=True,
-                            filters=["heuristic"],
+                            # filters=["heuristic"],
                         ),
                     ]
                 ],
@@ -77,7 +77,7 @@ def get_experiments(overrides={}, filters=[]):
     )
 
 
-def experiment(experiments, overrides={}, filters=[]):
+def experiment(experiments, overrides={}, filters=None):
     return [
         experiment
         for experiment in [
@@ -87,11 +87,11 @@ def experiment(experiments, overrides={}, filters=[]):
             }
             for experiment_ in itertools.product(*DEFAULTS, *experiments)
         ]
-        if all(any(v in experiment[k] for v in vs) for k, vs in filters)
+        if filters is None or all(any(v in experiment[k] for v in vs) for k, vs in filters)
     ]
 
 
-def ablate(feats, add_one=True, add_none=True, add_all=False, filters=[]):
+def ablate(feats, add_one=True, add_none=True, add_all=False, filters=None):
     return [
         *([("none", {feat: feat_vals[0] for feat, feat_vals in feats})] if add_none else []),
         *(
@@ -101,7 +101,7 @@ def ablate(feats, add_one=True, add_none=True, add_all=False, filters=[]):
                     {feat_: feat_val if feat == feat_ else feat_vals_[0] for feat_, feat_vals_ in feats},
                 )
                 for feat, feat_vals in feats
-                if feat in filters
+                if filters is None or feat in filters
                 for feat_val in feat_vals[1:]
             ]
             if add_one
