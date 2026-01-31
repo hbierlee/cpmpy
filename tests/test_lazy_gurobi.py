@@ -247,7 +247,8 @@ class TestTables:
     def test_explain(self, env):
         random.seed(SEED)
         for e, A_enc in [
-            (generate_table_from_data([(2, 1), (2, 1), (2, 1), (1, 2)], 2), np.array([0, 1, 0, 1])),
+            (generate_table_from_example(), np.array([0, 1, 0, 0, 0, 1, 0, 0, 1, 0])),
+            # (generate_table_from_data([(2, 1), (2, 1), (2, 1), (1, 2)], 2), np.array([0, 1, 0, 1])),
             # (generate_table(3, 3, 3), None),
             # (generate_table(10, 2000, 10), None),
             # (generate_table(100, 500, 25), None),
@@ -277,26 +278,30 @@ class TestTables:
                     **env,
                     **{
                         "fractional": False,
-                        "coverlift": True,
+                        "coverlift": False,
                         "max_iterations": None,
-                        "heuristic": Heuristic.INPUT,
+                        "heuristic": Heuristic.GREEDY,
                         # "heuristic": Heuristic.GREEDY,
                         "shrink": False,
                         "debug": True,
-                        "verbosity": 2,
+                        "verbosity": 3,
                     },
                 },
             )
-            slv.solve()
-            slv.stats()
+            if False:
+                slv.solve()
+                slv.stats()
+                X_enc, T_enc, parts, table = slv.tables[0]
+
+                def list_to_A_enc(A_enc):
+                    return dict(zip(X_enc, A_enc))
+
+                A_enc = list_to_A_enc(A_enc)
+
             X_enc, T_enc, parts, table = slv.tables[0]
-
-            def list_to_A_enc(A_enc):
-                return dict(zip(X_enc, A_enc))
-
-            A_enc = list_to_A_enc(A_enc)
-
-            explanations = list(slv._explain_assignment(A_enc))
+            print(A_enc)
+            # explanations = list(slv._explain_assignment(A_enc, frm="MIPSOL"))
+            explanations = list(slv.explain(A_enc, T_enc, parts, frm="MIPSOL"))
             print("E", explanations)
         # print("ERR", e.value)
 
