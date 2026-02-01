@@ -768,7 +768,7 @@ def xcsp3_cpmpy(
 
         # ------------------------------------- - ------------------------------------ #
 
-        if check_time_limit is not None and s.status().exitstatus in (CPMStatus.FEASIBLE, CPMStatus.OPTIMAL):
+        if check_time_limit != 0 and s.status().exitstatus in (CPMStatus.FEASIBLE, CPMStatus.OPTIMAL):
             print_comment(f"Checking solution within check time limit {check_time_limit}")
             time_check = time.time()
             try:
@@ -777,7 +777,7 @@ def xcsp3_cpmpy(
                 for c in model.constraints:
                     assert c.value(), f"Constraint {c} failed for assignment {show_assignment(get_variables(c))}"
                     # stop in time; we are in danger of being killed
-                    if check_time_limit - (time.time() - time_check) < time_buffer:
+                    if check_time_limit is not None and check_time_limit - (time.time() - time_check) < time_buffer:
                         raise TimeoutError(f"Checking did not finish in time limit {check_time_limit}")
             except (TimeoutError, AssertionError) as e:
                 raise CheckError(f"Check failed for solver {s}") from e
