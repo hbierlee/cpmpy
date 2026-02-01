@@ -463,16 +463,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             N_tight = tight(~R_tight, RS)
 
-            # R_tight &= N_tight
-
-            # R -= R_tight
             R_tight |= N_tight
             # 11 -> 0
             # 10 -> 1
             # 01 -> 0
             # 00 -> 0
-
-            # X |= union(cols(T_enc, r) for r in N_tight.nonzero()[0])
 
             X |= T_enc[N_tight, :].any(0)
             # X = T_enc[R_tight, :].any(0)  # slightly slower
@@ -612,7 +607,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             neg_choices = choices & ~A_enc_pos
             choice = self.choose(
                 # neg_choices if neg_choices.any() else choices,
-                (choices & A_enc_pos) if R.sum() > 5 or not neg_choices.any() else neg_choices,
+                (choices & A_enc_pos) if R.sum() > -1 or not neg_choices.any() else neg_choices,
                 T_enc,
                 R,
                 parts,
