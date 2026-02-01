@@ -465,14 +465,22 @@ def xcsp3_benchmark(
     areas = dict()
     def update_metadata_table(metadata):
         metadata["problem"] = metadata["name"].split("-")[0]
+        print(f"Updating table metadata for {metadata['name']}", end=None)
         if 'tables' not in metadata and (metadata["problem"] not in areas or areas[metadata["problem"]]):
-            print(f"Updating table metadata for {metadata['name']}", end=None)
-            metadata = { **metadata, **get_table_metadata(read_xcsp3(metadata['path'])) }
-            print(metadata["area"])
-            areas[metadata["problem"]] = metadata["area"]
+            try:
+                model = read_xcsp3(metadata['path'])
+                print("read")
+                metadata = { **metadata, **get_table_metadata(model) }
+                print("area = ", metadata["area"])
+                areas[metadata["problem"]] = metadata["area"]
+            except Exception as e:
+                metadata["error"] = str(e)
+                metadata["area"] = 0
+                metadata["tables"] = []
         else:
             metadata["area"] = 0
             metadata["tables"] = []
+            print("cached as 0")
 
         return metadata
 
