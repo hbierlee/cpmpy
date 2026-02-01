@@ -52,7 +52,7 @@ def get_experiments(overrides={}, filters=[]):
                     for alias, kw in [
                         *ablate(
                             [
-                                ("heuristic", (Heuristic.INPUT, Heuristic.GREEDY)),
+                                ("heuristic", (Heuristic.GREEDY,)),
                                 ("fractional", (False, True)),
                                 # ("shrink", (False, True)),
                                 ("coverlift", (False, True)),
@@ -60,13 +60,16 @@ def get_experiments(overrides={}, filters=[]):
                                     "cutoff",
                                     (
                                         0,
+                                        100,
+                                        10,
                                         25,
                                     ),
                                 ),
+                                ("negatives", (0,3,0)),
                             ],
                             add_none=True,
                             add_all=True,
-                            # filters=["heuristic"],
+                            filters=["fractional", "coverlift", "cutoff", "negatives"],
                         ),
                     ]
                 ],
@@ -97,15 +100,15 @@ def ablate(feats, add_one=True, add_none=True, add_all=False, filters=None):
         *(
             [
                 (
-                    feat if feat_val is True else f"{feat}-{feat_val}",
+                    feat if feat_val is True else f"{feat}_{feat_val}",
                     {feat_: feat_val if feat == feat_ else feat_vals_[0] for feat_, feat_vals_ in feats},
                 )
                 for feat, feat_vals in feats
-                if filters is None or feat in filters
+                if len(feat_vals) > 1 and (filters is None or feat in filters)
                 for feat_val in feat_vals[1:]
             ]
             if add_one
             else []
         ),
-        *([("all", {feat: feat_vals[1] for feat, feat_vals in feats})] if add_all else []),
+        *([("all", {feat: feat_vals[-1] for feat, feat_vals in feats})] if add_all else []),
     ]
