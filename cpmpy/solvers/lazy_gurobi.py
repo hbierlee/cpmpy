@@ -259,7 +259,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             )
 
         super().__init__(name="lazy_gurobi", cpm_model=cpm_model, **kwargs)
-        self.native_model.Params.LazyConstraints = 1
+        if self.tables:
+            self.native_model.Params.LazyConstraints = 1
         # self.native_model.Params.Threads = 1
         # self.native_model.Params.PreCrush = 1
         if self.env["seed"] is not None:
