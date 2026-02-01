@@ -18,6 +18,7 @@
 
 import warnings # for deprecation warning
 import time
+import numpy as np
 
 from cpmpy.transformations.get_variables import get_variables_model
 from cpmpy.expressions.utils import is_boolexpr, is_int
@@ -267,19 +268,18 @@ class Hashabledict(dict):
             f"{{{', '.join(f'{k}: {v}' for k, v in sorted(self.items(), key=lambda k: k[0].name))}}}"
         )
 
-def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosity=1, diverse=False):
+def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosity=1, diverse=False, asynchronous=False):
     """Return all solutions of `P` as values of the projected variables, `X`, within the time limit, or `False` iff `P` is determined to be unsatisfiable."""
     P = P.copy()
-    sols = []
     dt = time.time()
 
     if X is None:
         X = get_variables_model(P)
 
-    P.objective_ = None
+    sols = []
 
     import cpmpy as cp
-    import numpy as np
+    P.objective_ = None
 
     P += cp.all([x == x for x in X])
 
@@ -308,7 +308,7 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
         if all(x.value() is None for x in X):
             return
 
-        sol = Hashabledict((x, value(x)) for x in X if x.value() is not None)
+        sol = tuple(value(x) for x in X if x.value() is not None)
 
         if sol not in sols:
             sols.append(sol)
@@ -331,9 +331,10 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
             while P.solve(time_limit=time_limit):
                 sol = store_sol()
                 if sol:
-                    yield sol
+                    # if asynchronous:
+                    #     yield sol
 
-                    P += cp.any(x != a for x, a in sol.items())
+                    P += cp.any(x != a for x, a in zip(X, sol))
                 if time_limit is not None:
                     time_limit -= time.time() - dt
         else:
@@ -343,4 +344,6 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
 
     if verbosity >= 2:
         print("")
-    return sols
+    return X, np.array(sols, dtype=int)
+    return np.reshape(sols, shape=())
+    sols.reshape((len(X)))

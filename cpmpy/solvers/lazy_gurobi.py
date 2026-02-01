@@ -226,6 +226,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "shrink": False,
             "fractional": True,
             "coverlift": True,
+            "negatives": 0,
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
@@ -254,9 +255,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         self.tables = []
 
         if self.env["checker"]:
-            self.env["solutions"] = frozenset(
-                cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
-            )
+            _, self.env["solutions"] = cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
 
         super().__init__(name="lazy_gurobi", cpm_model=cpm_model, **kwargs)
         if self.tables:
@@ -274,19 +273,24 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["feasible"] = cpm_model.solve()
             self.env["model"] = cpm_model
 
+        if self.env["checker"]:
+            self.log("SOLS", len(self.env["solutions"]))
+            self.env["remain"] = len(self.solutions_checker())
+            self.log("SEARCH", self.env["remain"])
+
     def log(self, *mess, verbosity=1, end="\n", indent=None):
         assert self.env["verbosity"]
         if verbosity <= self.env["verbosity"]:
             indent = self.indent if indent is None else indent
             mess = " " * indent * 2 + " ".join(str(m) for m in mess) + end
-            assert verbosity >= 3 or len(mess) < 100, f"Long message {mess}"
+            # assert verbosity >= 3 or len(mess) < 100, f"Long message {mess}"
             # self.logger.debug(mess)
             print(mess, end="")
             # print(mess, end="", flush=self.env["debug"])
 
     def print_cuts(self):
         cuts_df = pd.DataFrame.from_dict(self.env["cuts"])
-        if self.env["verbosity"] >= 4:
+        if self.env["verbosity"] >= 0:
             pd.set_option("display.max_rows", None)
             pd.set_option("display.max_colwidth", None)
             pd.set_option("display.max_columns", None)
@@ -327,7 +331,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "n_cuts_unexplained": len(cuts_mipnode_unexp),
         }
 
-    def choose(self, choices, T_enc, R, parts, A_enc, heuristic=Heuristic.GREEDY):
+    def choose(self, choices, T_enc, R, parts, A_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
         if self.env["verbosity"]:
             self.log(f"Choose from {choices.nonzero()} from remaining rows {R}", verbosity=3)
             self.log(T_enc[R, :].astype(int), verbosity=3)
@@ -341,6 +345,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             case Heuristic.INPUT:
                 return np.argmax(choices)
             case Heuristic.GREEDY:
+                T_enc = T_enc if make_pos_choice else ~T_enc
                 parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
                 parts_ -= parts_[0]
                 # map back to the right part index
@@ -395,6 +400,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # RS = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
         # X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
 
+        # TODO perf do we need RS for every row?
         RS = (C_enc[S] * T_enc[:, S]).sum(axis=1)
         R_tight = tight(R, RS)
         X = (T_enc.T & R_tight).any(1)
@@ -406,11 +412,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("R_tight", R_tight, verbosity=3)
             self.log("X", X.nonzero(), verbosity=3)
         # TODO [peter] C missing from alg
-
-        def choose(S):
-            if self.env["verbosity"]:
-                self.log("choose from", show_set(S), verbosity=3)
-            return min(S)
 
         i = 0
         while not X.all():
@@ -451,7 +452,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             assert not self.env["example2"] or a_j == [2, 1, 1][i]
 
             S[j] = True
-            # assert j not in C_enc # TODO [peter] can happen?
             C_enc[j] += a_j
 
             assert (
@@ -595,8 +595,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         for iteration in itertools.count():
             if none(R):
-                if self.env["verbosity"]:
-                    self.log(f"cuts = {iteration}")
                 break
 
             def covered(choice):
@@ -605,14 +603,17 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return C_, l_parts, T_enc[:, C_].any(1)
 
             neg_choices = choices & ~A_enc_pos
+            make_pos_choice = R.sum() >= self.env["negatives"] or not neg_choices.any()
             choice = self.choose(
                 # neg_choices if neg_choices.any() else choices,
-                (choices & A_enc_pos) if R.sum() > -1 or not neg_choices.any() else neg_choices,
+                (choices & A_enc_pos) if make_pos_choice else neg_choices,
                 T_enc,
                 R,
-                parts,
+                parts if make_pos_choice else np.arange(len(T_enc.T)),
                 A_enc,
+                # heuristic=self.env["heuristic"] if make_pos_choice else Heuristic.INPUT,
                 heuristic=self.env["heuristic"],
+                make_pos_choice=make_pos_choice,
             )
             # choice, is_pos = [(1, True), (4, False)][iteration]
             is_pos = A_enc_pos[choice]
@@ -670,6 +671,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["verbosity"]:
             self.log(f"by explanation of size ({sum(X)})", verbosity=2)
             self.log(X, verbosity=3)
+            self.log("C_enc", C_enc, verbosity=3)
             self.env["cuts"][-1]["cut"] = X.copy()
 
         if self.env["shrink"]:
@@ -688,7 +690,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         def show_cut():
             if self.env["verbosity"]:
                 self.log(
-                    f"cut == {' + '.join(f'{c} * x_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
+                    f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
                     indent=2,
                     verbosity=3,
                 )
@@ -807,7 +809,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             expr = cp.BoolVal(expr)
 
         if self.env["verbosity"]:
-            self.log(f"cons == {expr}", indent=2, verbosity=3)
+            self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2)
+            self.log(f"  == {expr}", indent=2, verbosity=2)
 
         self.env["cuts"][-1]["expr"] = expr
 
@@ -888,6 +891,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     __add__ = add  # avoid redirect in superclass
 
+    def solutions_checker(self):
+        return cp.solvers.utils.solutions(
+            self.env["checker"], X=self.user_vars, projected_solution_limit=None
+        )[1]
+
     def check_explanation(self, expr, X_enc, A_enc, T_enc, frm):
         # A_enc = A_enc > 0.5
         for x, a in zip(X_enc, A_enc):
@@ -912,6 +920,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             assert value(expr) is True, f"Cut off row {show(i)} for case:\n\n{case}\n\n{show_table(T_enc_i)}"
 
         if self.env["checker"] and self.env["feasible"]:
+            repeated = expr in self.env["checker"].constraints
             self.env["checker"] += expr
 
             # nsols = self.env["checker"].solveAll()
@@ -919,20 +928,45 @@ class CPM_lazy_gurobi(CPM_gurobi):
             #     f"{nsols}:The {expr} for {A_enc} made model unsat\n\n{T_enc}\n\n{self.env['checker']}\n\n"
             # )
 
-            actual_solutions = frozenset(
-                cp.solvers.utils.solutions(
-                    self.env["checker"], X=self.user_vars, projected_solution_limit=None
-                )
-            )
+            actual_solutions = self.solutions_checker()
 
             def show_assignments(As):
                 return "\n".join(repr(a) for a in As)
 
+            def without(A, B):
+                # Create a row-wise mask
+
+                # Convert rows to a 1D structured array
+                A_view = A.view(np.dtype((np.void, A.dtype.itemsize * A.shape[1])))
+                B_view = B.view(np.dtype((np.void, B.dtype.itemsize * B.shape[1])))
+
+                mask = ~np.isin(A_view, B_view)
+                return A[mask.flatten(), :]
+
             expected_solutions = self.env["solutions"]
-            self.log(self.env["checker"], verbosity=3)
-            self.log("SOLS", len(expected_solutions), len(actual_solutions), verbosity=3)
+            remaining = without(actual_solutions, expected_solutions)
+
+            strength = (
+                self.env["cuts"][-2]["remain"] - len(remaining)
+                if len(self.env["cuts"]) >= 2
+                else self.env["remain"] - len(remaining)
+            )
+            if not repeated:
+                self.log(self.env["checker"], verbosity=4)
+                self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
+                self.log(expected_solutions, verbosity=4, indent=2)
+                self.log(f"ACTUAL ({len(actual_solutions)})", verbosity=2)
+                self.log(actual_solutions, verbosity=4, indent=2)
+                self.log(f"TO REMOVE ({len(remaining)}):", verbosity=2)
+                self.log(remaining, verbosity=4)
+                self.log(f"STRENGTH == {strength}", verbosity=2)
+
+            # assert repeated or strength
+
+            self.env["cuts"][-1]["strength"] = strength
+            self.env["cuts"][-1]["remain"] = len(remaining)
             self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
-            assert expected_solutions <= actual_solutions, (
+            assert len(expected_solutions) <= len(actual_solutions), (
                 f"Missing sols:\n\n{show_assignments(expected_solutions)}\n\n {show_assignments(actual_solutions)}\n\n{self.env['checker']}"
             )
 
@@ -981,18 +1015,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["verbosity"]:
             self.log("Solving.. ")
 
-        if self.env["checker"]:
-            self.log(
-                "SOLS",
-                len(self.env["solutions"]),
-                len(
-                    frozenset(
-                        cp.solvers.utils.solutions(
-                            self.env["checker"], X=self.user_vars, projected_solution_limit=None
-                        )
-                    )
-                ),
-            )
 
         try:
             solution_callback = self.get_solution_callback()
@@ -1002,7 +1024,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # if self.env["debug"]:
                 #     assert self.env["feasible"]
                 if not self.env["found_feasible"]:
-                    self.log("WARN: not found feas")
+                    if self.env["verbosity"]:
+                        self.log("WARN: not found feas")
                 # assert self.env["found_feasible"]
 
             if hasattr(self.native_model, "_callback_exception"):

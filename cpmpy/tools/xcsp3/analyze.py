@@ -468,6 +468,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     csv_files = []
     for (i, path_str) in enumerate(reversed(files)):
         path = pathlib.Path(path_str)
+        assert path.exists(), path
         if path.is_file() and path.suffix == '.csv':
             csv_files.append((i, pathlib.Path(path)))
         elif path.is_dir():
@@ -512,10 +513,13 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
         def stdev(a):
             return statistics.stdev(a) if a else None
 
+        def min_(a):
+            return min(a) if a else None
 
-        return [metadata.get("method", None), sum(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
+        return [metadata.get("method", None), sum(rowss), min_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
 
-    df[["method", "rows", "count", "mean","median", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
+    df[["method", "rows", "min", "count", "mean","median", "stdev"]] = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
+
 
     # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
 

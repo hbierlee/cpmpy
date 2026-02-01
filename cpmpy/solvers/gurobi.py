@@ -222,7 +222,7 @@ class CPM_gurobi(SolverInterface):
             else:
                 self.cpm_status.exitstatus = ExitStatus.FEASIBLE
         elif grb_status == GRB.INTERRUPTED:
-            raise self.native_model._callback_exception or Exception("Gurobi was interrupted (perhaps the solution callback called model.terminate())")
+            raise getattr(self.native_model, "_callback_exception", None) or Exception("Gurobi was interrupted (perhaps the solution callback called model.terminate())")
         else:  # another?
             raise NotImplementedError(
                 f"Translation of gurobi status {grb_status} to CPMpy status not implemented")  # a new status type was introduced, please report on github
