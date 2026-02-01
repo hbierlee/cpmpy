@@ -134,10 +134,11 @@ def env():
             "max_iterations": 500,
             "seed": 42,
             "shrink": False,
-            "fractional": True,
-            "coverlift": True,
-            "heuristic": Heuristic.INPUT,
-            # "heuristic": Heuristic.GREEDY,
+            "fractional": False,
+            "coverlift": False,
+            "negatives": 3,
+            # "heuristic": Heuristic.INPUT,
+            "heuristic": Heuristic.GREEDY,
             "cutoff": 0,
         }
         if True
@@ -222,8 +223,7 @@ class TestTables:
 
     def test_playground(self, env):
         # x = np.arange(8).reshape(2, 4)
-        x = np.array([[0, 1, 0, 1], [0, 1, 1, 0]], dtype=bool)
-        x = x & [1, 0, 1, 1]
+        T = np.array([[0, 1, 0, 1], [0, 1, 1, 0]], dtype=bool)
         parts = np.array(
             [
                 0,
@@ -232,17 +232,56 @@ class TestTables:
                 1,
             ]
         )
+        T = T & [1, 0, 1, 1]
+
+        T = np.array(
+            [
+                [
+                    *[0, 1, 0, 0],
+                    *[1, 0, 0],
+                    *[1, 0, 0],
+                ],
+                [
+                    *[0, 0, 1, 0],
+                    *[0, 1, 0],
+                    *[0, 1, 0],
+                ],
+                [
+                    *[0, 0, 0, 1],
+                    *[0, 0, 1],
+                    *[0, 0, 1],
+                ],
+                [
+                    *[1, 0, 0, 0],
+                    *[0, 1, 0],
+                    *[0, 0, 1],
+                ],
+                [
+                    *[0, 1, 0, 0],
+                    *[1, 0, 0],
+                    *[0, 1, 0],
+                ],
+            ]
+        )
+        parts = np.array([0, 0, 0, 0, 1, 1, 1, 2, 2, 2])
+        a = np.array([0, 1, 0, 0, 0, 1, 0, 0, 1, 0])
+
         parts_ = np.add.accumulate(np.unique_counts(parts).counts)
         parts_ -= parts_[0]
-        print(parts)
 
-        print(x.astype(int))
+        print("", a, "a")
+        choices = a & [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+        print("", choices, "choices")
+        print(T)
+        T = T[[0, 4], :][:, choices]
+        print(T.astype(int))
+        print("", parts, "p")
         y = np.bitwise_or.reduceat(
-            x,
+            T,
             parts_,
             axis=1,
-        )
-        print(y)
+        ).sum(0)
+        print("Remaining R", y)
 
     def test_explain(self, env):
         random.seed(SEED)
@@ -284,25 +323,42 @@ class TestTables:
                         # "heuristic": Heuristic.GREEDY,
                         "shrink": False,
                         "debug": True,
-                        "verbosity": 3,
+                        "verbosity": 2,
+                        "negatives": 0,
+                        "checker": cp.Model(),
                     },
                 },
             )
             if False:
                 slv.solve()
                 slv.stats()
+                print(slv.env["cuts"])
+                slv.print_cuts()
                 X_enc, T_enc, parts, table = slv.tables[0]
 
                 def list_to_A_enc(A_enc):
                     return dict(zip(X_enc, A_enc))
 
-                A_enc = list_to_A_enc(A_enc)
+                # A_enc = list_to_A_enc(A_enc)
+            else:
+                X_enc, T_enc, parts, table = slv.tables[0]
+                # explanations = list(slv._explain_assignment(A_enc, frm="MIPSOL"))
+                frm = "MIPSOL"
 
-            X_enc, T_enc, parts, table = slv.tables[0]
-            print(A_enc)
-            # explanations = list(slv._explain_assignment(A_enc, frm="MIPSOL"))
-            explanations = list(slv.explain(A_enc, T_enc, parts, frm="MIPSOL"))
-            print("E", explanations)
+                if False:
+                    # sum([1, -1] * [⟦x == 2⟧, ⟦y == 1⟧]) <= 0
+                    slv.env["cuts"].append({"from": "MIPSOL"})
+                    C_enc = np.array([0, 1, 0, 0, 0, 1, 0, 0, 0, 0])
+                    k = 1
+                    C_enc = np.array([0, 1, 0, 0, -1, 0, 0, 0, 0, 0])
+                    k = 0
+                    explanation = (C_enc != 0, C_enc, k)
+                else:
+                    explanation = slv.explain(A_enc, T_enc, parts, frm=frm)
+
+                e = slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
+                print(e)
+
         # print("ERR", e.value)
 
         # slv.check_explanation(explanation, X_enc, A_enc, T_enc)
@@ -398,3 +454,17 @@ class TestTables:
         T = np.array([(2, 1, 1), (3, 2, 2), (4, 3, 3), (1, 2, 3), (2, 1, 2)])
         model = cp.Model(cp.Table(X, T), cp.AllDifferent(X))
         check_model(model, env=env)
+
+    def test_sols(self, env):
+        from cpmpy.solvers.utils import solutions
+
+        x = cp.boolvar(3, name="x")
+        print(x)
+        m = cp.Model(cp.sum([2, 3, 5] * x) <= 6)
+        print(m)
+        X, sols = solutions(m, verbosity=2)
+        print("xx", sols)
+
+        # m = generate_table_from_example()
+        # model = cp.Model(cp.Table(X, T), cp.AllDifferent(X))
+        # check_model(model, env=env)

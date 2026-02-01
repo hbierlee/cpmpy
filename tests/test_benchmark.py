@@ -8,6 +8,7 @@ from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark, get_table_metadata_
 from cpmpy.tools.xcsp3.experiments import experiment, ablate
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import ExitStatus, TIME_BUFFER
 from cpmpy.solvers.gurobi import CPM_gurobi
+from cpmpy.expressions.variables import _BoolVarImpl
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
 import test_lazy_gurobi
 import pandas as pd
@@ -230,49 +231,62 @@ class TestBenchmark:
             if isinstance(m, str):
                 m = read_xcsp3(m)
             # slv = CPM_lazy_gurobi()
-            import scalene
+            # import scalene
 
             import psutil
 
             import humanfriendly
 
             process = psutil.Process()
+            import difflib
 
             # scalene.scalene_profiler.start()
-            PRINT = False
+            PRINT = True
             slvs = (
-                # CPM_gurobi(),
+                CPM_gurobi(),
                 CPM_lazy_gurobi(),
             )
+            reps = {}
             for slv in slvs:
-                t = time.time()
-                print(slv.name)
-                rows=[]
-                for i, c in enumerate(m.constraints[:]):
-                    row = {}
-                    mem = process.memory_info().rss
-                    rep = repr(c)[:100]
-                    print(f"C{i}", rep)
-                    row["c"] = rep
-                    if c.name == "table":
-                        md = get_table_metadata_(c)
-                        print(md)
-                        del md["cols"]
-                        row |= md
-                    for c_ in slv.transform(c):
-                        if PRINT:
-                            print("  ", c_)
-                    if time.time() - t > 60:
-                        return
-                    diff = process.memory_info().rss - mem
-                    row["mem"] = diff
-                    rows.append(row)
-                    print(f"  M = {humanfriendly.format_size(diff)}")
+                with open(f"/tmp/{slv.name}.txt", "w") as f:
 
-                pd.set_option("display.max_colwidth", None)
-                pd.set_option("display.max_columns", None)
-                pd.set_option("display.max_rows", None)
-                pd.set_option("display.expand_frame_repr", False)
+                    _BoolVarImpl.counter = 1
+                    reps[slv.name] = ""
+
+                    t = time.time()
+                    print(slv.name, file=f)
+                    rows = []
+                    for i, c in enumerate(m.constraints[:]):
+                        row = {}
+                        mem = process.memory_info().rss
+                        rep = repr(c)
+                        print(f"C{i}", rep[:100], file=f)
+                        reps[slv.name] += rep
+                        row["c"] = rep
+                        if c.name == "table":
+                            md = get_table_metadata_(c)
+                            print(md, file=f)
+                            del md["cols"]
+                            row |= md
+                        for c_ in slv.transform(c):
+                            # row["t"] = repr(c)
+
+                            rep = repr(c_)
+                            reps[slv.name] += rep
+                            row["t"] = rep
+                            if PRINT:
+                                print("  ", c_, file=f)
+                        if time.time() - t > 60:
+                            return
+                        diff = process.memory_info().rss - mem
+                        row["mem"] = diff
+                        rows.append(row)
+                        print(f"  M = {humanfriendly.format_size(diff)}", f)
+
+                # pd.set_option("display.max_colwidth", None)
+                # pd.set_option("display.max_columns", None)
+                # pd.set_option("display.max_rows", None)
+                # pd.set_option("display.expand_frame_repr", False)
 
                 df = pd.DataFrame(data=rows)
                 df["mem_hf"] = df["mem"].map(humanfriendly.format_size)
@@ -280,7 +294,13 @@ class TestBenchmark:
                 # df["mem"] = humanfriendly.format_size(df["mem"])
                 print(df)
                 print(humanfriendly.format_size(df["mem"].sum()))
+
+                # np.savetxt(f"/tmp/{slv.name}.txt", df.values)
             print("done")
+
+            # diff = difflib.ndiff(reps["gurobi"], reps["lazy_gurobi"])
+            # import itertools
+            # print(''.join(itertools.islice(diff, 0, 10)), end="")
 
         # m.solve(solver="gurobi")
         # parser = _parse_xcsp3("../2025/COP25-dev/dev-1.xml")
