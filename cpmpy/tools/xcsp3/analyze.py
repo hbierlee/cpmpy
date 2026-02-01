@@ -229,8 +229,9 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
     pd.set_option('display.float_format', '{:0.1f}'.format)
 
     df["post"] = ~df["time_post"].isna()
-    df["cb_rel"] = 100 * (df["time_cb"] / df["time_solve"])
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
+    df["cb_rel"] = 100 * (df["time_cb"] / df["time_total"])
+    df["time_pc"] = (df["time_cb"] / df["cuts"]) * 1000
     df = df.sort_values(by=["problem", "instance", "alias"])
 
 
@@ -253,6 +254,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
              + [
             diff,
             "status",
+            "method",
             "obj",
             "time_total",
             "time_parse",
@@ -260,6 +262,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
             "time_solve",
             "time_cb",
             "cb_rel",
+            "time_pc",
             "cuts",
             # "exception",
         ]].sort_values(by=
@@ -309,6 +312,8 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
                 solv = ('solved', 'sum'),
                 cuts = ('cuts', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
+                time_pc = ('time_pc', 'mean'),
+                method = ('method', 'first'),
                 obj = ('obj', 'first'),
                 )
 
@@ -326,7 +331,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
                 "t_post_p2",
                 "t_solv_p2",
                 ]),
-            *(["obj"] if grouping_type == "per_inst" else []),
+            *(["method","obj"] if grouping_type == "per_inst" else []),
             *([
                 "insts",
                 "err",
@@ -341,6 +346,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
                 "solv",
                 "cuts",
                 "cb_rel",
+                "time_pc",
             ]),
         ]]
 
@@ -513,7 +519,28 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
 
-    # replace time_solve to NaN if not solved
+    # df["obj"] = df.where(df["method"] == "minimize", -df["obj"], df["obj"])
+    # df["obj"] = df.map(lambda x: -x["obj"] if x["method"] == "minimize" else x["obj"])
+
+
+
+    # let solve include post time?
+    df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
+
+    if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
+        df['alias'] = df['alias'] + "-" + df['run']
+
+    for col, glob in [("alias", glob_alias), ("problem", glob_instance), ("track", "COP")]:
+        if glob:
+            df = df.drop(df[~df[col].map(lambda g: any(g_ in g for g_ in glob))].index)
+
+
+
+
+    # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
+    # print(df.mask(df["status"] == OPT).groupby(by=['problem', 'instance']).agg(lambda x: ','.join(str(x_) for x_ in x.unique()))['obj'])
+
+    df['alias'] += '.'
 
     track, = df["track"].unique()
     is_cop = "COP" in track
@@ -526,25 +553,10 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     df["feasible"] = df["status"].isin((OPT, SAT, UNS))
     df["solved"] = df["status"].isin(solved)
 
-
+    # replace time_solve to NaN if not solved
     df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
 
-    # let solve include post time?
-    df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
-    if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
-        df['alias'] = df['alias'] + "-" + df['run']
-
-
-    # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
-    # print(df.mask(df["status"] == OPT).groupby(by=['problem', 'instance']).agg(lambda x: ','.join(str(x_) for x_ in x.unique()))['obj'])
-
-    df['alias'] += '.'
-
-
-    for col, glob in [("alias", glob_alias), ("problem", glob_instance)]:
-        if glob:
-            df = df.drop(df[~df[col].map(lambda g: any(g_ in g for g_ in glob))].index)
 
     # # temporarily drop all instances where there are any errors
     # print(df)
@@ -577,7 +589,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     if plot:
         fig.savefig(plot.with_suffix(".png"), bbox_inches='tight')
         fig.savefig(plot.with_suffix(".svg"), bbox_inches='tight')
-        print(f"Plot saved to {plot}.{{.png,.svg}}")
+        print(f"Plot saved to {plot}.{{png,svg}}")
     # else:
     #     plt.show()
 

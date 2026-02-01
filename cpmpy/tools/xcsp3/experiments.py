@@ -60,7 +60,7 @@ def get_experiments(overrides={}, filters=[]):
                                     "cutoff",
                                     (
                                         0,
-                                        125,
+                                        25,
                                     ),
                                 ),
                             ],

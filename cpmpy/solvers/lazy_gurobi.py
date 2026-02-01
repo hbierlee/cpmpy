@@ -786,7 +786,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         self.log("found feasible", verbosity=2)
                     self.env["found_feasible"] = feasible
             except Exception as e:
-                what._callback_exception = e
+                self.native_model._callback_exception = e
                 what.terminate()
             finally:
                 time_cb = time.time() - time_cb
@@ -906,10 +906,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if not is_true_cst(expr):
             assert value(expr) is False, f"Did not cut off assignment:\n\n{case}"
 
-        for T_enc_i in T_enc:
+        for i, T_enc_i in enumerate(T_enc):
             for x_i, a_i_j in zip(X_enc, T_enc_i):
                 x_i._value = a_i_j
-            assert value(expr) is True, f"Cut off row for case:\n\n{case}"
+            assert value(expr) is True, f"Cut off row {show(i)} for case:\n\n{case}\n\n{show_table(T_enc_i)}"
 
         if self.env["checker"] and self.env["feasible"]:
             self.env["checker"] += expr
@@ -1005,7 +1005,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     self.log("WARN: not found feas")
                 # assert self.env["found_feasible"]
 
-            if getattr(self.native_model, "_callback_exception", None):
+            if hasattr(self.native_model, "_callback_exception"):
                 raise self.native_model._callback_exception or Exception(
                     "Gurobi was interrupted (perhaps the solution callback called model.terminate())"
                 )
