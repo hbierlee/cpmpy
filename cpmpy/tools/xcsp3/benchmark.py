@@ -497,7 +497,8 @@ def xcsp3_benchmark(
         for k, g in itertools.groupby(dataset, key=lambda f_m: f_m[0].split("-")[0]):
             dataset_.append(min(g, key=lambda g_:g_[0]))
         dataset = dataset_
-    dataset = [(filename, metadata) for filename, metadata in dataset if metadata['area'] > 0]
+    # dataset = [(filename, metadata) for filename, metadata in dataset if min((t["rows"] for t in metadata["tables"]), default=0) >= 25]
+    dataset = [(filename, metadata) for filename, metadata in dataset if metadata["area"]]
     assert dataset
 
     # Process instances in parallel

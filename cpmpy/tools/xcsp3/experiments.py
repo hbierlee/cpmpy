@@ -33,7 +33,7 @@ DEFAULTS = [
     [
         {
             "year": 2025,
-            "track": "COP25",
+            "track": "CSP22to25",
             "glob_instance": None,
         }
     ],
@@ -65,11 +65,11 @@ def get_experiments(overrides={}, filters=[]):
                                         25,
                                     ),
                                 ),
-                                ("negatives", (0,3,0)),
+                                # ("negatives", (0,3)),
                             ],
                             add_none=True,
                             add_all=True,
-                            filters=["fractional", "coverlift", "cutoff", "negatives"],
+                            filters=["fractional", "coverlift", "cutoff"],
                         ),
                     ]
                 ],
