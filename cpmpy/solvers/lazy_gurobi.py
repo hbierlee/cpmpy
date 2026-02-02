@@ -228,8 +228,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "heuristic": Heuristic.GREEDY,
             "cutoff": 0,
             "shrink": False,
-            "fractional": True,
-            "coverlift": True,
+            "fractional": False,
+            "coverlift": False,
             "negatives": 0,
             "cuts": [],
             "max_iterations": None,
@@ -378,18 +378,37 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # )
                 # return choice if choice is not None else self.choose(A, T_enc, R, heuristic=Heuristic.GREEDY)
 
-    def shrink(self, C, T):
-        for i in C:
+    def shrink(self, X, T_enc):
+        k = 0
+        if self.env["verbosity"]:
+            self.log(f"start shrinkm {X.nonzero()[0]}", verbosity=2)
+        for i in X.nonzero()[0]:
             if self.env["verbosity"]:
-                self.log(f"shrinking {i + INDEX} in {show_set(C)}", verbosity=3)
+                self.log(f"shrinking {i + INDEX} in {X}", verbosity=3)
 
-            if len(C) <= 1:  # slightly different from
-                return C
+            # if X.sum() <= 1:  # slightly different from
+            #     return X
 
-            S = set.intersection(*[rows(T, l) for l in (C - {i})])
-            if len(S) == 0:
-                C = C - {i}
-        return C
+            # S = set.intersection(*[rows(T_enc, l) for l in (X - {i})])
+            X[i] = False
+
+            # 1 0 | 0 all
+            # 0 1 | 0
+            # 1 0 | 0
+            # 0 0 | 0
+            # 1 1 | 1
+            # 1,3,5 and 2,5 = 5
+
+            if T_enc[:, X].all(axis=1).any():
+                if self.env["verbosity"]:
+                    self.log(f"keep", i, verbosity=3)
+                X[i] = True  # keep i
+                # assert False
+            else:
+                k += 1
+                if self.env["verbosity"]:
+                    self.log(f"shrunk", i, verbosity=3)
+        return X, k
 
     @profile
     def gencoverlift(self, S, C_enc, k, T_enc):
@@ -682,14 +701,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["cuts"][-1]["cut"] = X.copy()
 
         if self.env["shrink"]:
-            X_shrunk = self.shrink(X, T_enc)
-            shrunk = len(X) - len(X_shrunk)
-            if shrunk:
-                if self.env["verbosity"]:
-                    self.log(f"shrunk by {shrunk}: {show_set(X)} --> {show_set(X_shrunk)}", indent=2)
+            X_shrunk, shrunk = self.shrink(X, T_enc)
+            C_enc[~X_shrunk] = 0
+            k -= shrunk
+            if self.env["verbosity"]:
+                if shrunk:
+                    self.log(f"shrunk by {shrunk}", indent=2, verbosity=2)
                     self.env["cuts"][-1] = {
                         **self.env["cuts"][-1],
-                        "pre_shrunk": self.env["cuts"][-1]["cut"],
+                        "shrunk": shrunk,
                         "cut": X_shrunk,
                     }
             self.env["cuts"][-1]["shrunk"] = shrunk

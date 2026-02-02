@@ -133,10 +133,9 @@ def env():
             "debug": 1,
             "max_iterations": 500,
             "seed": 42,
-            "shrink": False,
-            "fractional": True,
-            "coverlift": True,
-            "negatives": 3,
+            "fractional": False,
+            "coverlift": False,
+            "negatives": 0,
             # "heuristic": Heuristic.INPUT,
             "heuristic": Heuristic.GREEDY,
             "cutoff": 0,
@@ -283,6 +282,22 @@ class TestTables:
         ).sum(0)
         print("Remaining R", y)
 
+    def test_shrink(self, env):
+        X, k = CPM_lazy_gurobi(env={"verbosity": 4}).shrink(
+            np.array([True, True, True]),
+            np.array(
+                [
+                    [True, True, False],
+                    [False, False, True],
+                    [True, True, False],
+                    [False, False, False],
+                    [True, True, False],
+                ]
+            ),
+        )
+        assert k == 1
+        assert (X == np.array([False, True, True])).all()
+
     def test_explain(self, env):
         random.seed(SEED)
         for e, A_enc in [
@@ -321,7 +336,7 @@ class TestTables:
                         "max_iterations": None,
                         "heuristic": Heuristic.GREEDY,
                         # "heuristic": Heuristic.GREEDY,
-                        "shrink": False,
+                        "shrink": True,
                         "debug": True,
                         "verbosity": 2,
                         "negatives": 0,
