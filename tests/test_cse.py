@@ -60,7 +60,6 @@ class TestCSE(unittest.TestCase):
         self.assertEqual(str(flat_cons[0]), "BV0 xor a")
 
 
-
     def test_decompose(self):
         x,y,z = cp.intvar(0,10, shape=3, name=tuple("xyz"))
         q = cp.intvar(0,2, name="q")

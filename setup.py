@@ -27,7 +27,7 @@ solver_dependencies = {
     "minizinc": ["minizinc"],
     "pysat": ["python-sat"],
     "gurobi": ["gurobipy"],
-    "lazy_gurobi": ["gurobipy"],
+    "lazy_gurobi": ["gurobipy", "scalene", "line_profiler"],
     "pysdd": ["pysdd"],
     "gcs": ["gcspy"],
     "cpo": ["docplex"],

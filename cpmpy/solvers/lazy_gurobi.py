@@ -18,7 +18,10 @@ from cpmpy.expressions.utils import is_true_cst, is_false_cst, show_assignment, 
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.solvers.gurobi import CPM_gurobi
 from cpmpy.transformations.linearize import only_positive_bv
-# from scalene import profile
+
+from scalene import scalene_profiler
+
+from line_profiler import profile
 
 # https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
 # Functions for approximate comparison of floating point numbers
@@ -219,6 +222,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def __init__(self, env=None, cpm_model=None, **kwargs):
         self.env = {
             "debug": False,
+            "profile": False,
             "verbosity": 0,
             "log": None,
             "heuristic": Heuristic.GREEDY,
@@ -331,6 +335,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "n_cuts_unexplained": len(cuts_mipnode_unexp),
         }
 
+    @profile
     def choose(self, choices, T_enc, R, parts, A_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
         if self.env["verbosity"]:
             self.log(f"Choose from {choices.nonzero()} from remaining rows {R}", verbosity=3)
@@ -386,7 +391,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C = C - {i}
         return C
 
-    # @profile
+    @profile
     def gencoverlift(self, S, C_enc, k, T_enc):
         if self.env["verbosity"]:
             self.log("gencoverlift", verbosity=3)
@@ -487,7 +492,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
-    # @profile
+    @profile
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
@@ -568,8 +573,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
             else:
                 # R = np.ones(m, dtype=np.bool)
                 # choice = self.choose(U, T_enc, set(range(m)), heuristic=self.env["heuristic"])
-                choice = U.argmax()
-                # choice = self.choose(U, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
+                # choice = U.argmax()
+                R = np.ones(m, dtype=np.bool)
+                choice = self.choose(U, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
 
                 # TODO [peter] should be T_hat[choice]?
                 choices = np.ones(len(T_enc.T), dtype=bool)
@@ -603,6 +609,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return C_, l_parts, T_enc[:, C_].any(1)
 
             neg_choices = choices & ~A_enc_pos
+            # make_pos_choice = frm == "MIPNODE-OPT" or R.sum() >= self.env["negatives"] or not neg_choices.any()
             make_pos_choice = R.sum() >= self.env["negatives"] or not neg_choices.any()
             choice = self.choose(
                 # neg_choices if neg_choices.any() else choices,
@@ -721,6 +728,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
 
         def solution_callback(what, where):
+            if self.env["profile"]:
+                scalene_profiler.start()
             time_cb = time.time()
 
             try:
@@ -795,6 +804,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["verbosity"]:
                     self.log(f"end callback, dt = {time_cb}", verbosity=4)
                 self.env["time_cb"] += time_cb
+
+                if self.env["profile"]:
+                    scalene_profiler.stop()
                 # assert time_cb < 1.0 or self.env["debug"]
 
         return solution_callback
@@ -945,6 +957,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             expected_solutions = self.env["solutions"]
             remaining = without(actual_solutions, expected_solutions)
+            assert len(np.unique(actual_solutions, axis=0)) == len(actual_solutions)
 
             strength = (
                 self.env["cuts"][-2]["remain"] - len(remaining)
@@ -1015,7 +1028,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["verbosity"]:
             self.log("Solving.. ")
 
-
         try:
             solution_callback = self.get_solution_callback()
             hassol = super().solve(solution_callback=solution_callback, time_limit=time_limit, **kwargs)
@@ -1058,65 +1070,53 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def get_x_encs(self, X):
         return [x_enc_i for x in X for x_enc_i in self.ivarmap[x]._xs]
 
+    def transform_(self, cpm_expr):
+        if cpm_expr.name != "table" or len(cpm_expr.args[1]) <= self.env["cutoff"]:
+            return super().transform(cpm_expr)
+        else:
+            if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
+                cpm_expr = normalize_table(cpm_expr)
+            X, T = cpm_expr.args
+
+            # only check after normalize, since normalize may remove all rows
+            if not len(T):
+                return [cp.BoolVal(False)]
+            assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
+
+            T_enc = encode(X, T)
+
+            if self.env["verbosity"]:
+                self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
+                self.log("T =", verbosity=3)
+                self.log(T, verbosity=3)
+                self.log("T_enc =", verbosity=3)
+                self.log(np.astype(T_enc, int), verbosity=3)
+
+            cons = []
+            for x in X:
+                x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
+                    self.ivarmap, x, "direct", csemap=self._csemap
+                )
+                expr, k = x_enc.encode_term()
+                # TODO if only BV, then need to assign (but no need to assign if decoding constraint present)
+                # Note: do not use self += [..] to avoid poluting user_vars
+                cons += self.transform([*exactly_one_con, cp.sum(c * b for c, b in expr) + k == x])
+
+            x_encs = [self.ivarmap[x.name]._xs for x in X]
+            parts = np.fromiter((i for i, x_enc in enumerate(x_encs) for _ in x_enc), dtype=int)
+
+            X_enc = np.fromiter((x_enc_i for x_enc in x_encs for x_enc_i in x_enc), _BoolVarImpl)
+            assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
+            self.tables.append((X_enc, T_enc, parts, cpm_expr))
+
+            if self.env["checker"]:
+                for c in cons:
+                    self.env["checker"] += c
+
+            return cons
+
     def transform(self, cpm_expressions):
-        cpm_cons = []  # all but tables
-        cpm_expressions = super().transform(cpm_expressions, lazy=True)
-        for cpm_expr in cpm_expressions:
-            if cpm_expr.name == "table":
-                rows = len(cpm_expr.args[1])
-                if self.env["verbosity"]:
-                    self.log(f"table of {rows} rows:", cpm_expr, verbosity=3)
-                if rows >= self.env["cutoff"]:
-                    if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
-                        cpm_expr = normalize_table(cpm_expr)
-                        if self.env["verbosity"]:
-                            self.log("norm to", rows, get_table_area(cpm_expr), verbosity=2)
-                    X, T = cpm_expr.args
-                    # only check after normalize, since normalize may remove all rows
-                    if not len(T):
-                        return [cp.BoolVal(False)]
-                    assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
-
-                    T_enc = encode(X, T)
-
-                    if self.env["verbosity"]:
-                        self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
-                        self.log("T =", verbosity=3)
-                        self.log(T, verbosity=3)
-                        self.log("T_enc =", verbosity=3)
-                        self.log(np.astype(T_enc, int), verbosity=3)
-
-                    for x in X:
-                        x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
-                            self.ivarmap, x, "direct", csemap=self._csemap
-                        )
-                        expr, k = x_enc.encode_term()
-                        # TODO if only BV, then need to assign (but no need to assign if decoding constraint present)
-                        # Note: do not use self += [..] to avoid poluting user_vars
-                        cons = self.transform([*exactly_one_con, cp.sum(c * b for c, b in expr) + k == x])
-                        cpm_cons += cons
-
-                        if self.env["checker"]:
-                            for c in cons:
-                                self.env["checker"] += c
-
-                    x_encs = [self.ivarmap[x.name]._xs for x in X]
-                    parts = np.fromiter((i for i, x_enc in enumerate(x_encs) for _ in x_enc), dtype=int)
-
-                    X_enc = np.fromiter((x_enc_i for x_enc in x_encs for x_enc_i in x_enc), _BoolVarImpl)
-                    assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
-                    self.tables.append((X_enc, T_enc, parts, cpm_expr))
-                else:
-                    cpm_cons += super().transform(cpm_expr)
-            else:
-                cpm_cons.append(cpm_expr)
-
-        # self.names = {
-        #     x.name: f"x{i}"
-        #     for i, x in enumerate(cp.transformations.get_variables.get_variables(cpm_cons), start=1)
-        # }
-
-        return cpm_cons
+        return [cpm_con for cpm_expr in cpm_expressions for cpm_con in self.transform_(cpm_expr)]
 
     def _check_repeat_failure(self):
         if self.env["debug"]:
