@@ -60,6 +60,9 @@ from ..transformations.normalize import toplevel_list
 from ..transformations.reification import only_implies, reify_rewrite, only_bv_reifies
 from ..transformations.safening import no_partial_functions, safen_objective
 
+from cpmpy.expressions.globalconstraints import Table
+import types
+
 try:
     import gurobipy as gp
     GRB_ENV = None
@@ -126,7 +129,7 @@ class CPM_gurobi(SolverInterface):
         except PackageNotFoundError:
             return None
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding="default", **kwargs):
         """
         Constructor of the native solver object
 
@@ -142,6 +145,19 @@ class CPM_gurobi(SolverInterface):
 
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
         self.grb_model = gp.Model(env=GRB_ENV)
+
+        if encoding == "gleb":
+            def gleb_decompose(self):
+                arr, tab = self.args
+                row_selected = cp.boolvar(shape=len(tab))
+                cons = []
+                nptab = np.array(tab)
+                cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
+                cons += [cp.sum(row_selected) == 1]
+                return cons, []
+
+            Table.decompose = gleb_decompose
+
 
         # initialise everything else and post the constraints/objective
         # it is sufficient to implement add() and minimize/maximize() below
