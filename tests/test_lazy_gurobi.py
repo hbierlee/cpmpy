@@ -1,4 +1,5 @@
 import math
+import itertools
 import pathlib
 import pickle
 import random
@@ -70,12 +71,17 @@ def check_model(model, env=None):
     print(model)
     expected_sat = model.deepcopy().solve()
     try:
-        slv = (
-            CPM_lazy_gurobi(cpm_model=model, env=env.copy())
-            if isinstance(env, dict)
-            else env(cpm_model=model)
-        )
+        slv = env["solver"](cpm_model=model, **env["solver_kwargs"])
+
+        print("solver", slv)
         actual_sat = slv.solve()
+
+        if True:
+            for i, c in enumerate(model.constraints, start=1):
+                print(f"C{i}", repr(c)[:100])
+                for ci in env["solver"](**env["solver_kwargs"]).transform([c]):
+                    print("  ", ci)
+                    # print("  ", slv._csemap)
 
         # if hasattr(slv, "stats"):
         #     slv.stats()
@@ -125,24 +131,38 @@ SEED = 42
 SEED = None
 
 
-@pytest.fixture()
-def env():
-    yield (
-        {
-            "verbosity": 3,
-            "debug": 1,
-            "max_iterations": 500,
-            "seed": 42,
-            "fractional": False,
-            "coverlift": False,
-            "negatives": 0,
-            # "heuristic": Heuristic.INPUT,
-            "heuristic": Heuristic.GREEDY,
-            "cutoff": 0,
+def get_envs():
+    if True:
+        yield {
+            "solver": CPM_lazy_gurobi,
+            "solver_kwargs": {
+                "env": {
+                    "verbosity": 3,
+                    "debug": 1,
+                    "max_iterations": 500,
+                    "seed": 42,
+                    "fractional": False,
+                    "coverlift": False,
+                    "negatives": 0,
+                    # "heuristic": Heuristic.INPUT,
+                    "heuristic": Heuristic.GREEDY,
+                    "cutoff": 0,
+                }
+            },
         }
-        if True
-        else CPM_gurobi
-    )
+
+    yield {
+        "solver": CPM_gurobi,
+        "solver_kwargs": {
+            "verbose": 0
+            # "encoding": "gleb",
+        },
+    }
+
+
+@pytest.fixture
+def env():
+    return next(get_envs())
 
 
 def load_model(path):
@@ -385,70 +405,6 @@ class TestTables:
         #     slv.explain([0.0, 0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.5, 0.5, 0.0], T_enc, parts) == {1, 5}
         # )
 
-    @pytest.mark.parametrize(
-        "case",
-        (
-            (i, j, t)
-            for j in range(10)  # to repeat the test
-            for i, t in enumerate(
-                [
-                    *[
-                        cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))),
-                        generate_table_from_data([(1, 1)], 3),  # single row (actually exists in xcsp3)
-                        generate_table_from_data([(1, 1), (2, 2)], 3),  # Feasible (often 0 explanations)
-                        generate_table_from_data([(1, 2), (2, 1)], 3),  # Feasible
-                        with_constraints(
-                            generate_table_from_data([(1, 1), (2, 2)], 3), with_alldiff=True
-                        ),  # Infeasible
-                        with_constraints(
-                            generate_table_from_data([(1, 2), (2, 1)], 3), with_alldiff=True, with_min=True
-                        ),
-                        generate_table_from_example(),
-                        generate_two_tables(),
-                    ],
-                    *[
-                        table
-                        for allow_duplicate_vars in (False, True)
-                        for table in [
-                            with_constraints(
-                                generate_table(2, 2, 3, allow_duplicate_vars=allow_duplicate_vars),
-                                with_alldiff=True,
-                                with_min=True,
-                            ),
-                            with_constraints(
-                                generate_table(4, 4, 4, allow_duplicate_vars=allow_duplicate_vars),
-                                with_alldiff=False,
-                                with_min=False,
-                            ),
-                            with_constraints(
-                                generate_table(2, 2, 3, k=2, allow_duplicate_vars=allow_duplicate_vars)
-                            ),
-                            with_constraints(
-                                generate_table(3, 3, 4, allow_duplicate_vars=allow_duplicate_vars),
-                                # with_alldiff=False,
-                                # with_min=True,
-                            ),
-                            with_constraints(
-                                generate_table(2, 2, 2, allow_duplicate_vars=allow_duplicate_vars)
-                            ),  # minimized 1/1000 bug
-                            with_constraints(
-                                generate_table(5, 100, 10, allow_duplicate_vars=allow_duplicate_vars)
-                            ),
-                            with_constraints(
-                                generate_table(4, 3, 4, k=2, allow_duplicate_vars=allow_duplicate_vars)
-                            ),  # TRICKY BUG FINDER NO CHIOCE
-                        ]
-                    ],
-                ],
-                start=1,
-            )
-        ),
-        ids=lambda val: val[0],
-    )
-    def test_models(self, case, env):
-        _, _, model = case
-        check_model(model, env=env)
-
     def test_repro_model(self, env):
         m = load_model("/tmp/failed_model.pkl")
         print("Repro model:", m)
@@ -483,3 +439,89 @@ class TestTables:
         # m = generate_table_from_example()
         # model = cp.Model(cp.Table(X, T), cp.AllDifferent(X))
         # check_model(model, env=env)
+
+
+def idfn(a):
+    if isinstance(a, dict):
+        return a["solver"]
+    else:
+        return f"{a[0]}-{a[1]}"
+
+
+REPEAT = 3
+
+
+@pytest.mark.timeout(60)
+class TestModels:
+    @pytest.mark.parametrize(
+        ("env", "case"),
+        itertools.product(
+            get_envs(),
+            (
+                (i, j, t)
+                for j in range(1, 1 + REPEAT)  # to repeat the test
+                for i, t in enumerate(
+                    [
+                        *[
+                            cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))),
+                            generate_table_from_data([(1, 1)], 3),  # single row (actually exists in xcsp3)
+                            generate_table_from_data([(1, 1), (2, 2)], 3),  # Feasible (often 0 explanations)
+                            generate_table_from_data([(1, 2), (2, 1)], 3),  # Feasible
+                            with_constraints(
+                                generate_table_from_data([(1, 1), (2, 2)], 3), with_alldiff=True
+                            ),  # Infeasible
+                            with_constraints(
+                                generate_table_from_data([(1, 2), (2, 1)], 3),
+                                with_alldiff=True,
+                                with_min=True,
+                            ),
+                            generate_table_from_example(),
+                            with_constraints(
+                                generate_table_from_example(),
+                                with_alldiff=True,
+                            ),
+                            generate_two_tables(),
+                        ],
+                        *[
+                            table
+                            for allow_duplicate_vars in (False, True)
+                            for table in [
+                                with_constraints(
+                                    generate_table(2, 2, 3, allow_duplicate_vars=allow_duplicate_vars),
+                                    with_alldiff=True,
+                                    with_min=True,
+                                ),
+                                with_constraints(
+                                    generate_table(4, 4, 4, allow_duplicate_vars=allow_duplicate_vars),
+                                    with_alldiff=False,
+                                    with_min=False,
+                                ),
+                                with_constraints(
+                                    generate_table(2, 2, 3, k=2, allow_duplicate_vars=allow_duplicate_vars)
+                                ),
+                                with_constraints(
+                                    generate_table(3, 3, 4, allow_duplicate_vars=allow_duplicate_vars),
+                                    # with_alldiff=False,
+                                    # with_min=True,
+                                ),
+                                with_constraints(
+                                    generate_table(2, 2, 2, allow_duplicate_vars=allow_duplicate_vars)
+                                ),  # minimized 1/1000 bug
+                                with_constraints(
+                                    generate_table(5, 100, 10, allow_duplicate_vars=allow_duplicate_vars)
+                                ),
+                                with_constraints(
+                                    generate_table(4, 3, 4, k=2, allow_duplicate_vars=allow_duplicate_vars)
+                                ),  # TRICKY BUG FINDER NO CHIOCE
+                            ]
+                        ],
+                    ],
+                    start=1,
+                )
+            ),
+        ),
+        ids=idfn,
+    )
+    def test_models(self, case, env):
+        _, _, model = case
+        check_model(model, env=env)
