@@ -126,7 +126,7 @@ class CPM_gurobi(SolverInterface):
         except PackageNotFoundError:
             return None
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, **kwargs):
         """
         Constructor of the native solver object
 
@@ -146,6 +146,12 @@ class CPM_gurobi(SolverInterface):
         # initialise everything else and post the constraints/objective
         # it is sufficient to implement add() and minimize/maximize() below
         super().__init__(name=name, cpm_model=cpm_model, **kwargs)
+
+        if verbose:
+            self.grb_model.Params.LogFile = "/tmp/gurobi.log"
+            self.grb_model.Params.OutputFlag = 1
+            self.grb_model.write("/tmp/gurobi.lp")
+
 
     @property
     def native_model(self):
