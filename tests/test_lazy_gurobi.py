@@ -151,11 +151,13 @@ def get_envs():
             },
         }
 
+
+
     yield {
         "solver": CPM_gurobi,
         "solver_kwargs": {
-            "verbose": 0
-            # "encoding": "gleb",
+            "verbose": 0,
+            "encoding": "gleb",
         },
     }
 
