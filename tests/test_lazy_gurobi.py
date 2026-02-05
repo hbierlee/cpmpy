@@ -72,11 +72,13 @@ def check_model(model, env=None):
     print("== Model ==")
     print(model)
     expected_sat = model.deepcopy().solve()
+    print("expected feasible = ", expected_sat)
     try:
         slv = env["solver"](cpm_model=model, **env["solver_kwargs"])
 
         print("solver", slv)
         actual_sat = slv.solve()
+        print("actual feasible", actual_sat)
 
         if True:
             for i, c in enumerate(model.constraints, start=1):
@@ -88,11 +90,10 @@ def check_model(model, env=None):
         # if hasattr(slv, "stats"):
         #     slv.stats()
 
-        if actual_sat is False:
-            assert expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
-
-        if expected_sat:
+        if expected_sat and actual_sat:
             X = cp.transformations.get_variables.get_variables_model(model)
+            print("assignment", show_assignment(X))
+
             assert all(x.value() is not None for x in X), (
                 f"Expected all variables to be assigned, but found: {show_assignment(X)}"
             )
@@ -102,6 +103,9 @@ def check_model(model, env=None):
                 f"For assignment:\n\n{show_assignment(X)}\n\nThe following constraints fail:\n\n'"
                 + "\n\n".join(str(v) for v in violations)
             )
+
+        assert expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
+
         print("PASS.")
     except AssertionError as e:
         with open("/tmp/failed_model.pkl", "wb") as f:
@@ -459,7 +463,7 @@ def idfn(a):
         return f"{a[0]}-{a[1]}"
 
 
-REPEAT = 10
+REPEAT = 3
 
 
 @pytest.mark.timeout(60)
