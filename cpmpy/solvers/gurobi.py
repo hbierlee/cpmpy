@@ -191,13 +191,10 @@ class CPM_gurobi(SolverInterface):
                 arr, tab = self.args
                 T_enc = encode(arr, tab)
 
-                print(T_enc)
-
                 for x in arr:
                     x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
                         self.ivarmap, x, "direct", csemap=self._csemap
                     )
-                    print(x_enc)
                     expr, k = x_enc.encode_term()
 
                 cons = []
