@@ -63,6 +63,8 @@ from ..transformations.safening import no_partial_functions
 
 from cpmpy.expressions.globalconstraints import Table
 
+from cpmpy.expressions.utils import dom_size
+
 
 import types
 
@@ -168,6 +170,8 @@ class CPM_gurobi(SolverInterface):
             def gleb_decompose(self):
                 arr, tab = self.args
                 cons = []
+                if len(tab) == 0:
+                    return [], []
                 if len(tab) == 1:
                     cons += [(x == tab[0][i]) for i, x in enumerate(arr)]
                 else:
@@ -179,7 +183,7 @@ class CPM_gurobi(SolverInterface):
                 return cons, []
 
             Table.decompose = gleb_decompose
-        if encoding == "bool_table":
+        if encoding == "bool-gleb":
             def bool_decompose(self):
                 arr, tab = self.args
                 T_enc = encode(arr, tab)
