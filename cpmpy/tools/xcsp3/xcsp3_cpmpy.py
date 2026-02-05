@@ -755,10 +755,10 @@ def xcsp3_cpmpy(
         # ------------------------------- Print result ------------------------------- #
 
         if s.status().exitstatus == CPMStatus.OPTIMAL:
-            print_value(solution_xml(s))
+            # print_value(solution_xml(s))
             print_status(ExitStatus.optimal)
         elif s.status().exitstatus == CPMStatus.FEASIBLE:
-            print_value(solution_xml(s))
+            # print_value(solution_xml(s))
             print_status(ExitStatus.sat)
         elif s.status().exitstatus == CPMStatus.UNSATISFIABLE:
             print_status(ExitStatus.unsat)

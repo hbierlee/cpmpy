@@ -217,6 +217,8 @@ def xcsp3_stats(df, time_limit=None, save=None):
             if slowest_idx is not None and not pd.isna(slowest_idx):
                 print(f"Slowest {phase}: {df.loc[slowest_idx, f'time_{phase}']}s ({df.loc[slowest_idx, 'instance']}, {df.loc[slowest_idx, 'solver']})")
 
+    print("Solvers", df[['alias', 'solver_kwargs']])
+
     print("Problems", df['problem'].unique())
 
 
@@ -240,43 +242,43 @@ def xcsp3_stats(df, time_limit=None, save=None):
     if SHOW_DIFF:
         df = df.drop(df[df["alias"] == "base_gurobi"].index)
 
-    print("RESULTS")
-    print(df
-          # .where(df["status"] == OPT)
-          [[
-        "problem",
-        "instance",
-        "area",
-        # "mean",
-        "median",
-        "stdev",
-        ] + ([] if SHOW_DIFF else ["alias"])
-         + [
-        diff,
-        "status",
-        "obj",
-        "time_total",
-        "time_post",
-        "time_solve",
-        "time_cb",
-        "cb_rel",
-        "cuts",
-        # "exception",
-    ]].sort_values(by=
-                   [
-                       # "area",
-                       "median",
-                       "problem",
-                       "instance",
-                       "alias"
-                       ]
-                   # ["time_total"]
-                   + ([] if SHOW_DIFF else ["alias"])
-                   ))
+    if True:
+        print("RESULTS")
+        print(df
+              # .where(df["status"] == OPT)
+              [[
+            "problem",
+            "instance",
+            "area",
+            # "mean",
+            "median",
+            "stdev",
+            ] + ([] if SHOW_DIFF else ["alias"])
+             + [
+            diff,
+            "status",
+            "obj",
+            "time_total",
+            "time_parse",
+            "time_post",
+            "time_solve",
+            "time_cb",
+            "cb_rel",
+            "cuts",
+            "exception",
+        ]].sort_values(by=
+                       [
+                           # "area",
+                           "median",
+                           "problem",
+                           "instance",
+                           "alias"
+                           ]
+                       # ["time_total"]
+                       + ([] if SHOW_DIFF else ["alias"])
+                       ))
     if SHOW_DIFF:
         exit(0)
-
-    print(", ".join(str(x)[:100] for x in df["exception"].unique()))
 
     # print(df[["instance", "status", "is_err"]].sort_values(by=["instance"]))
 
@@ -352,6 +354,9 @@ def xcsp3_stats(df, time_limit=None, save=None):
         # exc = df[df["status"] == ERR]
         # exc["file"] = exc["problem"] + "-" + exc["instance"]
         print(errors)
+        # print(", ".join(str(x)[:100] for x in df["exception"].unique()))
+        # print(", ".join(str(x)[:100] for x in df["exception"].unique()))
+
 
     # Save convenience
     if save:
@@ -407,7 +412,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # Gather all CSV files
     csv_files = []
-    for (i, path_str) in enumerate(files):
+    for (i, path_str) in enumerate(reversed(files)):
         path = pathlib.Path(path_str)
         if path.is_file() and path.suffix == '.csv':
             csv_files.append((i, pathlib.Path(path)))
@@ -475,6 +480,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     if solved_only:
         df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset((OPT, UNS)), axis=1)]
 
+    pd.set_option("display.max_colwidth", None)
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_rows", None)
     pd.set_option("display.expand_frame_repr", False)
