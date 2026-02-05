@@ -25,7 +25,7 @@ DEFAULTS = [
             # pinac42: 1-12-20, 64Gb
             "workers": calculate_workers(MEM_LIMIT, PINAC_42_MEM_LIMIT, PINAC_42_WORKERS),
             "check_time_limit": 2 * 60,
-            "output_dir": "results",
+            "output_dir": "results/dev",
             "no_timestamp": True,
             "profile": None,
         }

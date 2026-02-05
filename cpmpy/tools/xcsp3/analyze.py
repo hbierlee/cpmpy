@@ -464,7 +464,9 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     import subprocess
     if sync:
-        subprocess.run(["rsync", "-r", sync / files[0], "."])
+        cmd = ["rsync", "-r", sync / files[0], "results"]
+        print("CMD", " ".join(str(c) for c in cmd))
+        subprocess.run(cmd)
     
 
 
