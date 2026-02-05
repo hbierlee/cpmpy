@@ -62,7 +62,27 @@ from ..transformations.reification import only_implies, reify_rewrite, only_bv_r
 from ..transformations.safening import no_partial_functions
 
 from cpmpy.expressions.globalconstraints import Table
+
+
 import types
+
+
+def encode(X, T):
+    dom_sizes = [dom_size(x) for x in X]
+    width = sum(dom_sizes)
+    T_enc = np.zeros((len(T), width), dtype=np.bool)
+
+    # from scipy.sparse import bsr_array, csr_matrix
+    # return csr_matrix(T_enc)
+
+    for t, t_enc_i in zip(T, T_enc):
+        offset = 0
+        for x, x_width, a in zip(X, dom_sizes, t):
+            t_enc_i[offset + a - x.lb] = True
+            offset += x_width
+    return T_enc
+
+
 
 try:
     import gurobipy as gp
@@ -143,17 +163,46 @@ class CPM_gurobi(SolverInterface):
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
         self.grb_model = gp.Model(env=GRB_ENV)
 
+
         if encoding == "gleb":
             def gleb_decompose(self):
                 arr, tab = self.args
-                row_selected = cp.boolvar(shape=len(tab))
                 cons = []
-                nptab = np.array(tab)
-                cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
-                cons += [cp.sum(row_selected) == 1]
+                if len(tab) == 1:
+                    cons += [(x == tab[0][i]) for i, x in enumerate(arr)]
+                else:
+                    row_selected = cp.boolvar(shape=len(tab))
+                    nptab = np.array(tab)
+
+                    cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
+                    cons += [cp.sum(row_selected) == 1]
                 return cons, []
 
             Table.decompose = gleb_decompose
+        if encoding == "bool_table":
+            def bool_decompose(self):
+                arr, tab = self.args
+                T_enc = encode(arr, tab)
+
+                print(T_enc)
+
+                for x in arr:
+                    x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
+                        self.ivarmap, x, "direct", csemap=self._csemap
+                    )
+                    print(x_enc)
+                    expr, k = x_enc.encode_term()
+
+                cons = []
+
+
+
+                return cons, []
+
+            Table.decompose = bool_decompose
+
+        if encoding == "mdd":
+            pass
 
 
         # initialise everything else and post the constraints/objective
@@ -380,18 +429,38 @@ class CPM_gurobi(SolverInterface):
         # apply transformations, then post internally
         # expressions have to be linearized to fit in MIP model. See /transformations/linearize
         cpm_cons = toplevel_list(cpm_expr)
+        print("Top level list: ", cpm_cons)
+        print()
         cpm_cons = no_partial_functions(cpm_cons, safen_toplevel={"mod", "div"})  # linearize expects safe exprs
+        print("No partial functions: ", cpm_cons)
+        print()
         supported = {"min", "max", "abs", "alldifferent"} # alldiff has a specialized MIP decomp in linearize
         cpm_cons = decompose_in_tree(cpm_cons, supported, csemap=self._csemap)
+        print("Decompose in tree: ", cpm_cons)
+        print()
         cpm_cons = flatten_constraint(cpm_cons, csemap=self._csemap)  # flat normal form
+        print("Flatten constraint: ", cpm_cons)
+        print()
         cpm_cons = reify_rewrite(cpm_cons, supported=frozenset(['sum', 'wsum']), csemap=self._csemap)  # constraints that support reification
+        print("Reify rewrite: ", cpm_cons)
+        print()
         cpm_cons = only_numexpr_equality(cpm_cons, supported=frozenset(["sum", "wsum", "sub"]), csemap=self._csemap)  # supports >, <, !=
+        print("Only numexpr equality: ", cpm_cons)
+        print()
         cpm_cons = only_bv_reifies(cpm_cons, csemap=self._csemap)
+        print("Only bv reifies: ", cpm_cons)
+        print()
         cpm_cons = only_implies(cpm_cons, csemap=self._csemap)  # anything that can create full reif should go above...
+        print("Only implies: ", cpm_cons)
+        print()
         # gurobi does not round towards zero, so no 'div' in supported set: https://github.com/CPMpy/cpmpy/pull/593#issuecomment-2786707188
         supported = set({"sum", "wsum","sub","min","max","mul","abs","pow"})
         cpm_cons = linearize_constraint(cpm_cons, supported=supported, csemap=self._csemap)  # the core of the MIP-linearization
+        print("Linearize constraint: ", cpm_cons)
+        print()
         cpm_cons = only_positive_bv(cpm_cons, csemap=self._csemap)  # after linearization, rewrite ~bv into 1-bv
+        print("CPM cons: ", cpm_cons)
+        print()
         return cpm_cons
 
     def add(self, cpm_expr_orig):
