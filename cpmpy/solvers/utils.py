@@ -349,3 +349,4 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
     return X, np.array(sols, dtype=int)
     return np.reshape(sols, shape=())
     sols.reshape((len(X)))
+

@@ -44,6 +44,7 @@
 
 from typing import Optional, List
 import time
+from enum import Enum
 
 from .solver_interface import SolverInterface, SolverStatus, ExitStatus, Callback
 from ..exceptions import NotSupportedError
@@ -59,11 +60,25 @@ from ..transformations.linearize import linearize_constraint, only_positive_bv, 
 from ..transformations.normalize import toplevel_list
 from ..transformations.reification import only_implies, reify_rewrite, only_bv_reifies
 from ..transformations.safening import no_partial_functions, safen_objective
-
 from cpmpy.expressions.globalconstraints import Table
 
 from cpmpy.expressions.utils import dom_size
 
+# TODO find better place
+
+class Feature(Enum):
+    def __repr__(self):
+        return repr(self.value)
+
+    def __str__(self):
+        return self.value
+
+
+class Encoding(Feature):
+    DEFAULT = "default"
+    GLEB = "gleb"
+    GLEB_BOOL = "gleb_bool"
+    MDD = "mdd"
 
 import types
 
@@ -151,7 +166,7 @@ class CPM_gurobi(SolverInterface):
         except PackageNotFoundError:
             return None
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding="default", **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.DEFAULT, **kwargs):
         """
         Constructor of the native solver object
 
@@ -169,7 +184,7 @@ class CPM_gurobi(SolverInterface):
         self.grb_model = gp.Model(env=GRB_ENV)
 
 
-        if encoding == "gleb":
+        if encoding == Encoding.GLEB:
             def gleb_decompose(self):
                 arr, tab = self.args
                 cons = []
@@ -186,17 +201,15 @@ class CPM_gurobi(SolverInterface):
                 return cons, []
 
             Table.decompose = gleb_decompose
-        elif encoding == "bool-gleb":
+        elif encoding == Encoding.GLEB_BOOL:
             def bool_decompose(self):
                 arr, tab = self.args
                 T_enc = encode(arr, tab)
-
                 for x in arr:
                     x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
                         self.ivarmap, x, "direct", csemap=self._csemap
                     )
                     expr, k = x_enc.encode_term()
-
                 cons = []
 
 
@@ -204,7 +217,7 @@ class CPM_gurobi(SolverInterface):
                 return cons, []
 
             Table.decompose = bool_decompose
-        elif encoding == "mdd":
+        elif encoding == Encoding.MDD:
             pass
 
 

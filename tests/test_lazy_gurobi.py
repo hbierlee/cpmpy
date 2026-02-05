@@ -10,7 +10,7 @@ import pytest
 import cpmpy as cp
 from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic
-from cpmpy.solvers.gurobi import CPM_gurobi
+from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
 from cpmpy.tools.xcsp3.experiments import get_experiments
 
 
@@ -162,7 +162,7 @@ def get_envs():
             continue
         yield e
 
-    for encoding in ["default", "gleb"]:
+    for encoding in [Encoding.DEFAULT, Encoding.GLEB]:
         yield {
             "alias": f"base_gurobi-{encoding}",
             "solver": CPM_gurobi,

@@ -1,7 +1,7 @@
 import itertools
 import math
 from cpmpy.solvers.lazy_gurobi import Heuristic, CPM_lazy_gurobi
-from cpmpy.solvers.gurobi import CPM_gurobi
+from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
 
 
 MEM_LIMIT = 8
@@ -46,9 +46,23 @@ def get_experiments(overrides={}, filters=[]):
         [
             [
                 # solvers
-                {"solver": CPM_gurobi, "alias": "base_gurobi"},  # TODO gen.
                 *[
-                    {"alias": f"{solver}-{alias}", "solver": CPM_lazy_gurobi, "solver_kwargs": {"env": kw}}
+                    {
+                        "solver": CPM_gurobi,
+                        "alias": "base_gurobi-{e}",
+                        "solver_kwargs": {"encoding": encoding},
+                    }
+                    for encoding in (
+                        Encoding.DEFAULT,
+                        Encoding.GLEB,
+                    )
+                ],
+                *[
+                    {
+                        "alias": f"{solver}-{alias}",
+                        "solver": CPM_lazy_gurobi,
+                        "solver_kwargs": {"env": kw},
+                    }
                     for solver in ["lazy_gurobi"]
                     for alias, kw in [
                         *ablate(
