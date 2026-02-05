@@ -84,7 +84,7 @@ def get_experiments(overrides={}, filters=[]):
                             ],
                             add_none=True,
                             add_all=True,
-                            filters=["fractional", "coverlift", "cutoff", "shrink"],
+                            # filters=["fractional", "coverlift", "cutoff", "shrink"],
                         ),
                     ]
                 ],
