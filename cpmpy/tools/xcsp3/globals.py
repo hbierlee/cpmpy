@@ -51,7 +51,7 @@ import cpmpy as cp
 from cpmpy import cpm_array, intvar, boolvar
 from cpmpy.exceptions import CPMpyException
 from cpmpy.expressions.core import Expression, Operator
-from cpmpy.expressions.globalconstraints import GlobalConstraint, GlobalFunction, AllDifferent, InDomain, DirectConstraint
+from cpmpy.expressions.globalconstraints import GlobalConstraint, GlobalFunction, AllDifferent, InDomain, DirectConstraint, Table as NonReifiedTable
 from cpmpy.expressions.utils import STAR, is_any_list, is_num, all_pairs, argvals, flatlist, is_boolexpr, argval, is_int, \
     get_bounds, eval_comparison
 from cpmpy.expressions.variables import _IntVarImpl
@@ -389,7 +389,7 @@ class Channel(GlobalConstraint):
         return sum(argvals(x) for x in arr) == 1 and 0 <= argval(v) < len(arr) and arr[argval(v)] == 1
 
 
-class NonReifiedTable(GlobalConstraint):
+class NonReifiedTableXCSP(GlobalConstraint):
     """
     The values of the variables in 'array' correspond to a row in 'table'.
     This global represents the non-reified version, meaning that it does not support occuring reified when decomposing.
