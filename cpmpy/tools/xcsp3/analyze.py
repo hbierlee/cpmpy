@@ -210,7 +210,7 @@ def xcsp3_objective_performance_profile(df):
 
     return fig
 
-def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
+def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
 
     if False:  # TODO FutureWarning: The behavior of Series.idxmax with all-NA values, or any-NA and skipna=False, is deprecated. In a future version this will raise ValueError
         for phase in ['parse', 'model', 'post']:
@@ -362,7 +362,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
         print(f"\n== {grouping_type} ==")
         print(groups)
 
-        if save and grouping_type == "per_alias":
+        if tex and grouping_type == "per_alias":
             n_instances = len((df["problem"] + "-" + df["instance"]).unique())
 
             # n_instances = df.groupby(['problem','instance']).nunique()
@@ -381,7 +381,9 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
                     print(x)
                     return f"\\{x.split('-')[1:][0]}"
 
-            print(groups.rename(index=rename_idx)[
+            tex = groups
+            # tex = groups.rename(index=rename_idx)
+            print(tex[
                 [
                     *(["unk", "mem", "post"]),
                     *(["feas"] if is_cop else [] ),
@@ -397,7 +399,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS]):
                 float_format="%.1f",
                 caption=f"{n_instances} {track} instances",
                 label=f"tbl:res:{track.lower()}",
-                # escape=True,
+                escape=True,
             ))
 
 
@@ -450,6 +452,7 @@ def main():
     parser.add_argument('--plot', '-p', type=pathlib.Path, default=None, help='Path to save the plot image (e.g., plot.png)')
     parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
     parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
+    parser.add_argument('--tex', action='store_true', default=None, help='Output tables in tex')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
     parser.add_argument('--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
@@ -457,12 +460,13 @@ def main():
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, glob_alias=None, glob_instance=None):
+def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, glob_alias=None, glob_instance=None, tex=False):
 
     import subprocess
     if sync:
         subprocess.run(["rsync", "-r", sync / files[0], "."])
     
+
 
     # Gather all CSV files
     csv_files = []
@@ -491,6 +495,12 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     
     df = pd.concat(dfs, ignore_index=True)
 
+    pd.set_option("display.max_colwidth", None)
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.max_rows", None)
+    pd.set_option("display.expand_frame_repr", False)
+
+
     # find problem names
     df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
     df['instance'] = df['instance'].map(lambda x: "-".join(x.split("-")[1:]).split(".")[0])
@@ -516,15 +526,25 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
         def min_(a):
             return min(a) if a else None
 
-        return [metadata.get("method", None), sum(rowss), min_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
+        def max_(a):
+            return max(a) if a else None
 
-    df[["method", "rows", "min", "count", "mean","median", "stdev"]] = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
+
+        return [metadata.get("method", None), sum(rowss), min_(rowss), max_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
+
+    df[["method", "rows", "min", "max", "count", "mean","median", "stdev"]] = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
 
 
     # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
 
     # df["obj"] = df.where(df["method"] == "minimize", -df["obj"], df["obj"])
     # df["obj"] = df.map(lambda x: -x["obj"] if x["method"] == "minimize" else x["obj"])
+    # df = df.drop(df[df["max"] <= 25].index)
+    print(df[["instance", "median", "stdev", "min", "max"]])
+    # assert False
+
+
+
 
 
 
@@ -576,15 +596,10 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     if solved_only:
         df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset(solved), axis=1)]
 
-    pd.set_option("display.max_colwidth", None)
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.max_rows", None)
-    pd.set_option("display.expand_frame_repr", False)
-
     assert not df.empty
 
     # Print some stats
-    xcsp3_stats(df, time_limit=time_limit, save=save)
+    xcsp3_stats(df, time_limit=time_limit, save=save, tex=tex)
     
     fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
     # fig = xcsp3_objective_performance_profile(merged_df)
