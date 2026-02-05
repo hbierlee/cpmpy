@@ -1,4 +1,5 @@
 import pandas as pd
+import pathlib
 from cpmpy.tools.xcsp3 import _parse_xcsp3, _load_xcsp3, read_xcsp3
 import sys
 import numpy as np
@@ -8,7 +9,7 @@ from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark, get_table_metadata_
 from cpmpy.tools.xcsp3.experiments import experiment, ablate
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import ExitStatus, TIME_BUFFER
 from cpmpy.solvers.gurobi import CPM_gurobi
-from cpmpy.expressions.variables import _BoolVarImpl
+from cpmpy.expressions.variables import _BoolVarImpl, _IntVarImpl
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
 import test_lazy_gurobi
 import pandas as pd
@@ -134,6 +135,7 @@ class TestBenchmark:
                                     # "glob_instance": "AlteredStates-02_c25.xml",
                                     "glob_instance": "Fortress1-08_c25.xml",
                                     "verbose": True,
+                                    "track": "COP25",
                                     "time_limit": TIMEOUT,
                                     "check_time_limit": 3,
                                     "output_dir": "/tmp/test_benchmark_results",
@@ -188,6 +190,7 @@ class TestBenchmark:
         # experiment["solver"](cp.Model(2*x + 3*x + 5*x <= 6))
 
         dt = time.time()
+        print("E", experiment)
         out = xcsp3_benchmark(**experiment)
         dt = time.time() - dt
 
@@ -206,7 +209,7 @@ class TestBenchmark:
             assert not np.isnan(df["time_post"])
 
     def test_ablate(self):
-        assert ablate([("a", (False, True)), ("b", (0, 2, 5))], add_none=True, add_all=True) == [
+        assert ablate([("a", (False, True)), ("b", (0, 5, 2))], add_none=True, add_all=True) == [
             ("none", {"a": False, "b": 0}),
             ("a", {"a": True, "b": 0}),
             ("b-2", {"a": False, "b": 2}),
@@ -216,6 +219,9 @@ class TestBenchmark:
 
     def test_dev(self):
         # Parse and create CPMpy model
+        x, y, z = cp.intvar(0, 3, shape=3, name=tuple("xyz"))
+        m = cp.Model([x + y <= 3, (x == 2) | (y == 2), cp.all([x == 2])])
+
         sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
         for m in (
             # "2025/COP25-dev/dev-1.xml",
@@ -227,9 +233,14 @@ class TestBenchmark:
             # "2025/COP25/IHTC-i01_c25.xml",
             # "2025/COP25/RoadefPlaning2-2021-04_c25.xml",
             # "2025/COP25/FAPP-aux-ex1_c25.xml",
+            # "2025/COP25/RoadefPlaning2-2024-11_c25.xml",
+            # "2025/CSP22to25/Soccer-20-12-20-1_c24.xml.lzma",
+            # "2025/CSP22to25/CoveringArray-3-05-2-10_c23.xml.lzma",
+            m,
         ):
             if isinstance(m, str):
-                m = read_xcsp3(m)
+                print("MM", m)
+                m = read_xcsp3(pathlib.Path(m))
             # slv = CPM_lazy_gurobi()
             # import scalene
 
@@ -244,31 +255,34 @@ class TestBenchmark:
             PRINT = True
             slvs = (
                 CPM_gurobi(),
-                CPM_lazy_gurobi(),
+                CPM_lazy_gurobi(env={"cutoff": 0}),
             )
             reps = {}
+            # counters = (_BoolVarImpl.counter, _IntVarImpl.counter)
             for slv in slvs:
                 with open(f"/tmp/{slv.name}.txt", "w") as f:
+                    _BoolVarImpl.counter, _IntVarImpl.counter = (0, 0)
 
-                    _BoolVarImpl.counter = 1
                     reps[slv.name] = ""
 
                     t = time.time()
                     print(slv.name, file=f)
                     rows = []
-                    for i, c in enumerate(m.constraints[:]):
+                    for i, c in enumerate(m.constraints[:] if True else (m.constraints,)):
+                        # TODO weirdly the BV counters are not properly reset if all constraints are transformed at once
                         row = {}
                         mem = process.memory_info().rss
                         rep = repr(c)
-                        print(f"C{i}", rep[:100], file=f)
+                        print(f"C{i} ({c.__class__.__name__})", rep[:100], file=f)
+                        print("  ", slv._csemap, file=f)
                         reps[slv.name] += rep
                         row["c"] = rep
-                        if c.name == "table":
+                        if getattr(c, "name", None) == "table":
                             md = get_table_metadata_(c)
                             print(md, file=f)
                             del md["cols"]
                             row |= md
-                        for c_ in slv.transform(c):
+                        for c_ in slv.transform([c] if not isinstance(c, list) else c):
                             # row["t"] = repr(c)
 
                             rep = repr(c_)
@@ -289,7 +303,11 @@ class TestBenchmark:
                 # pd.set_option("display.expand_frame_repr", False)
 
                 df = pd.DataFrame(data=rows)
-                df["mem_hf"] = df["mem"].map(humanfriendly.format_size)
+                df.insert(
+                    df.columns.get_loc("mem") + 1,
+                    value=df["mem"].map(humanfriendly.format_size),
+                    column="mem_hf",
+                )
                 df = df.sort_values(by="mem")
                 # df["mem"] = humanfriendly.format_size(df["mem"])
                 print(df)
