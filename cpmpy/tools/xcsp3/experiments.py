@@ -49,7 +49,7 @@ def get_experiments(overrides={}, filters=[]):
                 *[
                     {
                         "solver": CPM_gurobi,
-                        "alias": "base_gurobi-{e}",
+                        "alias": f"base_gurobi-{encoding}",
                         "solver_kwargs": {"encoding": encoding},
                     }
                     for encoding in (
