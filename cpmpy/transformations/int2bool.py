@@ -98,7 +98,7 @@ def _encode_int_var(ivarmap, x, encoding, csemap=None):
         return (ivarmap[x.name], ivarmap[x.name].encode_domain_constraint(csemap=csemap))
 
 
-def _encode_lin_expr(ivarmap, xs, weights, encoding, cmp=None):
+def _encode_lin_expr(ivarmap, xs, weights, encoding, cmp=None, csemap=None):
     """Return encoding of the linear expression with variables `xs` and coefficients `weights`, using `encoding`. If the linear expression occus as part of an `Comparison` (e.g. linear constraint), and the `encoding` is `auto`, then comparator of the Comparison `cmp` can be given to guide the encoding selection."""
     terms = []
     domain_constraints = []
@@ -110,7 +110,7 @@ def _encode_lin_expr(ivarmap, xs, weights, encoding, cmp=None):
         elif isinstance(x, _BoolVarImpl):
             terms += [(w, x)]
         elif isinstance(x, _IntVarImpl):
-            x_enc, x_cons = _encode_int_var(ivarmap, x, _decide_encoding(x, cmp, encoding))
+            x_enc, x_cons = _encode_int_var(ivarmap, x, _decide_encoding(x, cmp, encoding), csemap=csemap)
             domain_constraints += x_cons
             # Encode the value of the integer variable as PB expression `(b_1*c_1) + ... + k`
             new_terms, k_ = x_enc.encode_term(w)

@@ -240,7 +240,7 @@ class CPM_rc2(CPM_pysat):
         else:
             raise NotImplementedError(f"CPM_rc2: Non supported objective {obj} (yet?)")
 
-        terms, cons, k = _encode_lin_expr(self.ivarmap, xs, weights, self.encoding)
+        terms, cons, k = _encode_lin_expr(self.ivarmap, xs, weights, self.encoding, csemap=self._csemap)
 
         self += cons
         const += k
