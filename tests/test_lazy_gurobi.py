@@ -11,6 +11,7 @@ import cpmpy as cp
 from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic
 from cpmpy.solvers.gurobi import CPM_gurobi
+from cpmpy.tools.xcsp3.experiments import get_experiments
 
 
 def generate_table_from_example():
@@ -132,36 +133,39 @@ SEED = None
 
 
 def get_envs():
-    if True:
-        yield {
-            "solver": CPM_lazy_gurobi,
-            "solver_kwargs": {
-                "env": {
-                    "verbosity": 3,
-                    "debug": 1,
-                    "max_iterations": 500,
-                    "seed": 42,
-                    "fractional": False,
-                    "coverlift": False,
-                    "negatives": 0,
-                    # "heuristic": Heuristic.INPUT,
-                    "heuristic": Heuristic.GREEDY,
-                    "cutoff": 0,
-                }
-            },
-        }
+    yield {
+        "alias": "dev",
+        "solver": CPM_lazy_gurobi,
+        "solver_kwargs": {
+            "env": {
+                "verbosity": 3,
+                "debug": 1,
+                "max_iterations": 500,
+                "seed": 42,
+                "fractional": False,
+                "coverlift": False,
+                "negatives": 0,
+                # "heuristic": Heuristic.INPUT,
+                "heuristic": Heuristic.GREEDY,
+                "cutoff": 0,
+            }
+        },
+    }
 
+    for e in get_experiments():
+        if e["alias"] == "base_gurobi":
+            continue
+        yield e
 
     for encoding in ['default', 'gleb']:
         yield {
+            "alias": f"base_gurobi-{encoding}",
             "solver": CPM_gurobi,
             "solver_kwargs": {
                 "verbose": 0,
                 "encoding": encoding,
             },
         }
-
-
 
 
 @pytest.fixture
@@ -447,7 +451,7 @@ class TestTables:
 
 def idfn(a):
     if isinstance(a, dict):
-        return a["solver"]
+        return a["alias"]
     else:
         return f"{a[0]}-{a[1]}"
 
