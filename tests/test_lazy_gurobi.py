@@ -157,14 +157,15 @@ def get_envs():
             continue
         yield e
 
-    yield {
-        "alias": "base_gurobi",
-        "solver": CPM_gurobi,
-        "solver_kwargs": {
-            "verbose": 0
-            # "encoding": "gleb",
-        },
-    }
+    for encoding in ['default', 'gleb']:
+        yield {
+            "alias": "base_gurobi",
+            "solver": CPM_gurobi,
+            "solver_kwargs": {
+                "verbose": 0,
+                "encoding": encoding,
+            },
+        }
 
 
 @pytest.fixture
