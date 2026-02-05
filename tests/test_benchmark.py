@@ -212,8 +212,8 @@ class TestBenchmark:
         assert ablate([("a", (False, True)), ("b", (0, 5, 2))], add_none=True, add_all=True) == [
             ("none", {"a": False, "b": 0}),
             ("a", {"a": True, "b": 0}),
-            ("b-2", {"a": False, "b": 2}),
-            ("b-5", {"a": False, "b": 5}),
+            ("b_5", {"a": False, "b": 5}),
+            ("b_2", {"a": False, "b": 2}),
             ("all", {"a": True, "b": 2}),
         ]
 

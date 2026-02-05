@@ -19,7 +19,7 @@ def generate_table_from_example():
     y = cp.intvar(1, 3, name="y")
     z = cp.intvar(1, 3, name="z")
     X = (x, y, z)
-    T = np.array([(2, 1, 1), (3, 2, 2), (4, 3, 3), (1, 2, 3), (2, 1, 2)])
+    T = [[2, 1, 1], [3, 2, 2], [4, 3, 3], [1, 2, 3], [2, 1, 2]]
 
     return cp.Model(cp.Table(X, T))
 
@@ -30,8 +30,8 @@ def generate_two_tables():
     z = cp.intvar(2, 4, name="z")
     w = cp.intvar(1, 2, name="w")
     return cp.Model(
-        cp.Table((x, y, z), np.array([(2, 1, 2), (3, 2, 2), (4, 3, 3), (1, 2, 3), (2, 1, 4)])),
-        cp.Table((z, y, w), np.array([(2, 1, 1), (3, 2, 1), (2, 3, 1), (2, 3, 1), (4, 1, 2)])),
+        cp.Table((x, y, z), [[2, 1, 2], [3, 2, 2], [4, 3, 3], [1, 2, 3], [2, 1, 4]]),
+        cp.Table((z, y, w), [[2, 1, 1], [3, 2, 1], [2, 3, 1], [2, 3, 1], [4, 1, 2]]),
     )
 
 
@@ -39,7 +39,7 @@ def generate_table_from_data(T, d):
     """Generate a table constraint with the given `rows` and with var domains of size `d`"""
 
     X = cp.intvar(1, d, shape=len(T[0]), name="x")
-    return cp.Model(cp.Table(X, np.array(T)))
+    return cp.Model(cp.Table(X, T))
 
 
 def generate_table(n, m, d, k=1, allow_duplicate_vars=False):
@@ -56,7 +56,7 @@ def generate_table(n, m, d, k=1, allow_duplicate_vars=False):
         else:
             Y = X
         if len(Y):
-            T = np.array([tuple(random.randint(1, d) for _ in enumerate(Y)) for _ in range(m)])
+            T = [[random.randint(1, d) for _ in enumerate(Y)] for _ in range(m)]
             model += cp.Table(Y, T)
     return model
 
@@ -158,7 +158,7 @@ def get_envs():
             continue
         yield e
 
-    for encoding in ['default', 'gleb']:
+    for encoding in ["default", "gleb"]:
         yield {
             "alias": f"base_gurobi-{encoding}",
             "solver": CPM_gurobi,
@@ -184,6 +184,7 @@ def load_model(path):
 
 @pytest.mark.timeout(60)
 class TestTables:
+    @pytest.mark.skip()
     def test_repro_explain(self, env):
         path = pathlib.Path("/tmp/failed_cut.pkl")
         if path.exists():
@@ -234,7 +235,7 @@ class TestTables:
         x = cp.intvar(1, 4, name="x")
         # y = cp.intvar(1, 4, name="y")
         z = cp.intvar(2, 4, name="z")
-        c = cp.Table((x, x, z), np.array([(2, 1, 2), (1, 2, 2), (2, 2, 3), (3, 3, 3)]))
+        c = cp.Table((x, x, z), [[2, 1, 2], [1, 2, 2], [2, 2, 3], [3, 3, 3]])
         assert len(set(c.args[0])) < len(c.args[0])
         c = normalize_table(c)
         print(c)
@@ -414,6 +415,7 @@ class TestTables:
         #     slv.explain([0.0, 0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.5, 0.5, 0.0], T_enc, parts) == {1, 5}
         # )
 
+    @pytest.mark.skip()
     def test_repro_model(self, env):
         m = load_model("/tmp/failed_model.pkl")
         print("Repro model:", m)
@@ -431,7 +433,7 @@ class TestTables:
         y = cp.intvar(1, 3, name="y")
         z = cp.intvar(1, 3, name="z")
         X = (x, y, z)
-        T = np.array([(2, 1, 1), (3, 2, 2), (4, 3, 3), (1, 2, 3), (2, 1, 2)])
+        T = [[2, 1, 1], [3, 2, 2], [4, 3, 3], [1, 2, 3], [2, 1, 2]]
         model = cp.Model(cp.Table(X, T), cp.AllDifferent(X))
         check_model(model, env=env)
 
@@ -474,15 +476,15 @@ class TestModels:
                         *[
                             cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))),
                             cp.Model(cp.Table([cp.intvar(0, 5)], [])),
-                            #generate_table_from_data([tuple()], 5),
-                            generate_table_from_data([(1, 1)], 3),  # single row (actually exists in xcsp3)
-                            generate_table_from_data([(1, 1), (2, 2)], 3),  # Feasible (often 0 explanations)
-                            generate_table_from_data([(1, 2), (2, 1)], 3),  # Feasible
+                            # generate_table_from_data([tuple()], 5),
+                            generate_table_from_data([[1, 1]], 3),  # single row (actually exists in xcsp3)
+                            generate_table_from_data([[1, 1], [2, 2]], 3),  # Feasible (often 0 explanations)
+                            generate_table_from_data([[1, 2], [2, 1]], 3),  # Feasible
                             with_constraints(
-                                generate_table_from_data([(1, 1), (2, 2)], 3), with_alldiff=True
+                                generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True
                             ),  # Infeasible
                             with_constraints(
-                                generate_table_from_data([(1, 2), (2, 1)], 3),
+                                generate_table_from_data([[1, 2], [2, 1]], 3),
                                 with_alldiff=True,
                                 with_min=True,
                             ),

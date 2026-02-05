@@ -186,7 +186,7 @@ class CPM_gurobi(SolverInterface):
                 return cons, []
 
             Table.decompose = gleb_decompose
-        if encoding == "bool-gleb":
+        elif encoding == "bool-gleb":
             def bool_decompose(self):
                 arr, tab = self.args
                 T_enc = encode(arr, tab)
@@ -204,8 +204,7 @@ class CPM_gurobi(SolverInterface):
                 return cons, []
 
             Table.decompose = bool_decompose
-
-        if encoding == "mdd":
+        elif encoding == "mdd":
             pass
 
 
