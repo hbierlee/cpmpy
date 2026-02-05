@@ -131,7 +131,7 @@ class TestBenchmark:
                         [
                             [
                                 {
-                                    "alias": CPM_base_solver.__bases__,
+                                    # "alias": CPM_base_solver.__bases__,
                                     # "glob_instance": "AlteredStates-02_c25.xml",
                                     "glob_instance": "Fortress1-08_c25.xml",
                                     "verbose": True,

@@ -185,7 +185,7 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, dict, int, int, int,
     result['year'] = metadata['year']
     result['track'] = metadata['track']
     result['instance'] = metadata['name']
-    result['solver'] = solver
+    result['solver'] = solver if isinstance(solver, str) else solver().name
     result['alias'] = alias
     result['solver_kwargs'] = str(solver_kwargs) + "-" + str(solve_kwargs)
     # result['solve_kwargs'] = str(solve_kwargs)
@@ -448,7 +448,7 @@ def xcsp3_benchmark(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    alias = solver if alias is None else alias
+    alias = (solver if isinstance(solver, str) else solver().name) if alias is None else alias
     output_file = pathlib.Path(f"xcsp3_{year}_{track}_{alias}")
     if no_timestamp is False:
         # Get current timestamp in a filename-safe format
@@ -537,7 +537,7 @@ def main(args):
         filters=[("alias", args.glob_alias)] if args.glob_alias else []
     ) if args.cp_cuts else [args_]
     for e in experiments:
-        if e["solver"] == "lazy_gurobi":
+        if e["solver"].name == "lazy_gurobi":
             if args.debug:
                 e["solver_kwargs"]["env"]["debug"] = True
             e["solver_kwargs"]["env"]["verbosity"] = 0
