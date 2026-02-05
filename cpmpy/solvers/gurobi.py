@@ -61,7 +61,27 @@ from ..transformations.reification import only_implies, reify_rewrite, only_bv_r
 from ..transformations.safening import no_partial_functions, safen_objective
 
 from cpmpy.expressions.globalconstraints import Table
+
+
 import types
+
+
+def encode(X, T):
+    dom_sizes = [dom_size(x) for x in X]
+    width = sum(dom_sizes)
+    T_enc = np.zeros((len(T), width), dtype=np.bool)
+
+    # from scipy.sparse import bsr_array, csr_matrix
+    # return csr_matrix(T_enc)
+
+    for t, t_enc_i in zip(T, T_enc):
+        offset = 0
+        for x, x_width, a in zip(X, dom_sizes, t):
+            t_enc_i[offset + a - x.lb] = True
+            offset += x_width
+    return T_enc
+
+
 
 try:
     import gurobipy as gp
@@ -146,17 +166,46 @@ class CPM_gurobi(SolverInterface):
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
         self.grb_model = gp.Model(env=GRB_ENV)
 
+
         if encoding == "gleb":
             def gleb_decompose(self):
                 arr, tab = self.args
-                row_selected = cp.boolvar(shape=len(tab))
                 cons = []
-                nptab = np.array(tab)
-                cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
-                cons += [cp.sum(row_selected) == 1]
+                if len(tab) == 1:
+                    cons += [(x == tab[0][i]) for i, x in enumerate(arr)]
+                else:
+                    row_selected = cp.boolvar(shape=len(tab))
+                    nptab = np.array(tab)
+
+                    cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
+                    cons += [cp.sum(row_selected) == 1]
                 return cons, []
 
             Table.decompose = gleb_decompose
+        if encoding == "bool_table":
+            def bool_decompose(self):
+                arr, tab = self.args
+                T_enc = encode(arr, tab)
+
+                print(T_enc)
+
+                for x in arr:
+                    x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
+                        self.ivarmap, x, "direct", csemap=self._csemap
+                    )
+                    print(x_enc)
+                    expr, k = x_enc.encode_term()
+
+                cons = []
+
+
+
+                return cons, []
+
+            Table.decompose = bool_decompose
+
+        if encoding == "mdd":
+            pass
 
 
         # initialise everything else and post the constraints/objective

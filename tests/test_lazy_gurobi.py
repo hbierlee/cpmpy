@@ -152,14 +152,16 @@ def get_envs():
         }
 
 
+    for encoding in ['default', 'gleb']:
+        yield {
+            "solver": CPM_gurobi,
+            "solver_kwargs": {
+                "verbose": 0,
+                "encoding": encoding,
+            },
+        }
 
-    yield {
-        "solver": CPM_gurobi,
-        "solver_kwargs": {
-            "verbose": 0,
-            "encoding": "gleb",
-        },
-    }
+
 
 
 @pytest.fixture
