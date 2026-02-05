@@ -3,7 +3,7 @@ import numpy as np
 import cpmpy as cp
 from cpmpy.transformations.get_variables import get_variables
 from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark
-from cpmpy.tools.xcsp3.experiments import experiment
+from cpmpy.tools.xcsp3.experiments import experiment, ablate
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import ExitStatus, TIME_BUFFER
 from cpmpy.solvers.gurobi import CPM_gurobi
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
@@ -160,7 +160,7 @@ class TestBenchmark:
                     ),
                     # TODO test the right error is raised
                     ({"solver": CPM_gurobi_solve_incorrect, "time_limit": 10}, ExitStatus.error),
-                    ( # small dup. table
+                    (  # small dup. table
                         {
                             "solver": CPM_lazy_gurobi,
                             "time_limit": 20,
@@ -197,3 +197,12 @@ class TestBenchmark:
         if feasible:
             assert not np.isnan(df["time_solve"])
             assert not np.isnan(df["time_post"])
+
+    def test_ablate(self):
+        assert ablate([("a", (False, True)), ("b", (0, 5, 2))]) == [
+            ("none", {"a": False, "b": 0}),
+            ("a", {"a": True, "b": 0}),
+            ("b-5", {"a": False, "b": 5}),
+            ("b-2", {"a": False, "b": 2}),
+            ("all", {"a": True, "b": 2}),
+        ]
