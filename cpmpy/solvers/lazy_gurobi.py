@@ -18,7 +18,7 @@ from cpmpy.expressions.core import Comparison, Operator
 from cpmpy.expressions.utils import is_true_cst, is_false_cst, show_assignment, dom_size
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.solvers.gurobi import CPM_gurobi
-# from line_profiler import profile
+from line_profiler import profile
 # from memory_profiler import profile as mem_profile
 
 # https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
@@ -87,6 +87,23 @@ class SetEncoder(json.JSONEncoder):
         elif isinstance(obj, _BoolVarImpl):
             return str(obj)
         return json.JSONEncoder.default(self, obj)
+
+
+def terms(cpm_expr):
+    if isinstance(cpm_expr, Comparison):
+        assert cpm_expr.name == "<="
+        lin_exp, k = cpm_expr.args
+        match lin_exp.name:
+            case "wsum":
+                ws, xs = lin_exp.args
+            case "sum":
+                xs = lin_exp.args
+                ws = [1] * len(xs)
+            case _:
+                raise TypeError
+        return ws, xs, k
+    else:
+        raise TypeError
 
 
 INDEX = 1
@@ -194,14 +211,16 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "heuristic": Heuristic.GREEDY,
             "cutoff": 0,
             "shrink": False,
-            "fractional": False,
+            "fractional": True,
             "coverlift": True,
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
+            # "checker": cp.Model(),
             "checker": None,
             "tables": [],
             "found_feasible": False,
+            "model": None,
             "example2": False,
             **({} if env is None else env),
         }
@@ -220,10 +239,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         self.tables = []
 
-        # if self.env["debug"]:
-        #     self.env["solutions"] = frozenset(
-        #         cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
-        #     )
+        if self.env["checker"]:
+            self.env["solutions"] = frozenset(
+                cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
+            )
 
         super().__init__(cpm_model=cpm_model, **kwargs)
         self.native_model.Params.LazyConstraints = 1
@@ -238,13 +257,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["debug"] and cpm_model is not None:
             self.env["feasible"] = cpm_model.solve()
+            self.env["model"] = cpm_model
 
     def log(self, *mess, verbosity=1, end="\n", indent=None):
         assert self.env["debug"]
         if verbosity <= self.env["verbosity"]:
             indent = self.indent if indent is None else indent
             mess = " " * indent * 2 + " ".join(str(m) for m in mess) + end
-            self.logger.debug(mess)
+            # self.logger.debug(mess)
             print(mess, end="")
             # print(mess, end="", flush=self.env["debug"])
 
@@ -322,7 +342,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C = C - {i}
         return C
 
-    # @profile
+    @profile
     def gencoverlift(self, S, C_enc, k, T_enc):
         if self.env["debug"]:
             self.log("gencoverlift", verbosity=3)
@@ -434,7 +454,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
-    # @profile
+    @profile
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
@@ -442,10 +462,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["debug"]:
             self.log("Explain", end="\n")
-            self.log(" ", np.astype(A_enc, int) if frm == "MIPSOL" else A_enc, verbosity=2, indent=0)
+            self.log("", np.astype(A_enc, int) if frm == "MIPSOL" else A_enc, verbosity=2, indent=0)
             # if frm == "MIPSOL":
             #     self.log("", np.array(assign_mipsol(A_enc)), verbosity=2, indent=0)
             self.log(np.astype(T_enc, int), verbosity=2, indent=0)
+            self.log(f"p{np.astype(parts, int)}", verbosity=2, indent=0)
             # self.log(
             #     "",
             #     np.array(
@@ -503,29 +524,30 @@ class CPM_lazy_gurobi(CPM_gurobi):
             D = T_enc[:, W | F].any(1)
             U = F > ~(T_enc[D, :].all(0))
             if self.env["debug"]:
-                self.log(f"D = {D}", verbosity=2)
+                self.log(f"D = {D} {T_enc[D, :]}", verbosity=2)
                 self.log(f"U = {U}", verbosity=2)
 
             if none(U):
                 if self.env["debug"]:
                     self.log("unexplainable", indent=2)
-                    self.log("because U is empty", verbosity=3, indent=4)
+                    self.log("because U is empty", verbosity=2, indent=4)
                 return True
             else:
                 # i = self.choose(U, T_enc, set(range(m)), heuristic=self.env["heuristic"])
-                i = U.argmax()
-                if self.env["debug"]:
-                    self.log(f"chosen {i + INDEX}", verbosity=3, indent=self.indent + 2)
+                choice = U.argmax()
 
-                # TODO [peter] should be T_hat[i]?
-                R = T_enc[:, i]
-                # X = {i}
-                X = np.zeros(len(T_enc.T), dtype=bool)
-                X[i] = True
-                # choices = np.unique(parts) - parts[i]
+                # TODO [peter] should be T_hat[choice]?
                 choices = np.ones(len(T_enc.T), dtype=bool)
-                choices[parts == i] = False
+                choices[parts[choice] == parts] = False
+                X = np.zeros(len(T_enc.T), dtype=bool)
+                X[choice] = True
+                R = T_enc[:, choice]
                 k = 0
+                if self.env["debug"]:
+                    self.log(f"chosen {show(choice)}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"R {R}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"X {X}", verbosity=3, indent=self.indent + 2)
         else:
             R = np.ones(m, dtype=np.bool)
             X = np.zeros(len(T_enc.T), dtype=bool)
@@ -533,29 +555,21 @@ class CPM_lazy_gurobi(CPM_gurobi):
             k = -1
 
         for iteration in itertools.count(start=1):
-            if self.env["debug"]:
-                self.check_max_iterations(iteration)
-                self.indent = 1
-                self.log(f"R = {R}", verbosity=3)
-                self.log(f"X = {X}", verbosity=3)
-                # self.log(f"R = {show_set(R)}", verbosity=3)
-                self.log(f"choices = {choices}", verbosity=3)
-
+            assert A_enc[X].sum() > k
             if none(R):
                 break
 
             if none(choices):
                 return None
 
-            # TODO [peter] Heuristic, and V cna be removed
             choice = choices.argmax()
             l_parts = parts[choice] == parts
             choices[l_parts] = False
             C_ = l_parts & is_gt(A_enc, 0.0)
-            # R = T_enc[R, C_].any(1)
-            R &= T_enc[:, C_].any(1)
+            R = R & T_enc[:, C_].any(1)
             X |= C_
             k += 1
+
             # [     1   1     ]
             # [ 0 1 1 0 0 0 0 ]  Y
             # [ 0 0 0 0 1 0 0 ]  Y
@@ -577,7 +591,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # X = X.nonzero()[0]
 
         if self.env["debug"]:
-            self.log(f"by explanation of size ({len(X)}): {X}")
+            self.log(f"by explanation of size ({sum(X)}): {X}")
 
         if self.env["debug"]:
             self.env["cuts"][-1]["cut"] = X.copy()
@@ -601,7 +615,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         def show_cut():
             if self.env["debug"]:
                 self.log(
-                    f"cut == {' + '.join(f'{c} * x_{i}' for i, c in enumerate(C_enc) if c)} <= {k}", indent=2
+                    f"cut == {' + '.join(f'{c} * x_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
+                    indent=2,
                 )
 
         show_cut()
@@ -670,16 +685,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     self.log(frm, x_enc_a, verbosity=2)
                 feasible = True  # assume feasible
                 for expr in self._explain_assignment(x_enc_a, frm=frm):
-                    feasible = False  # any expr means not feasible
-
                     if isinstance(expr, Comparison) and expr.name == "<=":
+                        feasible = False  # any expr means not feasible
                         assert isinstance(expr.args[0], Operator)
                         expr, k = expr.args
                         cut = self._make_numexpr(expr) <= k
                         what.cbLazy(cut)
                     elif is_true_cst(expr):
+                        self.log("true const")
                         continue
                     elif is_false_cst(expr):
+                        if self.env["debug"]:
+                            self.log("explanation raised infeasible")
                         raise Infeasible
                     else:
                         assert False, f"Unsupported expl: {expr}"
@@ -708,7 +725,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return solution_callback
 
-    # @profile
     def explanation_to_expr(self, explanation, A_enc, X_enc, T_enc, frm, A_enc_):
         (X, C_enc, k) = explanation
         expr = cp.sum(C_enc[X] * X_enc[X]) <= k
@@ -727,20 +743,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         #     self.check_explanation(expr, X_enc, A_enc, T_enc, table)
 
         if self.env["debug"]:
-            for x, a in zip(X_enc, A_enc_):
-                x._value = a
-
-            if not is_true_cst(expr):
-                assert expr.value() is False, (
-                    f"Did not cut off assignment:\n\n{show_assignment(X_enc)}\n\nwith exp {expr} for table:\n\n {np.array(A_enc_)}\n{T_enc}"
-                )
-            for T_enc_i in T_enc:
-                if True:
-                    for x_i, a_i_j in zip(X_enc, T_enc_i):
-                        x_i._value = bool(a_i_j)
-                    assert expr.value() is True, (
-                        f"Explanation:\n\n{expr}\n\ncut off row\n\n{T_enc_i}\n({show_assignment(X_enc)})\n\nfor failure {A_enc_}"
-                    )
+            self.check_explanation(expr, X_enc, A_enc, T_enc)
 
         return expr
 
@@ -757,18 +760,21 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if frm == "MIPSOL":
                 if (T_enc[:] == A_enc_).all(1).any():
                     if self.env["debug"]:
-                        self.log(f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{T_enc}")
+                        self.log(
+                            f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{np.astype(T_enc, int)}"
+                        )
                     # assert False
                     # assert table.value() # TODO after assigning _value
                     continue
                 elif self.env["debug"]:
-                    self.log(f"table {i}/{len(self.tables)} INfeasible by {A_enc_}\n\n{T_enc}")
+                    self.log(f"table {i}/{len(self.tables)} INfeasible by {A_enc}\n\n{np.astype(T_enc, int)}")
 
             try:
                 # encode assignment
                 if self.env["debug"]:
                     self.log(" ", np.array(X_enc), verbosity=2, indent=0)
                 explanation = self.explain(A_enc, T_enc, parts, frm=frm)
+
                 if self.env["debug"]:
                     # self.check_explanation(explanation, X_enc, A_enc, T_enc)
                     self.env["cuts"][-1]["x"] = str(X_enc)
@@ -798,21 +804,60 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 raise e
 
     def add(self, cons):
+        if not isinstance(cons, list):
+            cons = [cons]
         if self.env["checker"]:
             self.env["checker"] += [con for con in cons if con.name != "table"]
         return super().add(cons)
 
     __add__ = add  # avoid redirect in superclass
 
-    def check_explanation(self, explanation, X_enc, A_enc, T_enc, table):
-        self.env["checker"] += explanation
+    def check_explanation(self, expr, X_enc, A_enc, T_enc):
+        for x, a in zip(X_enc, A_enc):
+            x._value = a
 
-        actual_solutions = frozenset(
-            cp.solvers.utils.solutions(self.env["checker"], X=self.user_vars, projected_solution_limit=None)
-        )
-        expected_solutions = self.env["solutions"]
-        self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
-        assert expected_solutions.issubset(actual_solutions), f"{expected_solutions} </= {actual_solutions}"
+        if not is_true_cst(expr):
+
+            def value(expr):
+                ws, xs, k = terms(expr)
+                lhs = sum(w * x.value() for w, x in zip(ws, xs))
+                return bool(is_le(lhs, k))  # np -> python bool
+
+            assert value(expr) is False, (
+                f"Did not cut off assignment:\n\n{show_assignment(X_enc)}\n\nwith exp {expr} = {value(expr)} for table:\n\n {A_enc}\n{T_enc}"
+            )
+
+        for T_enc_i in T_enc:
+            if True:
+                # TODO [peter] ask about this invariant
+                for x_i, a_i_j in zip(X_enc, T_enc_i):
+                    x_i._value = a_i_j
+                assert value(expr) is True, (
+                    f"Explanation:\n\n{expr}\n\ncut off row\n\n{T_enc_i}\n({show_assignment(X_enc)})\n\nfor failure {A_enc}"
+                )
+
+        if self.env["feasible"] and self.env["checker"]:
+            self.env["checker"] += expr
+
+            # nsols = self.env["checker"].solveAll()
+            # assert nsols >= 3, (
+            #     f"{nsols}:The {expr} for {A_enc} made model unsat\n\n{T_enc}\n\n{self.env['checker']}\n\n"
+            # )
+
+            actual_solutions = frozenset(
+                cp.solvers.utils.solutions(
+                    self.env["checker"], X=self.user_vars, projected_solution_limit=None
+                )
+            )
+
+            def show_assignments(As):
+                return "\n".join(repr(a) for a in As)
+
+            expected_solutions = self.env["solutions"]
+            self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
+            assert expected_solutions <= actual_solutions, (
+                f"Missing sols:\n\n{show_assignments(expected_solutions)}\n\n {show_assignments(actual_solutions)}\n\n{self.env['checker']}"
+            )
 
         # m = cp.Model(explanation, [x == a for x, a in zip(X_enc, A_enc)])
         # assert not m.solve(), f"Explanation {explanation} did not remove failure {A_enc}"
@@ -867,7 +912,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["debug"]:
                     assert self.env["feasible"]
                 if not self.env["found_feasible"]:
-                    print("WARN: not found feas")
+                    self.log("WARN: not found feas")
                 # assert self.env["found_feasible"]
 
             if getattr(self.native_model, "_callback_exception", None):
@@ -879,12 +924,16 @@ class CPM_lazy_gurobi(CPM_gurobi):
             hassol = False
         except Exception as e:
             if self.env["debug"]:
-                self.log("Exception in callback", e)
+                with open("/tmp/failed_model.pkl", "wb") as f:
+                    pickle.dump(self.env["model"], f)
+                if self.env["debug"]:
+                    self.log("Exception in callback", e)
             self.env["verbosity"] = 4
             try:
                 self.stats()
             except Exception as e_:
-                print("Also exception during stats:", e_)
+                if self.env["debug"]:
+                    self.log("Also exception during stats:", e_)
             raise e
 
         if "PYTEST_CURRENT_TEST" not in os.environ:
@@ -905,7 +954,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if cpm_expr.name == "table":
                 area = get_table_area(cpm_expr)
                 if self.env["debug"]:
-                    print(f"table of {area}:", cpm_expr)
+                    self.log(f"table of {area}:", cpm_expr)
                 if area >= self.env["cutoff"]:
                     if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
                         cpm_expr = normalize_table(cpm_expr)

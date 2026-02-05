@@ -64,7 +64,7 @@ import cpmpy as cp
 from cpmpy.tools.xcsp3.experiments import get_experiments
 from cpmpy.tools.xcsp3.dataset import XCSP3Dataset
 from cpmpy.tools.xcsp3 import read_xcsp3
-from cpmpy.tools.xcsp3.xcsp3_cpmpy import xcsp3_cpmpy, init_signal_handlers, ExitStatus, TIME_BUFFER
+from cpmpy.tools.xcsp3.xcsp3_cpmpy import xcsp3_cpmpy, init_signal_handlers, ExitStatus, TIME_BUFFER, CheckError
 import analyze
 
 

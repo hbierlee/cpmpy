@@ -94,7 +94,6 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
     df = df[(df['status'].isin(status_filter))]  # only those that reached the desired status
     # print(df[["solver", "instance", "status", metric]])
 
-
     # Count how many instances each solver solved (with correct status)
     solver_counts = df['alias'].value_counts()
 
@@ -227,6 +226,9 @@ def xcsp3_stats(df, time_limit=None, save=None):
         areas = [t["area"] for t in metadata["tables"]]
         return [metadata["area"], len(areas), statistics.mean(areas), statistics.stdev(areas)]
 
+
+    diff = "Δ"
+    df.insert(df.columns.get_loc("time_solve"), diff, df.groupby(['instance'])["time_solve"].diff())
     df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
     df[["area", "count", "mean", "stdev"]]  = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
     # df["area"], df["count"] = df["file_name"].map(get_metadata)
@@ -242,14 +244,15 @@ def xcsp3_stats(df, time_limit=None, save=None):
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
     df = df.sort_values(by=["problem", "instance", "alias"])
 
-    df["diff"] = df.groupby(['instance'])["time_solve"].diff()
 
     SHOW_DIFF = False
     if SHOW_DIFF:
         df = df.drop(df[df["alias"] == "base_gurobi"].index)
 
     print("RESULTS")
-    print(df[[
+    print(df
+          # .where(df["status"] == OPT)
+          [[
         "problem",
         "instance",
         "area",
@@ -257,20 +260,25 @@ def xcsp3_stats(df, time_limit=None, save=None):
         "stdev",
         ] + ([] if SHOW_DIFF else ["alias"])
          + [
-        "diff",
+        diff,
         "status",
-        # "time_total",
+        "obj",
+        "time_total",
         "time_post",
         "time_solve",
         "time_cb",
         "cb_rel",
         "cuts",
+        # "exception",
     ]].sort_values(by=
-                   ["mean", "problem", "instance"]
+                   # ["mean", "problem", "instance"]
+                   ["time_total"]
                    + ([] if SHOW_DIFF else ["alias"])
                    ))
     if SHOW_DIFF:
         exit(0)
+
+    print(", ".join(str(x)[:100] for x in df["exception"].unique()))
 
     # print(df[["instance", "status", "is_err"]].sort_values(by=["instance"]))
 
@@ -344,7 +352,7 @@ def xcsp3_stats(df, time_limit=None, save=None):
                     # 'run',
                     'alias',
                     'status',
-                    'objective_value',
+                    'obj',
                     ] +
                 [f'time_{t}' for t in (
                     "total",
@@ -417,16 +425,21 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
     df['instance'] = df['instance'].map(lambda x: "-".join(x.split("-")[1:]).split(".")[0])
 
+    # rename
+    df = df.rename(columns={"objective_value": "obj"})
+
     # replace time_solve to NaN if not solved
-    df["time_solve"] = df["time_solve"].mask(~df["status"].isin([OPT, UNS]))
+    solved = [OPT, UNS]
+    df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
 
     # let solve include post time?
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
+    if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
+        df['alias'] = df['alias'] + "-" + df['run']
 
-    if True:
-        if len(df['run'].unique()) > 1:
-            df['alias'] = df['alias'] + "-" + df['run']
+    # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
+    # print(df.mask(df["status"] == OPT).groupby(by=['problem', 'instance']).agg(lambda x: ','.join(str(x_) for x_ in x.unique()))['obj'])
 
     df['alias'] += '.'
 

@@ -90,11 +90,12 @@ def check_model(model, env=None):
 
             violations = [c for c in model.constraints if c.value() is False]
             assert not violations, (
-                f"For assignment:\n\n{show_assignment(X)}\n\nThe following constraints fail:\n\n{'\n\n'.join(str(v) for v in violations)}"
+                f"For assignment:\n\n{show_assignment(X)}\n\nThe following constraints fail:\n\n'"
+                + "\n\n".join(str(v) for v in violations)
             )
         print("PASS.")
     except AssertionError as e:
-        with open("/tmp/bug.pkl", "wb") as f:
+        with open("/tmp/failed_model.pkl", "wb") as f:
             pickle.dump(model, f)
 
         raise e
@@ -127,14 +128,14 @@ SEED = None
 def env():
     yield (
         {
-            "verbosity": 0,
+            "verbosity": 3,
             "debug": 1,
-            "max_iterations": 3000,
+            "max_iterations": 500,
             "seed": 42,
             "shrink": False,
-            "fractional": False,
+            "fractional": True,
             "coverlift": True,
-            "cutoff": 45,
+            "cutoff": 0,
         }
         if True
         else CPM_gurobi
@@ -158,7 +159,7 @@ class TestTables:
             slv = CPM_lazy_gurobi(
                 env={**env, **{"verbosity": 4, "debug": True}},
             )
-            explanation = slv.explain(A_enc, T_enc, parts, frm="MIPSOL")
+            explanation = slv.explain(A_enc, T_enc, parts, frm=frm)
             slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm, A_enc_)
 
     def test_coverlift(self, env):
@@ -244,6 +245,7 @@ class TestTables:
                 [
                     *[
                         cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))),
+                        generate_table_from_data([(1, 1)], 3),  # single row (actually exists in xcsp3)
                         generate_table_from_data([(1, 1), (2, 2)], 3),  # Feasible (often 0 explanations)
                         generate_table_from_data([(1, 2), (2, 1)], 3),  # Feasible
                         with_constraints(
@@ -273,7 +275,7 @@ class TestTables:
                                 generate_table(2, 2, 3, k=2, allow_duplicate_vars=allow_duplicate_vars)
                             ),
                             with_constraints(
-                                generate_table(3, 3, 5, allow_duplicate_vars=allow_duplicate_vars),
+                                generate_table(3, 3, 4, allow_duplicate_vars=allow_duplicate_vars),
                                 # with_alldiff=False,
                                 # with_min=True,
                             ),
@@ -299,7 +301,7 @@ class TestTables:
         check_model(model, env=env)
 
     def test_repro_model(self, env):
-        m = load_model("/tmp/bug.pkl")
+        m = load_model("/tmp/failed_model.pkl")
         print("Repro model:", m)
         check_model(m, env=env)
 
