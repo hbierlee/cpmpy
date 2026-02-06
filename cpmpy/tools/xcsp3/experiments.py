@@ -61,11 +61,12 @@ def get_experiments(overrides={}, filters=[]):
                     {
                         "alias": f"{solver}-{alias}",
                         "solver": CPM_lazy_gurobi,
-                        "solver_kwargs": {"env": kw},
+                        "solver_kwargs": solver_kwargs,
                     }
                     for solver in ["lazy_gurobi"]
-                    for alias, kw in [
-                        *ablate(
+                    for alias, solver_kwargs in [
+                        (alias, {"env": env, "encoding": Encoding.GLEB})
+                        for alias, env in ablate(
                             [
                                 ("heuristic", (Heuristic.GREEDY,)),
                                 ("fractional", (False, True)),
@@ -84,8 +85,7 @@ def get_experiments(overrides={}, filters=[]):
                             ],
                             add_none=True,
                             add_all=True,
-                            # filters=["fractional", "coverlift", "cutoff", "shrink"],
-                        ),
+                        )
                     ]
                 ],
             ]
