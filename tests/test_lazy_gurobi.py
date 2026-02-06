@@ -14,6 +14,9 @@ from cpmpy.solvers.gurobi import CPM_gurobi
 from cpmpy.tools.xcsp3.experiments import get_experiments
 
 
+from cpmpy.solvers.gurobi import Encoding as ENCODING
+
+
 def generate_table_from_example():
     x = cp.intvar(1, 4, name="x")
     y = cp.intvar(1, 3, name="y")
@@ -158,7 +161,7 @@ def get_envs():
             continue
         yield e
 
-    for encoding in ['default', 'gleb']:
+    for encoding in ENCODING:
         yield {
             "alias": f"base_gurobi-{encoding}",
             "solver": CPM_gurobi,
