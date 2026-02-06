@@ -1,15 +1,18 @@
 """Convert integer linear constraints to pseudo-boolean constraints."""
 
-from typing import List
 import itertools
 import math
-from ..transformations.flatten_model import get_or_make_var
-import cpmpy as cp
 from abc import ABC, abstractmethod
-from ..expressions.variables import _BoolVarImpl, _IntVarImpl
+from typing import List
+
+import cpmpy as cp
+
+from ..expressions.core import BoolVal, Comparison, Expression, Operator
 from ..expressions.globalconstraints import DirectConstraint
-from ..expressions.core import Comparison, Operator, BoolVal
-from ..expressions.core import Expression
+from ..expressions.utils import is_int
+from ..expressions.variables import _BoolVarImpl, _IntVarImpl, boolvar
+from ..transformations.flatten_model import get_or_make_var
+from abc import ABC, abstractmethod
 
 UNKNOWN_COMPARATOR_ERROR = ValueError("Comparator is not known or should have been simplified by linearize.")
 
@@ -55,9 +58,8 @@ def _encode_expr(ivarmap, expr, encoding, csemap=None):
             return _encode_comparison(ivarmap, lhs, expr.name, rhs, encoding, csemap=csemap)
         elif lhs.name == "sum":
             if len(lhs.args) == 1:
-                return _encode_expr(
-                    ivarmap, Comparison(expr.name, lhs.args[0], rhs), encoding, csemap=csemap
-                )  # even though it seems trivial (to call `_encode_comparison`), using recursion avoids bugs
+                # even though it seems trivial (to call `_encode_comparison`), using recursion avoids bugs
+                return _encode_expr(ivarmap, Comparison(expr.name, lhs.args[0], rhs), encoding, csemap=csemap)  
             else:
                 return _encode_linear(ivarmap, lhs.args, expr.name, rhs, encoding, csemap=csemap)
         elif lhs.name == "wsum":
@@ -94,6 +96,29 @@ def _encode_int_var(ivarmap, x, encoding, csemap=None):
             raise NotImplementedError(encoding)
 
         return (ivarmap[x.name], ivarmap[x.name].encode_domain_constraint(csemap=csemap))
+
+
+def _encode_lin_expr(ivarmap, xs, weights, encoding, cmp=None, csemap=None):
+    """Return encoding of the linear expression with variables `xs` and coefficients `weights`, using `encoding`. If the linear expression occus as part of an `Comparison` (e.g. linear constraint), and the `encoding` is `auto`, then comparator of the Comparison `cmp` can be given to guide the encoding selection."""
+    terms = []
+    domain_constraints = []
+    k = 0
+    for w, x in zip(weights, xs):
+        # the linear may contain Boolean as well as integer variables
+        if is_int(x):
+            k += w * x
+        elif isinstance(x, _BoolVarImpl):
+            terms += [(w, x)]
+        elif isinstance(x, _IntVarImpl):
+            x_enc, x_cons = _encode_int_var(ivarmap, x, _decide_encoding(x, cmp, encoding), csemap=csemap)
+            domain_constraints += x_cons
+            # Encode the value of the integer variable as PB expression `(b_1*c_1) + ... + k`
+            new_terms, k_ = x_enc.encode_term(w)
+            terms += new_terms
+            k += k_
+        else:
+            raise TypeError(f"Term {w} * {x} for {type(x)}")
+    return terms, domain_constraints, k
 
 
 def _encode_linear(ivarmap, xs, cmp, rhs, encoding, weights=None, check_bounds=True, csemap=None):
@@ -136,19 +161,8 @@ def _encode_linear(ivarmap, xs, cmp, rhs, encoding, weights=None, check_bounds=T
         if value is not None:
             return [value], []
 
-    terms = []
-    domain_constraints = []
-    for w, x in zip(weights, xs):
-        # the linear may contain Boolean as well as integer variables
-        if isinstance(x, _BoolVarImpl):
-            terms += [(w, x)]
-        else:
-            x_enc, x_cons = _encode_int_var(ivarmap, x, _decide_encoding(x, cmp, encoding), csemap=csemap)
-            domain_constraints += x_cons
-            # Encode the value of the integer variable as PB expression `(b_1*c_1) + ... + k`
-            new_terms, k = x_enc.encode_term(w)
-            terms += new_terms  # add new terms
-            rhs -= k  # subtract constant from both sides
+    terms, domain_constraints, k = _encode_lin_expr(ivarmap, xs, weights, encoding, cmp=cmp, csemap=csemap)
+    rhs -= k
 
     if len(terms) == 0:
         # the unzip trick does not allow default for 0 length iterables
@@ -292,7 +306,6 @@ class IntVarEncDirect(IntVarEnc):
             return [self.eq(d)]
         elif op == "!=":
             return [~self.eq(d)]
-        # return _not_and([self.eq(d)])
         elif op == "<=":
             # all higher values are False
             return list(~self._xs[self._offset(d + 1) :])
@@ -331,7 +344,6 @@ class IntVarEncOrder(IntVarEnc):
         """Return a conjunction whether x==d."""
         if self._x.lb <= d <= self._x.ub:
             return [self.geq(d), ~self.geq(d + 1)]
-            # return cp.all([self.geq(d), ~self.geq(d + 1)])
         else:
             return [BoolVal(False)]
 
@@ -412,7 +424,6 @@ class IntVarEncLog(IntVarEnc):
             return self.eq(d)
         elif cmp == "!=":  # x<d or x>=d+1
             return [cp.any(~lit for lit in self.eq(d))]
-            # return [cp.any(~x for x in self.eq(d))]
         elif cmp in (">=", "<="):
             # TODO lexicographic encoding might be more effective, but currently we just use the PB encoding
             constraint, domain_constraints = _encode_linear(
@@ -435,3 +446,16 @@ def _dom(x):
 
 def _dom_size(x):
     return x.ub + 1 - x.lb
+
+
+def replace_int_user_vars(user_vars, ivarmap):
+    """Replace integer user vars by the corresponding Booleans from ivarmap.
+    Note that it returns a new set, it does not modify the user_vars set."""
+    bool_user_vars = set()
+    for x in user_vars:
+        if isinstance(x, _BoolVarImpl):
+            bool_user_vars.add(x)
+        else:
+            # extends set with encoding variables of `x`
+            bool_user_vars.update(ivarmap[x.name].vars())
+    return bool_user_vars

@@ -4,16 +4,24 @@ import unittest
 import pytest
 
 import cpmpy as cp
+from cpmpy.expressions.variables import _BoolVarImpl, _IntVarImpl
 from cpmpy.expressions.globalfunctions import GlobalFunction
-from cpmpy.exceptions import TypeError, NotSupportedError
-from cpmpy.expressions.utils import STAR, argvals
+from cpmpy.exceptions import TypeError, NotSupportedError, IncompleteFunctionError
+from cpmpy.expressions.utils import STAR, argvals, argval
 from cpmpy.solvers import CPM_minizinc
+from cpmpy.transformations.decompose_global import decompose_in_tree
+from cpmpy.transformations.safening import no_partial_functions
 
-from utils import skip_on_missing_pblib
+from utils import skip_on_missing_pblib, inclusive_range
 
 
 @skip_on_missing_pblib(skip_on_exception_only=True)
 class TestGlobal(unittest.TestCase):
+
+    def setUp(self):
+        _BoolVarImpl.counter = 0
+        _IntVarImpl.counter = 0
+
     def test_alldifferent(self):
         """Test all different constraint with a set of
         unit cases.
@@ -281,49 +289,32 @@ class TestGlobal(unittest.TestCase):
     def test_InDomain(self):
         iv = cp.intvar(-8, 8)
         iv_arr = cp.intvar(-8, 8, shape=5)
-        cons = [cp.InDomain(iv, iv_arr)]
-        model = cp.Model(cons)
-        self.assertTrue(model.solve())
-        self.assertIn(iv.value(), iv_arr.value())
+
+        # Test InDomain with constant list
         vals = [1, 5, 8, -4]
-        cons = [cp.InDomain(iv, vals)]
-        model = cp.Model(cons)
+        model = cp.Model([cp.InDomain(iv, vals)])
         self.assertTrue(model.solve())
         self.assertIn(iv.value(), vals)
-        cons = [cp.InDomain(iv, [])]
-        model = cp.Model(cons)
+
+        # Test InDomain with empty list (should be unsat)
+        model = cp.Model([cp.InDomain(iv, [])])
         self.assertFalse(model.solve())
-        cons = [cp.InDomain(iv, [1])]
-        model = cp.Model(cons)
+
+        # Test InDomain with singleton list
+        model = cp.Model([cp.InDomain(iv, [1])])
         self.assertTrue(model.solve())
-        self.assertEqual(iv.value(),1)
-        cons = cp.InDomain(cp.min(iv_arr), vals)
-        model = cp.Model(cons)
+        self.assertEqual(iv.value(), 1)
+
+        # Test InDomain using minimum of array
+        model = cp.Model([cp.InDomain(cp.min(iv_arr), vals)])
         self.assertTrue(model.solve())
-        iv2 = cp.intvar(-8, 8)
-        vals = [1, 5, 8, -4, iv2]
-        cons = [cp.InDomain(iv, vals)]
-        model = cp.Model(cons)
-        self.assertTrue(model.solve())
-        self.assertIn(iv.value(), argvals(vals))
-        vals = [1, 5, 8, -4]
+
+        # Test InDomain with boolean var and constants
         bv = cp.boolvar()
-        cons = [cp.InDomain(bv, vals)]
-        model = cp.Model(cons)
+        vals3 = [1, 5, 8, -4]
+        model = cp.Model([cp.InDomain(bv, vals3)])
         self.assertTrue(model.solve())
-        self.assertIn(bv.value(), set(vals))
-        vals = [iv2, 5, 8, -4]
-        bv = cp.boolvar()
-        cons = [cp.InDomain(bv, vals)]
-        model = cp.Model(cons)
-        self.assertTrue(model.solve())
-        self.assertIn(bv.value(), argvals(vals))
-        vals = [bv & bv, 5, 8, -4]
-        bv = cp.boolvar()
-        cons = [cp.InDomain(bv, vals)]
-        model = cp.Model(cons)
-        self.assertTrue(model.solve())
-        self.assertIn(bv.value(), argvals(vals))
+        self.assertIn(bv.value(), set(vals3))
 
     def test_lex_lesseq(self):
         from cpmpy import BoolVal
@@ -564,9 +555,13 @@ class TestGlobal(unittest.TestCase):
         self.assertTrue(model.solve())
         self.assertEqual(str(min(iv.value())), '-1')
 
-        model = cp.Model(cp.Minimum(iv).decompose_comparison('==', 4))
+        _min, define = cp.Minimum(iv).decompose()
+        model = cp.Model(_min == 4, define)
+
         self.assertTrue(model.solve())
-        self.assertEqual(str(min(iv.value())), '4')
+        self.assertEqual(min(iv.value()), 4)
+        self.assertEqual(cp.Minimum(iv).value(), 4)
+
 
     def test_minimum_onearg(self):
 
@@ -586,9 +581,12 @@ class TestGlobal(unittest.TestCase):
         self.assertTrue(model.solve())
         self.assertTrue(max(iv.value()) <= -1)
 
-        model = cp.Model(cp.Maximum(iv).decompose_comparison('!=', 4))
+        _max, define = cp.Maximum(iv).decompose()
+        model = cp.Model(_max == 4, define)
+
         self.assertTrue(model.solve())
-        self.assertNotEqual(str(max(iv.value())), '4')
+        self.assertEqual(max(iv.value()), 4)
+        self.assertEqual(cp.Maximum(iv).value(), 4)
 
     def test_maximum_onearg(self):
 
@@ -613,10 +611,14 @@ class TestGlobal(unittest.TestCase):
         self.assertTrue(model.solve())
         self.assertTrue(cp.Model(decompose_in_tree(constraints)).solve()) #test with decomposition
 
-        model = cp.Model(cp.Abs(iv).decompose_comparison('!=', 4))
+        _abs, define = cp.Abs(iv).decompose()
+        model = cp.Model(_abs == 4, define)
+
         self.assertTrue(model.solve())
-        self.assertNotEqual(str(abs(iv.value())), '4')
-        self.assertEqual(model.solveAll(display=iv), 15)
+        self.assertIn(iv.value(), [-4,4])
+        self.assertEqual(_abs.value(), 4)
+        self.assertEqual(cp.Abs(iv).value(), 4)
+        self.assertEqual(model.solveAll(), 2)
 
         pos = cp.intvar(0,8, name="x")
         constraints = [cp.Abs(pos) != 4]
@@ -689,6 +691,83 @@ class TestGlobal(unittest.TestCase):
                 except (NotImplementedError, NotSupportedError):
                     pass
 
+    def test_element_index_dom_mismatched(self):
+        """
+            Check transform of `[0,1,2][x in -1..1] == y in 1..5`
+            Note the index variable has a lower bound *outside* the indexable range, and an upper bound inside AND lower than the indexable range upper bound
+        """
+        elem = cp.Element([0, 1, 2], cp.intvar(-1, 1, name="x"))
+        constraint = elem <= cp.intvar(1, 5, name="y")
+        decomposed = decompose_in_tree(no_partial_functions([constraint], safen_toplevel={"element"}))
+
+        expected = {
+            # safening constraints
+            "(BV0) == ((x >= 0) and (x <= 2))",
+            "(BV0) -> ((IV0) == (x))",
+            "(~BV0) -> (IV0 == 0)",
+            "BV0",
+            # actual decomposition
+            '(IV0 == 0) -> (IV1 == 0)',
+            '(IV0 == 1) -> (IV1 == 1)',
+            '(IV0 == 2) -> (IV1 == 2)',
+            '(IV1) <= (y)'
+        }
+        self.assertSetEqual(set(map(str, decomposed)), expected)
+
+        # should raise a warning if we don't safen first
+        with pytest.warns(UserWarning, match=".*unsafe.*"):
+            val, decomp = elem.decompose()
+            expected = {
+                # actual decomposition
+                '(x == 0) -> (IV2 == 0)',
+                '(x == 1) -> (IV2 == 1)',
+                'x >= 0', 'x < 3'
+            }
+            self.assertSetEqual(set(map(str, decomp)), expected)
+
+        # also for linear decomp
+        with pytest.warns(UserWarning, match=".*unsafe.*"):
+            val, decomp = elem.decompose_linear()
+            expected = {
+                'x >= 0', 'x < 3'
+            }
+            assert set(map(str, decomp)) == expected
+            assert str(val) == "sum([0, 1] * [x == 0, x == 1])"
+
+    def test_modulo(self):
+
+        x, z = cp.intvar(-2,2, shape=2, name=["x","z"])
+        y = cp.intvar(1,5, name="y")
+        vars = [x,y,z]
+
+        constraint = [x % y  == z]
+        decomp = decompose_in_tree(constraint)
+
+        all_sols = set()
+        lin_all_sols = set()
+        count = cp.Model(constraint).solveAll(solver="ortools", display=lambda: all_sols.add(tuple(argvals(vars))))
+        decomp_count = cp.Model(decomp).solveAll(solver="ortools", display=lambda: lin_all_sols.add(tuple(argvals(vars))))
+
+        self.assertSetEqual(all_sols, lin_all_sols) # same on decision vars
+        self.assertEqual(count,decomp_count) # same on all vars
+
+    def test_div(self):
+        x, z = cp.intvar(-2, 2, shape=2, name=["x", "z"])
+        y = cp.intvar(1, 5, name="y")
+        vars = [x, y, z]
+
+        constraint = [x // y == z]
+        decomp = decompose_in_tree(constraint)
+
+        all_sols = set()
+        decomp_sols = set()
+        count = cp.Model(constraint).solveAll(solver="ortools", display=lambda: all_sols.add(tuple(argvals(vars))))
+        decomp_count = cp.Model(decomp).solveAll(solver="ortools",
+                                                display=lambda: decomp_sols.add(tuple(argvals(vars))))
+
+        self.assertSetEqual(all_sols, decomp_sols)  # same on decision vars
+        self.assertEqual(count, decomp_count)  # same on all vars
+
     def test_xor(self):
         bv = cp.boolvar(5)
         self.assertTrue(cp.Model(cp.Xor(bv)).solve())
@@ -738,7 +817,7 @@ class TestGlobal(unittest.TestCase):
 
 
     def test_not_xor(self):
-        bv = cp.boolvar(5)
+        bv = cp.boolvar(shape=5, name=tuple("abcde"))
         self.assertTrue(cp.Model(~cp.Xor(bv)).solve())
         self.assertFalse(cp.Xor(bv).value())
         nbNotModels = cp.Model(~cp.Xor(bv)).solveAll(display=lambda: self.assertFalse(cp.Xor(bv).value()))
@@ -823,7 +902,7 @@ class TestGlobal(unittest.TestCase):
 
     @pytest.mark.skipif(not CPM_minizinc.supported(),
                         reason="Minizinc not installed")
-    def test_cumulative_single_demand(self):
+    def test_cumulative_single_task_mzn(self):
         start = cp.intvar(0, 10, name="start")
         dur = 5
         end = cp.intvar(0, 10, name="end")
@@ -831,7 +910,7 @@ class TestGlobal(unittest.TestCase):
         capacity = 10
 
         m = cp.Model()
-        m += cp.Cumulative([start], [dur], [end], [demand], capacity)
+        m += cp.Cumulative([start],[dur], [end],[demand], capacity)
 
         self.assertTrue(m.solve(solver="ortools"))
         self.assertTrue(m.solve(solver="minizinc"))
@@ -846,12 +925,38 @@ class TestGlobal(unittest.TestCase):
         capacity = 10
         bv = cp.boolvar()
 
-        cons = cp.Cumulative([start], [dur], [end], [demand], capacity)
+        cons = cp.Cumulative(start, dur, end, demand, capacity)
 
         m = cp.Model(bv.implies(cons), start + dur != end)
 
         self.assertTrue(m.solve(solver="ortools"))
         self.assertTrue(m.solve(solver="minizinc"))
+
+    @pytest.mark.skipif(not CPM_minizinc.supported(),
+                        reason="Minizinc not installed")
+    def test_negative_table_minizinc(self):
+        """Test negative_table constraint with minizinc solver"""
+        iv = cp.intvar(-8, 8, 3)
+
+        # Test basic negative_table
+        constraints = [cp.NegativeTable([iv[0], iv[1], iv[2]], [(5, 2, 2)])]
+        model = cp.Model(constraints)
+        self.assertTrue(model.solve(solver="minizinc"))
+        # Verify the solution doesn't match the forbidden tuple
+        self.assertNotEqual((iv[0].value(), iv[1].value(), iv[2].value()), (5, 2, 2))
+
+        # Test with multiple forbidden tuples
+        constraints = [cp.NegativeTable(iv, [[10, 8, 2], [5, 2, 2]])]
+        model = cp.Model(constraints)
+        self.assertTrue(model.solve(solver="minizinc"))
+        sol = tuple(iv.value())
+        self.assertNotIn(sol, [(10, 8, 2), (5, 2, 2)])
+
+        # Test that negative_table and table are contradictory when they have the same tuples
+        constraints = [cp.NegativeTable(iv, [[10, 8, 2], [5, 9, 2]]), 
+                       cp.Table(iv, [[10, 8, 2], [5, 9, 2]])]
+        model = cp.Model(constraints)
+        self.assertFalse(model.solve(solver="minizinc"))
 
 
 
@@ -881,6 +986,19 @@ class TestGlobal(unittest.TestCase):
         self.assertTrue(cp.Model(cons.decompose()).solve())
         self.assertTrue(cons.value())
 
+    def test_cumulative_negative_dur(self):
+        start = cp.intvar(0,10,shape=3, name="start")
+        dur = cp.intvar(-5,-1, shape=3, name="dur")
+        end = cp.intvar(-5,10, shape=3, name="end")
+        bv = cp.boolvar()
+
+        expr = cp.Cumulative(start, dur, end, 1, 5)
+        self.assertFalse(cp.Model(expr).solve())
+        self.assertTrue(cp.Model(bv == expr).solve())
+        self.assertFalse(bv.value())
+
+
+
     def test_ite(self):
         x = cp.intvar(0, 5, shape=3, name="x")
         iter = cp.IfThenElse(x[0] > 2, x[1] > x[2], x[1] == x[2])
@@ -901,11 +1019,7 @@ class TestGlobal(unittest.TestCase):
 
     def test_global_cardinality_count(self):
         iv = cp.intvar(-8, 8, shape=5)
-        val = cp.intvar(-3, 3, shape=3)
         occ = cp.intvar(0, len(iv), shape=3)
-        self.assertTrue(cp.Model([cp.GlobalCardinalityCount(iv, val, occ), cp.AllDifferent(val)]).solve())
-        self.assertTrue(cp.GlobalCardinalityCount(iv, val, occ).value())
-        self.assertTrue(all(cp.Count(iv, val[i]).value() == occ[i].value() for i in range(len(val))))
         val = [1, 4, 5]
         self.assertTrue(cp.Model([cp.GlobalCardinalityCount(iv, val, occ)]).solve())
         self.assertTrue(cp.GlobalCardinalityCount(iv, val, occ).value())
@@ -918,7 +1032,7 @@ class TestGlobal(unittest.TestCase):
 
     def test_not_global_cardinality_count(self):
         iv = cp.intvar(-8, 8, shape=5)
-        val = cp.intvar(-3, 3, shape=3)
+        val = [0,1,2]
         occ = cp.intvar(0, len(iv), shape=3)
         self.assertTrue(cp.Model([~cp.GlobalCardinalityCount(iv, val, occ), cp.AllDifferent(val)]).solve())
         self.assertTrue(~cp.GlobalCardinalityCount(iv, val, occ).value())
@@ -934,10 +1048,8 @@ class TestGlobal(unittest.TestCase):
         self.assertTrue(~cp.GlobalCardinalityCount([iv[0],iv[2],iv[1],iv[4],iv[3]], val, occ).value())
 
     def test_gcc_onearg(self):
-
         iv = cp.intvar(0, 10)
         for s, cls in cp.SolverLookup.base_solvers():
-            print(s)
             if cls.supported():
                 try:
                     self.assertTrue(cp.Model(cp.GlobalCardinalityCount([iv], [3],[1])).solve(solver=s))
@@ -1124,6 +1236,80 @@ class TestBounds(unittest.TestCase):
             self.assertEqual(test_lb,lb)
             self.assertEqual(test_ub,ub)
 
+    def test_bounds_div(self):
+        x = cp.intvar(-8, 8)
+        y = cp.intvar(-7,-1)
+        z = cp.intvar(3,9)
+        op1 = cp.Division(x,y)
+        lb1,ub1 = op1.get_bounds()
+        self.assertEqual(lb1,-8)
+        self.assertEqual(ub1,8)
+        op2 = cp.Division(x,z)
+        lb2,ub2 = op2.get_bounds()
+        self.assertEqual(lb2,-2)
+        self.assertEqual(ub2,2)
+        for lhs in inclusive_range(*x.get_bounds()):
+            for rhs in inclusive_range(*y.get_bounds()):
+                val = cp.Division(lhs,rhs).value()
+                self.assertGreaterEqual(val,lb1)
+                self.assertLessEqual(val,ub1)
+            for rhs in inclusive_range(*z.get_bounds()):
+                val = cp.Division(lhs, rhs).value()
+                self.assertGreaterEqual(val,lb2)
+                self.assertLessEqual(val,ub2)
+
+    def test_bounds_mod(self):
+        x = cp.intvar(-8, 8)
+        xneg = cp.intvar(-8, 0)
+        xpos = cp.intvar(0, 8)
+        y = cp.intvar(-5, -1)
+        z = cp.intvar(1, 4)
+        op1 = cp.Modulo(xneg,y)
+        lb1, ub1 = op1.get_bounds()
+        self.assertEqual(lb1,-4)
+        self.assertEqual(ub1,0)
+        op2 = cp.Modulo(xpos,z)
+        lb2, ub2 = op2.get_bounds()
+        self.assertEqual(lb2,0)
+        self.assertEqual(ub2,3)
+        op3 = cp.Modulo(xneg,z)
+        lb3, ub3 = op3.get_bounds()
+        self.assertEqual(lb3,-3)
+        self.assertEqual(ub3,0)
+        op4 = cp.Modulo(xpos,y)
+        lb4, ub4 = op4.get_bounds()
+        self.assertEqual(lb4,0)
+        self.assertEqual(ub4,4)
+        op5 = cp.Modulo(x,y)
+        lb5, ub5 = op5.get_bounds()
+        self.assertEqual(lb5,-4)
+        self.assertEqual(ub5,4)
+        op6 = cp.Modulo(x,z)
+        lb6, ub6 = op6.get_bounds()
+        self.assertEqual(lb6,-3)
+        self.assertEqual(ub6,3)
+        for lhs in inclusive_range(*x.get_bounds()):
+            for rhs in inclusive_range(*y.get_bounds()):
+                val = cp.Modulo(lhs,rhs).value()
+                self.assertGreaterEqual(val,lb5)
+                self.assertLessEqual(val,ub5)
+            for rhs in inclusive_range(*z.get_bounds()):
+                val = cp.Modulo(lhs, rhs).value()
+                self.assertGreaterEqual(val,lb6)
+                self.assertLessEqual(val,ub6)
+
+    def test_bounds_pow(self):
+        x = cp.intvar(-8, 5)
+        op = cp.Power(x,3)
+        lb, ub = op.get_bounds()
+        self.assertEqual(lb,-8 ** 3)
+        self.assertEqual(ub,5 ** 3)
+
+        op = cp.Power(x, 4)
+        lb, ub = op.get_bounds()
+        self.assertEqual(lb, 5 ** 4)
+        self.assertEqual(ub, 8 ** 4)
+
     def test_bounds_element(self):
         x = cp.intvar(-8, 8)
         y = cp.intvar(-7, -1)
@@ -1134,6 +1320,33 @@ class TestBounds(unittest.TestCase):
         self.assertEqual(ub,9)
         self.assertFalse(cp.Model(expr < lb).solve())
         self.assertFalse(cp.Model(expr > ub).solve())
+
+    def test_incomplete_func(self):
+        # element constraint
+        arr = cp.cpm_array([1,2,3])
+        i = cp.intvar(0,5,name="i")
+        p = cp.boolvar()
+
+        cons = (arr[i] == 1).implies(p)
+        m = cp.Model([cons, i == 5])
+        self.assertTrue(m.solve())
+        self.assertTrue(cons.value())
+
+        # div constraint
+        a,b = cp.intvar(1,2,shape=2)
+        cons = (42 // (a - b)) >= 3
+        m = cp.Model([p.implies(cons), a == b])
+        if cp.SolverLookup.lookup("z3").supported():
+            self.assertTrue(m.solve(solver="z3")) # ortools does not support divisor spanning 0 work here
+            self.assertRaises(IncompleteFunctionError, cons.value)
+            self.assertFalse(argval(cons))
+
+        # mayhem
+        cons = (arr[10 // (a - b)] == 1).implies(p)
+        m = cp.Model([cons, a == b])
+        if cp.SolverLookup.lookup("z3").supported():
+            self.assertTrue(m.solve(solver="z3"))
+            self.assertTrue(cons.value())
 
     def test_bounds_count(self):
         x = cp.intvar(-8, 8)
@@ -1283,8 +1496,7 @@ class TestTypeChecks(unittest.TestCase):
         b = cp.boolvar()
         a = cp.boolvar()
         self.assertTrue(cp.Model([cp.Circuit(x+2,2,0)]).solve())
-        self.assertRaises(TypeError,cp.Circuit,(a,b))
-        self.assertRaises(TypeError,cp.Circuit,(x,y,b))
+        self.assertTrue(cp.Model([cp.Circuit(a,b)]).solve())
 
     def test_multicicruit(self):
         c1 = cp.Circuit(cp.intvar(0,4, shape=5))
@@ -1298,9 +1510,8 @@ class TestTypeChecks(unittest.TestCase):
         b = cp.boolvar()
         a = cp.boolvar()
         self.assertFalse(cp.Model([cp.Inverse([x,y,x],[x,y,x])]).solve())
-        self.assertRaises(TypeError,cp.Inverse,[a,b],[x,y])
-        self.assertRaises(TypeError,cp.Inverse,[a,b],[b,False])
-
+        self.assertTrue(cp.Model([cp.Inverse([a,b],[a,b])]).solve()) # identity function
+     
     def test_ITE(self):
         x = cp.intvar(-8, 8)
         y = cp.intvar(-7, -1)
@@ -1347,19 +1558,6 @@ class TestTypeChecks(unittest.TestCase):
         self.assertRaises(TypeError, cp.Xor, (x, b))
         self.assertRaises(TypeError, cp.Xor, (x, y))
 
-    def test_cumulative(self):
-        x = cp.intvar(0, 8)
-        z = cp.intvar(-8, 8)
-        q = cp.intvar(-8, 8)
-        y = cp.intvar(-7, -1)
-        b = cp.boolvar()
-        a = cp.boolvar()
-
-        self.assertTrue(cp.Model([cp.Cumulative([x,y],[x,2],[z,q],1,x)]).solve())
-        self.assertRaises(TypeError, cp.Cumulative, [x,y],[x,y],[a,y],1,x)
-        self.assertRaises(TypeError, cp.Cumulative, [x,y],[x,y],[x,y],1,x)
-        self.assertRaises(TypeError, cp.Cumulative, [x,y],[x,y],[x,y],x,False)
-
     def test_gcc(self):
         x = cp.intvar(0, 1)
         z = cp.intvar(-8, 8)
@@ -1382,9 +1580,12 @@ class TestTypeChecks(unittest.TestCase):
         SOLVERNAMES = [name for name, solver in cp.SolverLookup.base_solvers() if solver.supported()]
         for name in SOLVERNAMES:
             if name == "pysdd": continue
-            self.assertTrue(cp.Model([cp.GlobalCardinalityCount(iv, [1,4], [1,1])]).solve(solver=name))
-            # test closed version
-            self.assertFalse(cp.Model(cp.GlobalCardinalityCount(iv, [1,4], [0,0], closed=True)).solve(solver=name))
+            try:
+                self.assertTrue(cp.Model([cp.GlobalCardinalityCount(iv, [1,4], [1,1])]).solve(solver=name))
+                # test closed version
+                self.assertFalse(cp.Model(cp.GlobalCardinalityCount(iv, [1,4], [0,0], closed=True)).solve(solver=name))
+            except (NotImplementedError, NotSupportedError):
+                pass
 
     def test_count(self):
         x = cp.intvar(0, 1)
@@ -1444,13 +1645,33 @@ class TestTypeChecks(unittest.TestCase):
         self.assertTrue(cp.Model(cp.AllDifferentExceptN([x,3,y,0], [3,0]).decompose()).solve())
 
 
-    def test_element_index_dom_mismatched(self):
-        """
-            Check transform of `[0,1,2][x in -1..1] == y in 1..5`
-            Note the index variable has a lower bound *outside* the indexable range, and an upper bound inside AND lower than the indexable range upper bound
-        """
-        constraint=cp.Element([0,1,2], cp.intvar(-1,1, name="x"))
-        self.assertEqual(
-            str(constraint.decompose_comparison("==", cp.intvar(1,5, name="y"))),
-            "([(x == 0) -> (y == 0), (x == 1) -> (y == 1), x >= 0, x <= 1], [])"
-        )
+
+@pytest.mark.usefixtures("solver")
+def test_issue801_expr_in_cumulative(solver):
+
+    if solver in ("pysat", "pysdd", "pindakaas", "rc2"):
+        pytest.skip(f"{solver} does not support integer variables")
+    if solver == "cplex":
+        pytest.skip(f"waiting for PR #769 to be merged.")
+
+    start = cp.intvar(0,5,shape=3,name="start")
+    dur = [1,2,3]
+    end = cp.intvar(0,10,shape=3,name="end")
+    bv = cp.boolvar(shape=3,name="bv")
+
+    assert cp.Model(cp.NoOverlap(bv * start, dur, end)).solve(solver=solver)
+    if solver != "pumpkin": # Pumpkin does not support variables as duration
+        assert cp.Model(cp.NoOverlap(bv * start,bv * dur, end)).solve(solver=solver)
+    assert cp.Model(cp.NoOverlap(bv * start, dur, bv * end)).solve(solver=solver)
+
+    # also for cumulative
+    assert cp.Model(cp.Cumulative(bv * start, dur, end,1, 3)).solve(solver=solver)
+    assert cp.Model(cp.Cumulative(bv * start, dur, bv * end, 1, 3)).solve(solver=solver)
+    if solver != "pumpkin": # Pumpkin does not support variables as duration, demand or capacity
+        assert cp.Model(cp.Cumulative(bv * start,bv * dur, end, 1, 3)).solve(solver=solver)
+        assert cp.Model(cp.Cumulative(bv * start, dur, end, bv * [2, 3, 4], 3 * bv[0])).solve(solver=solver)
+        assert cp.Model(cp.Cumulative(bv * start, dur, end, 1, 3 * bv[0])).solve(solver=solver)
+
+
+
+

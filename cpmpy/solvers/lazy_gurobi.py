@@ -7,7 +7,6 @@ import pickle
 import pprint
 import sys
 import time
-from enum import Enum
 
 import numpy as np
 import pandas as pd
@@ -15,8 +14,8 @@ import pandas as pd
 import cpmpy as cp
 from cpmpy.expressions.core import Comparison, Operator
 from cpmpy.expressions.utils import is_true_cst, is_false_cst, show_assignment, dom_size
+from cpmpy.solvers.gurobi import CPM_gurobi, Feature
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
-from cpmpy.solvers.gurobi import CPM_gurobi
 from cpmpy.transformations.linearize import only_positive_bv
 
 from scalene import scalene_profiler
@@ -189,16 +188,10 @@ def encode(X, T):
     return T_enc
 
 
-class Heuristic(Enum):
+class Heuristic(Feature):
     INPUT = "input"
     GREEDY = "greedy"
     REDUCE = "reduce"
-
-    def __repr__(self):
-        return repr(self.value)
-
-    def __str__(self):
-        return self.value
 
 
 def normalize_table(table):

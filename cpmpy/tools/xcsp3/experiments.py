@@ -1,7 +1,7 @@
 import itertools
 import math
 from cpmpy.solvers.lazy_gurobi import Heuristic, CPM_lazy_gurobi
-from cpmpy.solvers.gurobi import CPM_gurobi
+from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
 
 
 MEM_LIMIT = 8
@@ -25,7 +25,7 @@ DEFAULTS = [
             # pinac42: 1-12-20, 64Gb
             "workers": calculate_workers(MEM_LIMIT, PINAC_42_MEM_LIMIT, PINAC_42_WORKERS),
             "check_time_limit": 2 * 60,
-            "output_dir": "results",
+            "output_dir": "results/dev",
             "no_timestamp": True,
             "profile": None,
         }
@@ -46,12 +46,27 @@ def get_experiments(overrides={}, filters=[]):
         [
             [
                 # solvers
-                {"solver": CPM_gurobi, "alias": "base_gurobi"},  # TODO gen.
                 *[
-                    {"alias": f"{solver}-{alias}", "solver": CPM_lazy_gurobi, "solver_kwargs": {"env": kw}}
+                    {
+                        "solver": CPM_gurobi,
+                        "alias": f"base_gurobi-{encoding}",
+                        "solver_kwargs": {"encoding": encoding},
+                    }
+                    for encoding in (
+                        Encoding.DEFAULT,
+                        Encoding.GLEB,
+                    )
+                ],
+                *[
+                    {
+                        "alias": f"{solver}-{alias}",
+                        "solver": CPM_lazy_gurobi,
+                        "solver_kwargs": solver_kwargs,
+                    }
                     for solver in ["lazy_gurobi"]
-                    for alias, kw in [
-                        *ablate(
+                    for alias, solver_kwargs in [
+                        (alias, {"env": env, "encoding": Encoding.GLEB})
+                        for alias, env in ablate(
                             [
                                 ("heuristic", (Heuristic.GREEDY,)),
                                 ("fractional", (False, True)),
@@ -70,8 +85,7 @@ def get_experiments(overrides={}, filters=[]):
                             ],
                             add_none=True,
                             add_all=True,
-                            filters=["fractional", "coverlift", "cutoff", "shrink"],
-                        ),
+                        )
                     ]
                 ],
             ]
