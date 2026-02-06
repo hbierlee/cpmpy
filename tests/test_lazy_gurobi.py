@@ -474,12 +474,13 @@ class TestModels:
             get_envs(),
             (
                 (i, j, t)
-                for j in range(1, 1 + REPEAT)  # to repeat the test
+                for j, _ in enumerate(range(REPEAT), start=1)  # to repeat the test
                 for i, t in enumerate(
                     [
                         *[
                             cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))),
                             cp.Model(cp.Table([cp.intvar(0, 5)], [])),
+                            cp.Model(~cp.Table([cp.intvar(0, 5)], [])),
                             # generate_table_from_data([tuple()], 5),
                             generate_table_from_data([[1, 1]], 3),  # single row (actually exists in xcsp3)
                             generate_table_from_data([[1, 1], [2, 2]], 3),  # Feasible (often 0 explanations)

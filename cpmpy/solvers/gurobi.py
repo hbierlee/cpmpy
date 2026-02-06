@@ -189,7 +189,7 @@ class CPM_gurobi(SolverInterface):
                 arr, tab = self.args
                 cons = []
                 if len(tab) == 0:
-                    return [], [False]
+                    return [False], []
                 if len(tab) == 1:
                     cons += [(x == tab[0][i]) for i, x in enumerate(arr)]
                 else:
