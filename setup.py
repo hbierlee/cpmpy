@@ -20,22 +20,6 @@ with open("README.md", "r", encoding="utf8") as readme_file:
 
 
 solver_dependencies = {
-<<<<<<< HEAD
-    "ortools": ["ortools"],
-    "z3": ["z3-solver"],
-    "choco": ["pychoco>=0.2.1"],
-    "exact": ["exact>=2.1.0"],
-    "minizinc": ["minizinc"],
-    "pysat": ["python-sat"],
-    "gurobi": ["gurobipy"],
-    "lazy_gurobi": ["gurobipy", "scalene", "line_profiler"],
-    "pysdd": ["pysdd"],
-    "gcs": ["gcspy"],
-    "cpo": ["docplex"],
-    "pumpkin": ["pumpkin-solver>=0.2.1"],
-    "pindakaas": ["pindakaas>=0.2.1"],
-    "cplex": ["docplex", "cplex"],
-=======
     "ortools": ["ortools>=9.3.10497,<=9.14.6206,!=9.9.*,!=9.10.*,!=9.11.*"], # exclusion due to bug #191
     "z3": ["z3-solver>=4.8.15.0,<=4.15.4.0"],
     "choco": ["pychoco>=0.2.1,<=0.2.4"],
@@ -50,7 +34,6 @@ solver_dependencies = {
     "pumpkin": ["pumpkin-solver==0.2.2"], # CPMpy requires features only available from Pumpkin version >=0.2.2
     "pindakaas": ["pindakaas>=0.2.1,<=0.3.0"],
     "cplex": ["docplex>=2.28.240,<=2.31.254", "cplex>=20.1.0.4,<=22.1.2.0"],
->>>>>>> feature/cp-cuts
 }
 solver_dependencies["all"] = list({pkg for group in solver_dependencies.values() for pkg in group}) 
 
