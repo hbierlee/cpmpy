@@ -73,6 +73,17 @@ def generate_edge_case_tables():
     # No valid tuples (unsatisfiable - tuples outside domains)
     yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[4, 5], [5, 6], [6, 7]]))
 
+    # table with fixed vals, feas/infeasible
+    yield cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[3, 2]]))
+    yield cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[4, 2]]))
+
+    # table with bool vars
+    yield cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]]))
+
+    # table with neg bool vars
+    yield cp.Model(cp.Table([~cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]]))
+
+
     # Single tuple only
     yield cp.Model(cp.Table([cp.intvar(1, 5, name="x"), cp.intvar(1, 5, name="y")], [[3, 3]]))
 
