@@ -350,7 +350,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return choices.nonzero()[0][
                     np.bitwise_or.reduceat(
                         # get only the relevant rows and columns
-                        T_enc[R, :][:, choices],  # TODO play nice with neg choices
+                        T_enc[np.ix_(R, choices)],
                         # for the columns of each part
                         parts_,
                         # see if there is any 1 in the row
@@ -404,7 +404,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         return X, k
 
     @profile
-    def gencoverlift(self, S, C_enc, k, T_enc):
+    def gencoverlift(self, S, C_enc, k, T_enc, A_enc):
         if self.env["verbosity"]:
             self.log("gencoverlift", verbosity=3)
 
