@@ -50,7 +50,7 @@ def get_experiments(overrides={}, filters=[]):
                     {
                         "solver": CPM_gurobi,
                         "alias": f"base_gurobi-{encoding}",
-                        "solver_kwargs": {"encoding": encoding},
+                        "solver_kwargs": {"encoding": encoding, "output_stats": True},
                     }
                     for encoding in (
                         Encoding.DEFAULT,
@@ -61,7 +61,7 @@ def get_experiments(overrides={}, filters=[]):
                     {
                         "alias": f"{solver}-{alias}",
                         "solver": CPM_lazy_gurobi,
-                        "solver_kwargs": solver_kwargs,
+                        "solver_kwargs": solver_kwargs | {"output_stats": True},
                     }
                     for solver in ["lazy_gurobi"]
                     for alias, solver_kwargs in [

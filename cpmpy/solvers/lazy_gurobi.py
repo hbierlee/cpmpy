@@ -321,7 +321,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"cuts (MIPSOL) = {len(cuts_mipsol)}")
             self.log(f"cuts (MIPNODE, explained) = {len(cuts_mipnode_exp)}")
             self.log(f"cuts (MIPNODE, unexplainable) = {len(cuts_mipnode_unexp)}")
-        return {
+        return super().stats() | {
             "time_cb": self.env["time_cb"],
             "n_cuts": len(cuts_mipsol),
             "n_cuts_explained": len(cuts_mipnode_exp),
@@ -1071,10 +1071,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["verbosity"]:
                     self.log("Also exception during stats:", e_)
             raise e
-
-        if "PYTEST_CURRENT_TEST" not in os.environ:
-            for field, stat in self.stats().items():
-                print(f"c Stat={field}={stat}")
 
         # TODO recheck https://or.stackexchange.com/questions/12591/ensure-gurobi-uses-callback-on-all-feasible-solutions It looks like if the solution at the end of the root node is integer, gurobi doesn't pass through callbacks for fractional solutions.
 

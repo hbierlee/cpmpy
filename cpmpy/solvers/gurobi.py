@@ -166,7 +166,7 @@ class CPM_gurobi(SolverInterface):
         except PackageNotFoundError:
             return None
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.DEFAULT, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.DEFAULT, output_stats=False, **kwargs):
         """
         Constructor of the native solver object
 
@@ -182,6 +182,7 @@ class CPM_gurobi(SolverInterface):
 
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
         self.grb_model = gp.Model(env=GRB_ENV)
+        self.output_stats = output_stats
 
 
         if encoding == Encoding.GLEB:
@@ -709,4 +710,15 @@ class CPM_gurobi(SolverInterface):
                     self.cpm_status.exitstatus = ExitStatus.OPTIMAL
         # if unsat or timout with no solution, .solve() will have already set the state accordingly (so nothing to update)
 
+        if self.output_stats:
+            for field, stat in self.stats().items():
+                print(f"c Stat={field}={stat}")
+
+
         return opt_sol_count
+
+    def stats(self):
+        return {
+            "constraints": self.native_model.NumConstrs,
+        }
+
