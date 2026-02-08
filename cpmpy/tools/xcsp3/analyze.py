@@ -526,7 +526,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             ))
 
 
-    errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception"]]
+    errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception", "traceback"]]
     if not errors.empty:
         print("== ERRORS ==")
         # exc = df[df["status"] == ERR]
@@ -657,7 +657,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
         return [metadata.get("method", None), sum(rowss), min_(rowss), max_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
 
-    df[["method", "rows", "min", "max", "count", "mean","median", "stdev"]] = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
+    df[["method", "rows", "min", "max", "count", "mean", "median", "stdev"]] = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
 
 
     # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
