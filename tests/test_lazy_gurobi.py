@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 import cpmpy as cp
+from cpmpy.transformations.get_variables import get_variables_model
 from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic
 from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
@@ -33,6 +34,61 @@ def generate_two_tables():
         cp.Table((x, y, z), [[2, 1, 2], [3, 2, 2], [4, 3, 3], [1, 2, 3], [2, 1, 4]]),
         cp.Table((z, y, w), [[2, 1, 1], [3, 2, 1], [2, 3, 1], [2, 3, 1], [4, 1, 2]]),
     )
+
+
+def generate_edge_case_tables():
+    """Generator yielding various edge case table constraints"""
+
+    # Single column table (1 variable)
+    yield cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]]))
+
+    # Complete table (all possible tuples)
+    yield cp.Model(
+        cp.Table(
+            [cp.intvar(1, 2, name="x"), cp.intvar(1, 2, name="y")],
+            [[i, j] for i in range(1, 3) for j in range(1, 3)],
+        )
+    )
+
+    # Duplicate rows in table
+    yield cp.Model(
+        cp.Table(
+            [cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]]
+        )
+    )
+
+    # Constant column (one variable always same value)
+    yield cp.Model(
+        cp.Table(
+            [cp.intvar(1, 5, name="x"), cp.intvar(1, 3, name="y"), cp.intvar(1, 4, name="z")],
+            [[1, 2, 3], [1, 1, 2], [1, 3, 4], [1, 2, 1]],
+        )
+    )
+
+    # Sparse table (large domain, few tuples)
+    yield cp.Model(
+        cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])
+    )
+
+    # No valid tuples (unsatisfiable - tuples outside domains)
+    yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[4, 5], [5, 6], [6, 7]]))
+
+    # Single tuple only
+    yield cp.Model(cp.Table([cp.intvar(1, 5, name="x"), cp.intvar(1, 5, name="y")], [[3, 3]]))
+
+    # Very wide table (many columns)
+    yield cp.Model(
+        cp.Table(
+            cp.intvar(1, 3, shape=10, name="x"),
+            [[1, 2, 3, 1, 2, 3, 1, 2, 3, 1], [2, 1, 2, 1, 2, 1, 2, 1, 2, 1]],
+        )
+    )
+
+    # Diagonal pattern
+    yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 1], [2, 2], [3, 3]]))
+
+    # Anti-diagonal pattern
+    yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 3], [2, 2], [3, 1]]))
 
 
 def generate_table_from_data(T, d):
@@ -71,6 +127,9 @@ def assert_integer_solution(A_enc):
 def check_model(model, env=None):
     print("== Model ==")
     print(model)
+
+
+    print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
     expected_sat = model.deepcopy().solve()
     print("expected feasible = ", expected_sat)
     try:
@@ -79,11 +138,14 @@ def check_model(model, env=None):
         print("solver", slv)
         actual_sat = slv.solve()
         print("actual feasible", actual_sat)
+        print("stats = ", slv.stats())
 
         if True:
+            slv_ = env["solver"](**env["solver_kwargs"])
+            print("ENCODING")
             for i, c in enumerate(model.constraints, start=1):
                 print(f"C{i}", repr(c)[:100])
-                for ci in env["solver"](**env["solver_kwargs"]).transform([c]):
+                for ci in slv_.transform([c]):
                     print("  ", ci)
                     # print("  ", slv._csemap)
 
@@ -230,7 +292,7 @@ class TestTables:
         C_enc = {s: 1 for s in S}
         k = len(S) - 1
 
-        c = slv.gencoverlift(S, C_enc, k, T_enc)
+        c = slv.gencoverlift(S, C_enc, k, T_enc, A_enc)
 
         print("c", c)
         # TODO assert
@@ -500,6 +562,7 @@ class TestModels:
                             ),
                             generate_two_tables(),
                         ],
+                        *list(generate_edge_case_tables()),  # Edge case tables
                         *[
                             table
                             for allow_duplicate_vars in (False, True)

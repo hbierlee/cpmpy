@@ -177,13 +177,13 @@ def encode(X, T):
     width = sum(dom_sizes)
     T_enc = np.zeros((len(T), width), dtype=np.bool)
 
-    # from scipy.sparse import bsr_array, csr_matrix
-    # return csr_matrix(T_enc)
-
-    for t, t_enc_i in zip(T, T_enc):
+    for i, row in enumerate(T):
         offset = 0
-        for x, x_width, a in zip(X, dom_sizes, t):
-            t_enc_i[offset + a - x.lb] = True
+        for x, x_width, a in zip(X, dom_sizes, row):
+            try:
+                T_enc[i, offset + a - x.lb] = True
+            except IndexError:
+                np.delete(T_enc, i)
             offset += x_width
     return T_enc
 
