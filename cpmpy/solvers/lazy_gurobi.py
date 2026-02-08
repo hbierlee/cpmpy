@@ -1,8 +1,6 @@
 import itertools
 import json
 import collections
-import math
-import os
 import pickle
 import pprint
 import sys
@@ -56,15 +54,15 @@ def is_ge(x, y):
 
 
 def eps_floor(x):
-    return math.floor(x + EPS)
+    return np.floor(x + EPS)
 
 
 def eps_ceil(x):
-    return math.ceil(x - EPS)
+    return np.ceil(x - EPS)
 
 
 def eps_round(x):
-    return math.ceil(x - 0.5 + EPS)
+    return np.ceil(x - 0.5 + EPS)
 
 
 def eps_frac(x):
@@ -160,11 +158,7 @@ def cols(T, i, j=1):
 
 
 def is_integer(v):
-    return math.isclose(v, v > 0.5, abs_tol=1e-5)
-
-
-def is_integer_solution(A_enc):
-    return all(is_integer(a) for a in A_enc)
+    return np.isclose(v, v > 0.5, abs_tol=1e-5)
 
 
 def union(sets):
@@ -627,6 +621,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C_enc[choice] = 1
                 R = T_enc[:, choice]
                 k = 0
+
                 if self.env["example_frac"]:
                     assert_example(X, [2])
                     assert k == 0
@@ -651,11 +646,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if none(R):
                 break
 
-            def covered(choice):
-                l_parts = parts[choice] == parts
-                C_ = l_parts & is_gt(A_enc, 0.0)
-                return C_, l_parts, T_enc[:, C_].any(1)
-
             neg_choices = choices & ~A_enc_pos
             # make_pos_choice = frm == "MIPNODE-OPT" or R.sum() >= self.env["negatives"] or not neg_choices.any()
             make_pos_choice = R.sum() >= self.env["negatives"] or not neg_choices.any()
@@ -674,7 +664,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             is_pos = A_enc_pos[choice]
 
             if choice is None:
-                return None
+                # this can happen only if assignment is feasible
+                raise Exception("No choices left for ", frm)
 
             l_parts = parts[choice] == parts
             assert not C_enc[choice], f"chosen {choice}"
@@ -704,6 +695,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
                 self.log(f"C_ {C_}", verbosity=3, indent=self.indent + 2)
                 self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
+                self.log("FRAC", frm, F.any(), verbosity=2, indent=self.indent + 2)
                 self.log(f"R choice={choice} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
                 self.log(f"= {show_set(R.nonzero())}", verbosity=3, indent=self.indent + 3)
                 self.log(f"== {R}", verbosity=3, indent=self.indent + 4)
@@ -748,7 +740,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(
                     f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
                     indent=2,
-                    verbosity=3,
+                    verbosity=2,
                 )
 
         show_cut()
@@ -832,10 +824,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     case GRB.Callback.MIPSOL:  # Integer solution
                         x_enc_a = {x_enc_i: cbGetVal(x_enc_i, what.cbGetSolution) for x_enc_i in all_xs}
                         frm = "MIPSOL"
-                        if self.env["debug"]:
-                            assert is_integer_solution(x_enc_a.values()), (
-                                f"Expected integer solution for MIP, but got {x_enc_a}"
-                            )
                     case _:
                         return
 
@@ -883,6 +871,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def _explain_assignment(self, x_enc_a, frm=None):
         # If fully integer, we can check if the tables are feasible yet
+        if self.env["verbosity"]:
+            self.log("EXPLAIN", frm, x_enc_a, verbosity=2)
+
         for i, (X_enc, T_enc, parts, table) in enumerate(self.tables, start=INDEX):
             # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
             A_enc = np.fromiter((x_enc_a[x_enc_i] for x_enc_i in X_enc), dtype=float)
@@ -890,22 +881,28 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # A_enc_ = assign_mipsol(A_enc)
 
             # TODO figure out when can be skipped
-            # if frm == "MIPNODE-OPT" and is_integer_solution(A_enc) and
-            if frm == "MIPSOL":
-                if (T_enc == A_enc_).all(1).any():
-                    if self.env["verbosity"]:
-                        self.log(
-                            f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{np.astype(T_enc, int)}",
-                            verbosity=3,
-                        )
-                    # assert False
-                    # assert table.value() # TODO after assigning _value
-                    continue
-                elif self.env["verbosity"]:
+            if (frm == "MIPSOL" or is_integral(A_enc).all()) and (T_enc == A_enc_).all(1).any():
+                if self.env["verbosity"]:
                     self.log(
-                        f"table {i}/{len(self.tables)} INfeasible by {A_enc}\n\n{np.astype(T_enc, int)}",
-                        verbosity=3,
+                        f"table {i}/{len(self.tables)} feasible",
+                        verbosity=2,
                     )
+                    self.log(
+                        f"by {A_enc_}\n\n{np.astype(T_enc, int)}",
+                        verbosity=3,
+                        indent=2,
+                    )
+                continue
+            elif self.env["verbosity"]:
+                self.log(
+                    f"table {i}/{len(self.tables)} INfeasible",
+                    verbosity=3,
+                )
+                self.log(
+                    f"by {A_enc_}\n\n{np.astype(T_enc, int)}",
+                    verbosity=3,
+                    indent=2,
+                )
 
             try:
                 # encode assignment
