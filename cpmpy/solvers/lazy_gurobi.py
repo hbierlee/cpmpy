@@ -868,7 +868,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # TODO figure out when can be skipped
             # if frm == "MIPNODE-OPT" and is_integer_solution(A_enc) and
             if frm == "MIPSOL":
-                if (T_enc[:] == A_enc_).all(1).any():
+                if (T_enc == A_enc_).all(1).any():
                     if self.env["verbosity"]:
                         self.log(
                             f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{np.astype(T_enc, int)}",
