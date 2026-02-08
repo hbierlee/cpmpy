@@ -34,6 +34,7 @@ import matplotlib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 
 FIELDNAMES = [
     "year",
@@ -138,7 +139,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
 
     return fig
 
-def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", time_limit=None):
+def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None):
     """
     Create a scatter plot comparing the performance of two solvers.
 
@@ -172,9 +173,8 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", time
     if solver1 not in solvers or solver2 not in solvers:
         raise ValueError(f"Solvers {solver1} and/or {solver2} not found in dataframe. Available: {solvers}")
 
-    # Filter data for the two solvers, including median attribute
-    df1 = df[df['alias'] == solver1][['instance', metric, 'solved', 'median']].copy()
-    df2 = df[df['alias'] == solver2][['instance', metric, 'solved', 'median']].copy()
+    df1 = df[df['alias'] == solver1][['instance', metric, 'solved', inst_metric]].copy()
+    df2 = df[df['alias'] == solver2][['instance', metric, 'solved', inst_metric]].copy()
 
     # Merge on instance to get paired data
     merged = df1.merge(df2, on='instance', suffixes=('_1', '_2'))
@@ -191,38 +191,37 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", time
     x = merged[f'{metric}_1'].values
     y = merged[f'{metric}_2'].values
 
-    # Get median values for coloring (use median_1, both should be the same)
-    median_values = merged['median_1'].values
-    print(f"Median values - min: {median_values.min()}, max: {median_values.max()}, unique: {len(np.unique(median_values))}")
-    print(f"Sample median values: {median_values[:10] if len(median_values) >= 10 else median_values}")
+    inst_metrics = merged[f'{inst_metric}_1'].values
+    print(f"Median values - min: {inst_metrics.min()}, max: {inst_metrics.max()}, unique: {len(np.unique(inst_metrics))}")
+    print(f"Sample median values: {inst_metrics[:10] if len(inst_metrics) >= 10 else inst_metrics}")
 
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 10))
 
     # Use log normalization if the range is large
-    norm = None
-    vmin, vmax = median_values.min(), median_values.max()
-
-    if len(np.unique(median_values)) > 1:
-        from matplotlib.colors import LogNorm
-            # When using norm, don't specify vmin/vmax
+    vmin, vmax = inst_metrics.min(), inst_metrics.max()
+    # inst_metrics = inst_metrics.where(inst_metrics <= 25, 0, inst_metrics)
 
     # Plot scatter points colored by median
     scatter = ax.scatter(
             x,
             y,
-            c=median_values,
+            c=inst_metrics,
             alpha=0.6,
             s=50,
             cmap='viridis',
             edgecolors='black',
             linewidth=0.5,
-            norm=LogNorm(vmin=max(vmin, 1e-10), vmax=vmax)
+            norm=LogNorm(
+                vmin=max(vmin, 1e-10),
+                # vmin=100,
+                vmax=vmax
+                ),
             )
 
     # Add colorbar
     cbar = plt.colorbar(scatter, ax=ax)
-    cbar.set_label('Median table size', rotation=270, labelpad=20)
+    cbar.set_label(f'{inst_metric} table size', rotation=270, labelpad=20)
 
     # Plot diagonal line (y=x)
     max_val = max(x.max(), y.max())
@@ -733,32 +732,28 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     # Print some stats
     xcsp3_stats(df, time_limit=time_limit, save=save, tex=tex)
 
-    aliases = sorted(df["alias"].unique())
-    if len(aliases) == 2 and plot:
-        fig = xcsp3_scatter_plot(
-                df,
-                solver1=aliases[0],
-                solver2=aliases[1],
-                time_limit=time_limit,
-                # metric="time_post"
-                )
-        scatter = plot.with_name("scatter")
-        fig.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
-        fig.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
-        print(f"Plot saved to {scatter}.{{png,svg}}")
-    
-    # else:
-    #     plt.show()
-
-
-    # fig = xcsp3_objective_performance_profile(merged_df)
-
-    # Save or show plot
     if plot:
+        # Save or show plot
         fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
         fig.savefig(plot.with_suffix(".png"), bbox_inches='tight')
         fig.savefig(plot.with_suffix(".svg"), bbox_inches='tight')
         print(f"Plot saved to {plot}.{{png,svg}}")
+
+        aliases = sorted(df["alias"].unique())
+        if len(aliases) == 2 and plot:
+            fig = xcsp3_scatter_plot(
+                    df,
+                    solver1=aliases[0],
+                    solver2=aliases[1],
+                    time_limit=time_limit,
+                    inst_metric="min",
+                    # metric="time_post"
+                    )
+            scatter = plot.with_name("scatter")
+            fig.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
+            fig.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
+            print(f"Plot saved to {scatter}.{{png,svg}}")
+
     # else:
     #     plt.show()
 
