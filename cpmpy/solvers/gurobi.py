@@ -45,6 +45,7 @@
 from typing import Optional, List
 import time
 from enum import Enum
+import pathlib
 
 from .solver_interface import SolverInterface, SolverStatus, ExitStatus, Callback
 from ..exceptions import NotSupportedError
@@ -221,6 +222,9 @@ class CPM_gurobi(SolverInterface):
             Table.decompose = bool_decompose
         elif encoding == Encoding.MDD:
             pass
+
+        if verbose:
+            pathlib.Path("/tmp/encoding.txt").unlink(missing_ok=True)
 
 
         # initialise everything else and post the constraints/objective
@@ -500,8 +504,16 @@ class CPM_gurobi(SolverInterface):
       # add new user vars to the set
       get_variables(cpm_expr_orig, collect=self.user_vars)
 
+      if self.verbose:
+        with open("/tmp/encoding.txt", "a") as f:
+          print(f"C", cpm_expr_orig, file=f)
+          print("X", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables(cpm_expr_orig)), file=f)
+
+
       # transform and post the constraints
       for cpm_expr in self.transform(cpm_expr_orig):
+        if self.verbose:
+          print("  ", cpm_expr, file=open("/tmp/encoding.txt", "a"))
         if self.time_limit is not None:
             runtime = time.time() - self.time
             if runtime > self.time_limit:
