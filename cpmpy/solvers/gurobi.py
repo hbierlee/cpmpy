@@ -341,6 +341,12 @@ class CPM_gurobi(SolverInterface):
             for cpm_var in self.user_vars:
                 cpm_var._value = None
 
+        if self.output_stats:
+            for field, stat in self.stats().items():
+                print(f"c Stat={field}={stat}")
+
+
+
         return has_sol
 
 
@@ -709,10 +715,6 @@ class CPM_gurobi(SolverInterface):
                 else: # found all solutions   
                     self.cpm_status.exitstatus = ExitStatus.OPTIMAL
         # if unsat or timout with no solution, .solve() will have already set the state accordingly (so nothing to update)
-
-        if self.output_stats:
-            for field, stat in self.stats().items():
-                print(f"c Stat={field}={stat}")
 
 
         return opt_sol_count
