@@ -435,7 +435,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         i = 0
 
         # centre of mass
-        com = T_enc.sum(axis=0) / len(T_enc)
+        # com = T_enc.sum(axis=0) / len(T_enc)
 
         while not X.all():
             assert (
@@ -466,11 +466,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             if self.env["example2"]:
                 j = [3, 7, 0][i]
-            elif False:
+            elif True:
                 j = np.nanargmax(np.where(~X, A_enc, np.nan))
             else:
-                j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
-                assert not X[j]
+                assert False
+                # j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
+                # assert not X[j]
 
             RT = (~R_tight) & T_enc[:, j]
             if (~RT).all():
