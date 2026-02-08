@@ -138,6 +138,129 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
 
     return fig
 
+def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", time_limit=None):
+    """
+    Create a scatter plot comparing the performance of two solvers.
+
+    Parameters
+    ----------
+    df : DataFrame
+        DataFrame containing solver results with columns: alias, instance, and metric
+    solver1 : str, optional
+        Name of the first solver (x-axis). If None, uses the first solver in the dataframe.
+    solver2 : str, optional
+        Name of the second solver (y-axis). If None, uses the second solver in the dataframe.
+    metric : str, default="time_solve"
+        The metric to compare (e.g., "time_solve", "time_total")
+    time_limit : float, optional
+        Maximum time limit for the axes. If specified, unsolved instances are plotted at time_limit.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The generated scatter plot figure
+    """
+    # Get unique solvers
+    solvers = df['alias'].unique()
+
+    # Determine which solvers to compare
+    if solver1 is None:
+        solver1 = solvers[0]
+    if solver2 is None:
+        solver2 = solvers[1] if len(solvers) > 1 else solvers[0]
+
+    if solver1 not in solvers or solver2 not in solvers:
+        raise ValueError(f"Solvers {solver1} and/or {solver2} not found in dataframe. Available: {solvers}")
+
+    # Filter data for the two solvers, including median attribute
+    df1 = df[df['alias'] == solver1][['instance', metric, 'solved', 'median']].copy()
+    df2 = df[df['alias'] == solver2][['instance', metric, 'solved', 'median']].copy()
+
+    # Merge on instance to get paired data
+    merged = df1.merge(df2, on='instance', suffixes=('_1', '_2'))
+
+    # Handle unsolved instances
+    if time_limit is not None:
+        merged[f'{metric}_1'] = merged[f'{metric}_1'].fillna(time_limit)
+        merged[f'{metric}_2'] = merged[f'{metric}_2'].fillna(time_limit)
+    else:
+        # Drop instances where either solver didn't solve it
+        merged = merged.dropna(subset=[f'{metric}_1', f'{metric}_2'])
+
+    # Extract x and y coordinates
+    x = merged[f'{metric}_1'].values
+    y = merged[f'{metric}_2'].values
+
+    # Get median values for coloring (use median_1, both should be the same)
+    median_values = merged['median_1'].values
+    print(f"Median values - min: {median_values.min()}, max: {median_values.max()}, unique: {len(np.unique(median_values))}")
+    print(f"Sample median values: {median_values[:10] if len(median_values) >= 10 else median_values}")
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    # Use log normalization if the range is large
+    norm = None
+    vmin, vmax = median_values.min(), median_values.max()
+
+    if len(np.unique(median_values)) > 1:
+        from matplotlib.colors import LogNorm
+            # When using norm, don't specify vmin/vmax
+
+    # Plot scatter points colored by median
+    scatter = ax.scatter(
+            x,
+            y,
+            c=median_values,
+            alpha=0.6,
+            s=50,
+            cmap='viridis',
+            edgecolors='black',
+            linewidth=0.5,
+            norm=LogNorm(vmin=max(vmin, 1e-10), vmax=vmax)
+            )
+
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Median table size', rotation=270, labelpad=20)
+
+    # Plot diagonal line (y=x)
+    max_val = max(x.max(), y.max())
+    min_val = min(x.min(), y.min())
+    ax.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=1.5, label='Equal performance', zorder=0)
+
+    # Set plot properties
+    ax.set_xlabel(f'{solver1} - {metric} (seconds)')
+    ax.set_ylabel(f'{solver2} - {metric} (seconds)')
+
+    # Get unique year-track combinations
+    year_track_pairs = df[['year', 'track']].drop_duplicates()
+    datasets = ', '.join([f'{row.year}:{row.track}' for _, row in year_track_pairs.iterrows()])
+
+    # Count wins
+    solver1_wins = sum(1 for i in range(len(x)) if x[i] < y[i])
+    solver2_wins = sum(1 for i in range(len(x)) if x[i] > y[i])
+    ties = sum(1 for i in range(len(x)) if np.isclose(x[i], y[i], rtol=1))
+
+    ax.set_title(f"Scatter Plot: {solver1} vs {solver2} ({datasets})\n"
+                 f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}")
+    ax.grid(True, alpha=0.3)
+
+    # Use log scale if there's a wide range
+    if max_val / min_val > 100:
+        ax.set_xscale('log')
+        ax.set_yscale('log')
+
+    # Set axis limits
+    if time_limit is not None:
+        ax.set_xlim(0, time_limit * 1.1)
+        ax.set_ylim(0, time_limit * 1.1)
+
+    ax.legend()
+    plt.tight_layout()
+
+    return fig
+
 def get_cost(row):
     """
     Get the achieved objective value from the provided row.
@@ -602,12 +725,30 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # Print some stats
     xcsp3_stats(df, time_limit=time_limit, save=save, tex=tex)
+
+    aliases = sorted(df["alias"].unique())
+    if len(aliases) == 2 and plot:
+        fig = xcsp3_scatter_plot(
+                df,
+                solver1=aliases[0],
+                solver2=aliases[1],
+                time_limit=time_limit,
+                # metric="time_post"
+                )
+        scatter = plot.with_name("scatter")
+        fig.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
+        fig.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
+        print(f"Plot saved to {scatter}.{{png,svg}}")
     
-    fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
+    # else:
+    #     plt.show()
+
+
     # fig = xcsp3_objective_performance_profile(merged_df)
 
     # Save or show plot
     if plot:
+        fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
         fig.savefig(plot.with_suffix(".png"), bbox_inches='tight')
         fig.savefig(plot.with_suffix(".svg"), bbox_inches='tight')
         print(f"Plot saved to {plot}.{{png,svg}}")
