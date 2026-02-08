@@ -285,6 +285,7 @@ class CPM_gurobi(SolverInterface):
         for param, val in kwargs.items():
             self.grb_model.setParam(param, val)
 
+        assert self.native_model.Params.Threads == 1
         _ = self.grb_model.optimize(callback=solution_callback)
         grb_objective = self.grb_model.getObjective()
 
