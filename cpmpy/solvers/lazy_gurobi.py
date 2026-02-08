@@ -227,7 +227,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
-            # "checker": cp.Model(),
             "checker": None,
             "tables": [],
             "found_feasible": False,
@@ -251,15 +250,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         self.tables = []
 
-        if self.env["checker"]:
-            _, self.env["solutions"] = cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
-
         super().__init__(
             name="lazy_gurobi",
             cpm_model=cpm_model,
-            verbose=self.env["verbosity"] >= 2,
+            verbose=self.env["verbosity"] >= 4,
             **kwargs,
         )
+
+        if self.env["checker"]:
+            _, self.env["solutions"] = cp.solvers.utils.solutions(
+                cpm_model, X=sorted(self.user_vars, key=lambda x: x.name), projected_solution_limit=None
+            )
+
         if self.tables:
             self.native_model.Params.LazyConstraints = 1
         # self.native_model.Params.Threads = 1
@@ -750,6 +752,29 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["max_iterations"] is not None:
             assert i <= self.env["max_iterations"], "Out of iterations"
 
+    def solution_callback_inner(self, x_enc_a, frm):
+        feasible = True  # assume feasible
+        for expr in self._explain_assignment(x_enc_a, frm=frm):
+            if isinstance(expr, Comparison) and expr.name == "<=":
+                feasible = False  # any expr means not feasible
+                assert isinstance(expr.args[0], Operator)
+                expr, k = expr.args
+                yield expr, k
+            elif is_true_cst(expr):
+                continue
+            elif is_false_cst(expr):
+                if self.env["verbosity"]:
+                    self.log("explanation raised infeasible")
+                raise Infeasible
+            else:
+                assert False, f"Unsupported expl: {expr}"
+
+        self.check_max_iterations(len(self.env["cuts"]))
+        if feasible and frm == "MIPSOL":
+            if self.env["verbosity"]:
+                self.log("found feasible", verbosity=2)
+            self.env["found_feasible"] = feasible
+
     def get_solution_callback(self):
         from gurobipy import GRB
 
@@ -795,35 +820,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     case _:
                         return
 
-                feasible = True  # assume feasible
-                for expr in self._explain_assignment(x_enc_a, frm=frm):
-                    if isinstance(expr, Comparison) and expr.name == "<=":
-                        feasible = False  # any expr means not feasible
-                        assert isinstance(expr.args[0], Operator)
-                        expr, k = expr.args
-                        cut = self._make_numexpr(expr) <= k
-                        what.cbLazy(cut)
-                    elif is_true_cst(expr):
-                        continue
-                    elif is_false_cst(expr):
-                        if self.env["verbosity"]:
-                            self.log("explanation raised infeasible")
-                        raise Infeasible
-                    else:
-                        assert False, f"Unsupported expl: {expr}"
-
-                    # if explanation:
-                    #     # grbs = [self.solver_var(X_enc[c]) for c in explanation]
-                    #     # cut = gp.quicksum(grbs) <= len(grbs) - 1.0
-                    #     # what.cbLazy(cut)
-                    # elif explanation is False:
-                    #     raise Infeasible
-
-                self.check_max_iterations(len(self.env["cuts"]))
-                if feasible and frm == "MIPSOL":
-                    if self.env["verbosity"]:
-                        self.log("found feasible", verbosity=2)
-                    self.env["found_feasible"] = feasible
+                for expr, k in self.solution_callback_inner(x_enc_a, frm):
+                    cut = self._make_numexpr(expr) <= k
+                    what.cbLazy(cut)
             except Exception as e:
                 self.native_model._callback_exception = e
                 what.terminate()
@@ -852,7 +851,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if isinstance(expr, (bool, np.bool)):
             expr = cp.BoolVal(expr)
 
-        self.env["cuts"][-1]["expr"] = expr
+        if self.env["debug"]:
+            self.env["cuts"][-1]["expr"] = expr
 
         # if self.env["debug"]:
         #     self.check_explanation(expr, X_enc, A_enc, T_enc, table)
@@ -933,7 +933,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def solutions_checker(self):
         return cp.solvers.utils.solutions(
-            self.env["checker"], X=self.user_vars, projected_solution_limit=None
+            self.env["checker"], X=sorted(self.user_vars, key=lambda x: x.name), projected_solution_limit=None
         )[1]
 
     def check_explanation(self, expr, X_enc, A_enc, T_enc, frm):
@@ -961,7 +961,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["checker"] and self.env["feasible"]:
             repeated = expr in self.env["checker"].constraints
-            self.env["checker"] += expr
+            # self.env["checker"] += expr
 
             # nsols = self.env["checker"].solveAll()
             # assert nsols >= 3, (
@@ -987,11 +987,31 @@ class CPM_lazy_gurobi(CPM_gurobi):
             remaining = without(actual_solutions, expected_solutions)
             assert len(np.unique(actual_solutions, axis=0)) == len(actual_solutions)
 
+            self.env["cuts"][-1]["remain"] = remaining
+            self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
+            # print(expected_solutions)
+            # print(actual_solutions)
+            print(remaining)
+            if len(self.env["cuts"]) >= 2:
+                removed = without(self.env["cuts"][-2]["remain"], remaining)
+                print(
+                    "A",
+                    self.user_vars,
+                    tuple(
+                        x.value()
+                        for x in sorted(self.user_vars, key=lambda x: x.name)
+                        if x.value() is not None
+                    ),
+                )
+                print("REMOVED")
+                print(removed)
+
             strength = (
-                self.env["cuts"][-2]["remain"] - len(remaining)
+                len(self.env["cuts"][-2]["remain"]) - len(self.env["cuts"][-1]["remain"])
                 if len(self.env["cuts"]) >= 2
                 else self.env["remain"] - len(remaining)
             )
+            self.env["cuts"][-1]["strength"] = strength
             if not repeated:
                 self.log(self.env["checker"], verbosity=4)
                 self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
@@ -1003,10 +1023,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(f"STRENGTH == {strength}", verbosity=2)
 
             # assert repeated or strength
+            assert strength
 
-            self.env["cuts"][-1]["strength"] = strength
-            self.env["cuts"][-1]["remain"] = len(remaining)
-            self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
             assert len(expected_solutions) <= len(actual_solutions), (
                 f"Missing sols:\n\n{show_assignments(expected_solutions)}\n\n {show_assignments(actual_solutions)}\n\n{self.env['checker']}"
             )
@@ -1057,8 +1075,27 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("Solving.. ")
 
         try:
-            solution_callback = self.get_solution_callback()
-            hassol = super().solve(solution_callback=solution_callback, time_limit=time_limit, **kwargs)
+            if self.env["checker"]:
+                # slv = CPM_ortools(cpm_model=self.env["checker"])
+                for iteration in itertools.count():
+                    hassol = self.env["checker"].solve(solver="ortools", time_limit=time_limit, **kwargs)
+                    print(self.env["checker"])
+                    all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
+                    x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
+                    # show_assignment(x_enc_a)
+                    print("sol", x_enc_a)
+                    self.check_max_iterations(iteration)
+                    self.solution_callback_inner(x_enc_a, "MIPSOL")
+                    for expr, k in self.solution_callback_inner(x_enc_a, "MIPSOL"):
+                        self.env["checker"] += [expr <= k]
+                    if self.env["found_feasible"]:
+                        break
+            else:
+                hassol = super().solve(
+                    solution_callback=self.get_solution_callback(),
+                    time_limit=time_limit,
+                    **kwargs,
+                )
 
             if hassol:
                 # if self.env["debug"]:

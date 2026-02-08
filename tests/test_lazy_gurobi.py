@@ -211,29 +211,36 @@ SEED = None
 
 
 def get_envs():
+
+    debug_env = {
+        "verbosity": 2,
+        "debug": 1,
+        "max_iterations": 500,
+        "seed": 42,
+    }
+
     yield {
         "alias": "dev",
         "solver": CPM_lazy_gurobi,
         "solver_kwargs": {
             "env": {
-                "verbosity": 3,
-                "debug": 1,
-                "max_iterations": 500,
-                "seed": 42,
+                **debug_env,
                 "fractional": False,
-                "coverlift": False,
+                "coverlift": True,
                 "negatives": 0,
-                # "heuristic": Heuristic.INPUT,
+                # "checker": cp.Model(),
                 "heuristic": Heuristic.GREEDY,
+                # "heuristic": Heuristic.REDUCE,
                 "cutoff": 0,
             }
         },
     }
 
     for e in get_experiments():
-        if e["alias"] == "base_gurobi":
+        if "base" in e["alias"]:
             continue
-        yield e
+
+        yield e | {"solver_kwargs": {"env": debug_env}}
 
     for encoding in [Encoding.DEFAULT, Encoding.GLEB]:
         yield {
@@ -615,5 +622,9 @@ class TestModels:
         ids=idfn,
     )
     def test_models(self, case, env):
+        import pprint
+
+        pprint.pprint(env)
+        print("env", env)
         _, _, model = case
         check_model(model, env=env)
