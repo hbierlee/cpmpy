@@ -59,6 +59,7 @@ FIELDNAMES = [
     "n_cuts_explained",
     "n_cuts_unexplained",
     "time_cb",
+    "constraints",
 ]
 
 
@@ -173,8 +174,8 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     if solver1 not in solvers or solver2 not in solvers:
         raise ValueError(f"Solvers {solver1} and/or {solver2} not found in dataframe. Available: {solvers}")
 
-    df1 = df[df['alias'] == solver1][['instance', metric, 'solved', inst_metric]].copy()
-    df2 = df[df['alias'] == solver2][['instance', metric, 'solved', inst_metric]].copy()
+    df1 = df[df['alias'] == solver1][['instance', metric, 'solved', inst_metric, 'small']].copy()
+    df2 = df[df['alias'] == solver2][['instance', metric, 'solved', inst_metric, 'small']].copy()
 
     # Merge on instance to get paired data
     merged = df1.merge(df2, on='instance', suffixes=('_1', '_2'))
@@ -192,6 +193,7 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     y = merged[f'{metric}_2'].values
 
     inst_metrics = merged[f'{inst_metric}_1'].values
+    is_small = merged['small_1'].values
     print(f"Median values - min: {inst_metrics.min()}, max: {inst_metrics.max()}, unique: {len(np.unique(inst_metrics))}")
     print(f"Sample median values: {inst_metrics[:10] if len(inst_metrics) >= 10 else inst_metrics}")
 
@@ -200,7 +202,17 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # Use log normalization if the range is large
     vmin, vmax = inst_metrics.min(), inst_metrics.max()
-    # inst_metrics = inst_metrics.where(inst_metrics <= 25, 0, inst_metrics)
+
+    # # Create a masked array where small instances are masked
+    # inst_metrics_colored = np.ma.array(
+    #         inst_metrics,
+    #         # mask=is_small,
+    #         )
+
+    # Create colormap and set colors for special cases
+    cmap = plt.cm.get_cmap('viridis').copy()
+    cmap.set_under('red')
+    # cmap.set_bad('blue')  # Color for masked values (small instances)
 
     # Plot scatter points colored by median
     scatter = ax.scatter(
@@ -209,11 +221,12 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
             c=inst_metrics,
             alpha=0.6,
             s=50,
-            cmap='viridis',
+            cmap=cmap,
             edgecolors='black',
             linewidth=0.5,
             norm=LogNorm(
-                vmin=max(vmin, 1e-10),
+                # vmin=max(vmin, 1e-10),
+                vmin=25,
                 # vmin=100,
                 vmax=vmax
                 ),
@@ -672,6 +685,8 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     # df["obj"] = df.where(df["method"] == "minimize", -df["obj"], df["obj"])
     # df["obj"] = df.map(lambda x: -x["obj"] if x["method"] == "minimize" else x["obj"])
     # df = df.drop(df[df["max"] <= 25].index)
+    df["small"] = df["max"] <= 100
+    # df = df.drop(df["small"].index)
     print(df[["instance", "median", "stdev", "min", "max"]])
     # assert False
 
@@ -754,7 +769,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
                     solver1=aliases[0],
                     solver2=aliases[1],
                     time_limit=time_limit,
-                    inst_metric="min",
+                    inst_metric="max",
                     # metric="time_post"
                     )
             scatter = plot.with_name("scatter")
