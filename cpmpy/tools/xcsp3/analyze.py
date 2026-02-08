@@ -387,6 +387,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             "cb_rel",
             "time_pc",
             "cuts",
+            "constraints",
             # "exception",
         ]].sort_values(by=
                        [
@@ -420,8 +421,10 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
         groups = df.groupby(grouping).agg(
                 alias = ("alias", "first"),
                 insts = ("problem", 'count'),
-                median = ('median', 'first'),
-                stdev = ('stdev', 'first'),
+                min_ = ("min", 'min'),
+                max_ = ("max", 'max'),
+                # median = ('median', 'first'),
+                # stdev = ('stdev', 'first'),
                 # t_totl_hr = ('time_total', 'sum'),
                 t_totl_p2 = ('time_total_p2', 'mean'),
                 t_post_p2 = ('time_post_p2', 'mean'),
@@ -434,6 +437,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 feas = ('feasible', 'sum'),
                 solv = ('solved', 'sum'),
                 cuts = ('cuts', 'mean'),
+                constraints = ('constraints', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
                 time_pc = ('time_pc', 'mean'),
                 method = ('method', 'first'),
@@ -447,8 +451,10 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
         groups = groups[[
             # *(["insts"] if PER_PROBLEM else ["insts"]),
             *([] if grouping_type == "per_alias" else [
-                "median",
-                "stdev",
+                "min_",
+                "max_",
+                # "median",
+                # "stdev",
                 ]),
             *([
                 "t_post_p2",
@@ -468,6 +474,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             *([
                 "solv",
                 "cuts",
+                "constraints",
                 "cb_rel",
                 "time_pc",
             ]),
