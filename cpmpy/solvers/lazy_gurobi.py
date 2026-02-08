@@ -232,6 +232,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "found_feasible": False,
             "model": None,
             "example2": False,
+            "example_frac": False,
             "feasible": None,
             **({} if env is None else env),
         }
@@ -338,7 +339,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
     @profile
     def choose(self, choices, T_enc, R, parts, A_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
         if self.env["verbosity"]:
-            self.log(f"Choose from {choices.nonzero()} from remaining rows {R}", verbosity=3)
+            self.log(f"Choose from {choices.nonzero()[0]} from remaining rows {R.nonzero()[0]}", verbosity=3)
             self.log(T_enc[R, :].astype(int), verbosity=3)
             self.log("", parts, "parts", verbosity=3)
             self.log("", A_enc.astype(int), "A_enc", verbosity=3)
@@ -521,9 +522,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
-    @profile
+    # @profile
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
+
+        def assert_example(A, B):
+            assert (A.nonzero()[0] == [i - 1 for i in B]).all(), A.nonzero()[0]
 
         # TODO convert T_enc to set of tuples?
 
@@ -588,11 +592,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"F = {F}", verbosity=3)
 
         if F.any():
-            D = T_enc[:, W | F].any(1)
+            D = ((W | F) >= T_enc).all(1)
+
+            if self.env["verbosity"]:
+                self.log(f"D = {D}", verbosity=3)
             U = F > ~((~T_enc[D, :]).all(0))  # tricky
 
             if self.env["verbosity"]:
-                self.log(f"D = {D} {T_enc[D, :]}", verbosity=3)
                 self.log(f"U = {U}", verbosity=3)
 
             if none(U):
@@ -606,6 +612,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 R = np.ones(m, dtype=np.bool)
                 choice = self.choose(U, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
 
+                if self.env["example_frac"]:
+                    assert_example(W, [6])
+                    assert_example(F, [2, 3, 8, 9])
+                    assert_example(D, [2])
+                    assert_example(U, [2, 8])
+                    choice = 2 - 1
+
                 # TODO [peter] should be T_hat[choice]?
                 choices = np.ones(len(T_enc.T), dtype=bool)
                 choices[parts[choice] == parts] = False
@@ -614,6 +627,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C_enc[choice] = 1
                 R = T_enc[:, choice]
                 k = 0
+                if self.env["example_frac"]:
+                    assert_example(X, [2])
+                    assert k == 0
+                    assert_example(R, [1, 5])
+                    assert parts[choice] == 1 - 1
+
                 # if self.env["debug"]:
                 #     self.log(f"chosen {show(choice)}", verbosity=3, indent=self.indent + 2)
                 #     self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
@@ -684,8 +703,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 )
                 self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
                 self.log(f"C_ {C_}", verbosity=3, indent=self.indent + 2)
-                self.log(f"is_pos {is_pos} {choice}", verbosity=2, indent=self.indent + 2)
-                self.log(f"R {choice} ({R.sum()})", verbosity=2, indent=self.indent + 2)
+                self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
+                self.log(f"R choice={choice} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
                 self.log(f"= {show_set(R.nonzero())}", verbosity=3, indent=self.indent + 3)
                 self.log(f"== {R}", verbosity=3, indent=self.indent + 4)
                 self.log(f"X {X}", verbosity=3, indent=self.indent + 2)
@@ -1079,11 +1098,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # slv = CPM_ortools(cpm_model=self.env["checker"])
                 for iteration in itertools.count():
                     hassol = self.env["checker"].solve(solver="ortools", time_limit=time_limit, **kwargs)
-                    print(self.env["checker"])
                     all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
                     x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
                     # show_assignment(x_enc_a)
-                    print("sol", x_enc_a)
                     self.check_max_iterations(iteration)
                     self.solution_callback_inner(x_enc_a, "MIPSOL")
                     for expr, k in self.solution_callback_inner(x_enc_a, "MIPSOL"):

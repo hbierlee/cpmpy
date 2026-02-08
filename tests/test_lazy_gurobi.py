@@ -83,7 +83,6 @@ def generate_edge_case_tables():
     # table with neg bool vars
     yield cp.Model(cp.Table([~cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]]))
 
-
     # Single tuple only
     yield cp.Model(cp.Table([cp.intvar(1, 5, name="x"), cp.intvar(1, 5, name="y")], [[3, 3]]))
 
@@ -138,7 +137,6 @@ def assert_integer_solution(A_enc):
 def check_model(model, env=None):
     print("== Model ==")
     print(model)
-
 
     print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
     expected_sat = model.deepcopy().solve()
@@ -414,8 +412,17 @@ class TestTables:
 
     def test_explain(self, env):
         random.seed(SEED)
-        for e, A_enc in [
-            (generate_table_from_example(), np.array([0, 1, 0, 0, 0, 1, 0, 0, 1, 0])),
+        for e, A_enc, env_ in [
+            # (
+            #     generate_table_from_example(),
+            #     np.array([0, 1, 0, 0, 0, 1, 0, 0, 1, 0]),
+            #     {"coverlift": True, "example2": True},
+            # ),
+            (
+                generate_table_from_example(),
+                np.array([0.0, 0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.5, 0.5, 0.0]),
+                {"fractional": True, "example_frac": True},
+            ),
             # (generate_table_from_data([(2, 1), (2, 1), (2, 1), (1, 2)], 2), np.array([0, 1, 0, 1])),
             # (generate_table(3, 3, 3), None),
             # (generate_table(10, 2000, 10), None),
@@ -445,17 +452,18 @@ class TestTables:
                 env={
                     **env,
                     **{
-                        "fractional": False,
+                        # "fractional": True,
                         "coverlift": False,
                         "max_iterations": None,
                         "heuristic": Heuristic.GREEDY,
                         # "heuristic": Heuristic.GREEDY,
                         "shrink": True,
                         "debug": True,
-                        "verbosity": 2,
+                        "verbosity": 3,
                         "negatives": 0,
-                        "checker": cp.Model(),
+                        # "checker": cp.Model(),
                     },
+                    **env_,
                 },
             )
             if False:
@@ -473,6 +481,7 @@ class TestTables:
                 X_enc, T_enc, parts, table = slv.tables[0]
                 # explanations = list(slv._explain_assignment(A_enc, frm="MIPSOL"))
                 frm = "MIPSOL"
+                frm = "MIPNODE-OPT"
 
                 if False:
                     # sum([1, -1] * [⟦x == 2⟧, ⟦y == 1⟧]) <= 0
