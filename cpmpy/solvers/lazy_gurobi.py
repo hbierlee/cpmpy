@@ -254,7 +254,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["checker"]:
             _, self.env["solutions"] = cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
 
-        super().__init__(name="lazy_gurobi", cpm_model=cpm_model, **kwargs)
+        super().__init__(
+            name="lazy_gurobi",
+            cpm_model=cpm_model,
+            verbose=self.env["verbosity"] >= 2,
+            **kwargs,
+        )
         if self.tables:
             self.native_model.Params.LazyConstraints = 1
         # self.native_model.Params.Threads = 1

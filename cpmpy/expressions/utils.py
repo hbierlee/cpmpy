@@ -246,6 +246,4 @@ def dom_size(x):
     return x.ub - x.lb + 1
 
 def show_assignment(X):
-    return ", ".join(f"{x}={x.value()}" for x in X)
-
-
+    return "\n".join(f"{x} in {'B' if isinstance(x, cp.expressions.variables._BoolVarImpl) else f'{x.lb}..{x.ub}'} = {x.value()}" for x in X)

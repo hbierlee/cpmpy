@@ -183,6 +183,7 @@ class CPM_gurobi(SolverInterface):
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
         self.grb_model = gp.Model(env=GRB_ENV)
         self.output_stats = output_stats
+        self.verbose = verbose
 
 
         if encoding == Encoding.GLEB:
