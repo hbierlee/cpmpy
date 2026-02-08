@@ -97,15 +97,17 @@ class SolverInterface(object):
         if cpm_model is not None:
             # post all constraints at once, implemented in `add()`
 
-            # self.add(cpm_model.constraints)
-            dt = time.time()
-            # Add timeout here, since CPMpy does not support SIGINTs
-            for i, c in enumerate(cpm_model.constraints):
-                # print(f"c {i}/{len(cpm_model.constraints)}: {str(c)[:100]}")
-                if self.time_limit is None or time.time() - dt < self.time_limit:
-                    self.add(c)
-                else:
-                    raise TimeoutError(f"TTO@{i}/{len(cpm_model.constraints)}")
+            if False:
+                self.add(cpm_model.constraints)
+            else:
+                dt = time.time()
+                # Add timeout here, since CPMpy does not support SIGINTs
+                for i, c in enumerate(cpm_model.constraints):
+                    # print(f"c {i}/{len(cpm_model.constraints)}: {str(c)[:100]}")
+                    if self.time_limit is None or time.time() - dt < self.time_limit:
+                        self.add(c)
+                    else:
+                        raise TimeoutError(f"TTO@{i}/{len(cpm_model.constraints)}")
 
             # post objective
             if cpm_model.objective_ is not None:
