@@ -584,12 +584,13 @@ def main():
     parser.add_argument('--tex', action='store_true', default=None, help='Output tables in tex')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
+    parser.add_argument('--common-instances', action='store_true', help='Only show instances which occur for all solvers')
     parser.add_argument('--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
     parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, glob_alias=None, glob_instance=None, tex=False):
+def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, common_instances=False, glob_alias=None, glob_instance=None, tex=False):
 
     import subprocess
     if sync:
@@ -726,6 +727,13 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     if solved_only:
         df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset(solved), axis=1)]
+
+    if common_instances:
+        # Filter to only keep instances that occur for all solvers
+        total_solvers = df['alias'].nunique()
+        instance_solver_counts = df.groupby(['problem', 'instance'])['alias'].nunique()
+        valid_instances = instance_solver_counts[instance_solver_counts == total_solvers].index
+        df = df.set_index(['problem', 'instance']).loc[valid_instances].reset_index()
 
     assert not df.empty
 
