@@ -431,6 +431,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # TODO [peter] C missing from alg
 
         i = 0
+
+        # centre of mass
+        com = T_enc.sum(axis=0) / len(T_enc)
+
         while not X.all():
             assert (
                 not self.env["example2"]
@@ -458,7 +462,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 ).all()
             ), f"{i}; {[i + 1 for i in X.nonzero()[0]]}"
 
-            j = [3, 7, 0][i] if self.env["example2"] else (~X).argmax()
+            if self.env["example2"]:
+                j = [3, 7, 0][i]
+            elif False:
+                j = np.nanargmax(np.where(~X, A_enc, np.nan))
+            else:
+                j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
+                assert not X[j]
 
             RT = (~R_tight) & T_enc[:, j]
             if (~RT).all():
@@ -720,7 +730,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["coverlift"]:
             if self.env["verbosity"]:
                 Xl = X.sum()
-            X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc)
+            X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc, A_enc)
             if self.env["verbosity"]:
                 self.log("coverlift added ", X.sum() - Xl, verbosity=3)
 
