@@ -283,7 +283,7 @@ class CPM_gurobi(SolverInterface):
             self.add(intvar(1, 1) == 1)
         
         # call the solver, with parameters
-        for param, val in kwargs.items():
+        for param, val in ({"Threads": 1} | kwargs).items():
             self.grb_model.setParam(param, val)
 
         assert self.native_model.Params.Threads == 1
