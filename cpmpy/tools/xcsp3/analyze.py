@@ -365,6 +365,8 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
 
     df["post"] = ~df["time_post"].isna()
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
+    df["lp_cuts"] = df["n_cuts_explained"]
+    df["no_cuts"] = df["n_cuts_unexplained"]
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_total"])
     df["time_pc"] = (df["time_cb"] / df["cuts"]) * 1000
     df = df.sort_values(by=["problem", "instance", "alias"])
@@ -399,6 +401,8 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             "cb_rel",
             "time_pc",
             "cuts",
+            "lp_cuts",
+            "no_cuts",
             "constraints",
             # "exception",
         ]].sort_values(by=
@@ -449,6 +453,8 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 feas = ('feasible', 'sum'),
                 solv = ('solved', 'sum'),
                 cuts = ('cuts', 'mean'),
+                lp_cuts = ('lp_cuts', 'mean'),
+                no_cuts = ('no_cuts', 'mean'),
                 constraints = ('constraints', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
                 time_pc = ('time_pc', 'mean'),
@@ -486,6 +492,8 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             *([
                 "solv",
                 "cuts",
+                "lp_cuts",
+                "no_cuts",
                 "constraints",
                 "cb_rel",
                 "time_pc",
