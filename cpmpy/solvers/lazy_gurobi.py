@@ -840,12 +840,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
         else:
             (X, C_enc, k) = explanation
             expr = cp.sum(C_enc[X] * X_enc[X]) <= k
+            if self.env["verbosity"]:
+                self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2)
+                self.log(f"  == {expr}", indent=2, verbosity=2)
+
         if isinstance(expr, (bool, np.bool)):
             expr = cp.BoolVal(expr)
-
-        if self.env["verbosity"]:
-            self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2)
-            self.log(f"  == {expr}", indent=2, verbosity=2)
 
         self.env["cuts"][-1]["expr"] = expr
 
