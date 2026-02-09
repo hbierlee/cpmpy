@@ -240,7 +240,7 @@ def get_envs():
 
         yield e | {"solver_kwargs": {"env": debug_env}}
 
-    for encoding in [Encoding.DEFAULT, Encoding.GLEB]:
+    for encoding in Encoding:
         yield {
             "alias": f"base_gurobi-{encoding}",
             "solver": CPM_gurobi,
