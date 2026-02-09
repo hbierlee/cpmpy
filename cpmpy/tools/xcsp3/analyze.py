@@ -30,7 +30,6 @@ import json
 import pathlib
 import statistics
 import re
-import matplotlib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -345,6 +344,38 @@ def xcsp3_objective_performance_profile(df):
 
     return fig
 
+def check_inconsistent_instances(df):
+    """
+    Check for instances that have both SAT and UNS results across different solvers/runs.
+    This indicates an inconsistency that should be investigated.
+    """
+    inconsistent = []
+
+    for (problem, instance), group in df.groupby(['problem', 'instance']):
+        statuses = set(group['status'].unique())
+
+        # Check if both SAT and UNS appear
+        if SAT in statuses and UNS in statuses:
+            # Get only the solvers that returned UNS
+            uns_results = group[group['status'] == UNS][['alias', 'time_total']]
+            uns_solvers = [(row['alias'], row['time_total']) for _, row in uns_results.iterrows()]
+
+            inconsistent.append({
+                'problem': problem,
+                'instance': instance,
+                'statuses': statuses,
+                'uns_solvers': uns_solvers
+            })
+
+    if inconsistent:
+        print("\n== INCONSISTENT INSTANCES (both SAT and UNS) ==")
+        for item in inconsistent:
+            uns_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in item['uns_solvers']])
+            print(f"{item['problem']}-{item['instance']}: UNS from [{uns_info}]")
+        print(f"\nTotal inconsistent instances: {len(inconsistent)}")
+
+    return inconsistent
+
 def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
 
     if False:  # TODO FutureWarning: The behavior of Series.idxmax with all-NA values, or any-NA and skipna=False, is deprecated. In a future version this will raise ValueError
@@ -356,6 +387,9 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
     print("Solvers", df[['alias', 'solver_kwargs']])
 
     print("Problems", df['problem'].unique())
+
+    # Check for inconsistent instances
+    check_inconsistent_instances(df)
 
 
     diff = "Δ"
@@ -378,9 +412,8 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
 
     if True:
         print("RESULTS")
-        print(df
+        df_ =df[[
               # .where(df["status"] == OPT)
-              [[
             "problem",
             "instance",
             "rows",
@@ -405,7 +438,12 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             "no_cuts",
             "constraints",
             # "exception",
-        ]].sort_values(by=
+        ]]
+
+        if len(df_) == 1:
+            print(df_.loc[0])
+        else:
+            print(df_.sort_values(by=
                        [
                            "rows",
                            "problem",
@@ -556,9 +594,17 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
     errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception", "traceback"]]
     if not errors.empty:
         print("== ERRORS ==")
+        for idx, error in errors.iterrows():
+            print(f"\n[{error['problem']}/{error['instance']} - {error['alias']}]")
+            print(f"Status: {error['status']} | Time: {error['time_total']:.2f}s")
+            if pd.notna(error['exception']):
+                print(f"Exception: {error['exception']}")
+            if pd.notna(error['traceback']):
+                print(f"Traceback:\n{error['traceback']}")
+
+    # if not errors.empty:
         # exc = df[df["status"] == ERR]
         # exc["file"] = exc["problem"] + "-" + exc["instance"]
-        print(errors)
         # print(", ".join(str(x)[:100] for x in df["exception"].unique()))
         # print(", ".join(str(x)[:100] for x in df["exception"].unique()))
 
@@ -732,6 +778,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     df["feasible"] = df["status"].isin((OPT, SAT, UNS))
     df["solved"] = df["status"].isin(solved)
 
+
     # replace time_solve to NaN if not solved
     df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
 
@@ -784,13 +831,6 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
             fig.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
             fig.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
             print(f"Plot saved to {scatter}.{{png,svg}}")
-
-    # else:
-    #     plt.show()
-
-    if len(df) == 1:
-        print(df.loc[0])
-
 
 
 if __name__ == '__main__':
