@@ -76,10 +76,10 @@ class Feature(Enum):
         return self.value
 
 class Encoding(Feature):
-    DEFAULT = "default"
+    CPMPY = "cpmpy"
     XCSP3 = "xcsp3"
     GLEB = "gleb"
-    BOOL_GLEB = "bool-gleb"
+    BOOL = "bool"
     # MDD = "mdd" # TODO removed for now so all available encodings are tested
 
 
@@ -200,7 +200,7 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], T_enc, cons
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.DEFAULT, output_stats=False, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, output_stats=False, **kwargs):
         """
         Constructor of the native solver object
 
@@ -221,7 +221,7 @@ class CPM_gurobi(SolverInterface):
         self.ivarmap = dict()
 
         match encoding:
-            case Encoding.DEFAULT:
+            case Encoding.CPMPY:
                 pass
             case Encoding.XCSP3:
                 def xcsp3_decompose(self):
@@ -257,7 +257,7 @@ class CPM_gurobi(SolverInterface):
 
                 Table.decompose = gleb_decompose
 
-            case Encoding.BOOL_GLEB:
+            case Encoding.BOOL:
                 def bool_decompose(self_):
                     X, T = self_.args
 

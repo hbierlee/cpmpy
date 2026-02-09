@@ -45,17 +45,13 @@ def get_experiments(overrides={}, filters=[]):
     return experiment(
         [
             [
-                # solvers
                 *[
                     {
                         "solver": CPM_gurobi,
                         "alias": f"base_gurobi-{encoding}",
                         "solver_kwargs": {"encoding": encoding, "output_stats": True},
                     }
-                    for encoding in (
-                        Encoding.DEFAULT,
-                        Encoding.GLEB,
-                    )
+                    for encoding in Encoding
                 ],
                 *[
                     {
