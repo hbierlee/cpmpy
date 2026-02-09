@@ -453,8 +453,9 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             ("per_alias", ['alias'])
             ):
 
-
-        groups = df.groupby(grouping).agg(
+        groups = df.assign(
+                time_solve=df["time_solve"].where(df["status"].isin(solved), 2 * time_limit)
+            ).groupby(grouping).agg(
                 alias = ("alias", "first"),
                 insts = ("problem", 'count'),
                 min_ = ("min", 'min'),
@@ -533,20 +534,22 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
 
         # TODO add cli arg to determine baseline alias
         baseline = "base_gurobi-gleb."
-        diff_ = groups
-        # TODO show diff for each solver to the baseline (rather than to each other by comparing to the previous row)
-        diff_[diff_cols] = groups[diff_cols].diff()
-        diff_ = diff_.drop(index=baseline, level=grouping[-1] if diff_.index.nlevels > 1 else None)
+        baseline = None
+        if baseline:
+            diff_ = groups
+            # TODO show diff for each solver to the baseline (rather than to each other by comparing to the previous row)
+            diff_[diff_cols] = groups[diff_cols].diff()
+            diff_ = diff_.drop(index=baseline, level=grouping[-1] if diff_.index.nlevels > 1 else None)
 
-        print("DIFF")
-        print(diff_)
+            print("DIFF")
+            print(diff_)
 
-        # Compute correlations
-        if grouping_type == "per_inst":
-            correlation = diff_[['t_solv_p2', 'median']].corr()
-            print("\n== Correlation between t_solv_p2 and median ==")
-            with pd.option_context('display.float_format', '{:.6f}'.format):
-                print(correlation)
+            # Compute correlations
+            if grouping_type == "per_inst":
+                correlation = diff_[['t_solv_p2', 'median']].corr()
+                print("\n== Correlation between t_solv_p2 and median ==")
+                with pd.option_context('display.float_format', '{:.6f}'.format):
+                    print(correlation)
 
         if tex and grouping_type == "per_alias":
             n_instances = len((df["problem"] + "-" + df["instance"]).unique())
@@ -647,13 +650,13 @@ def main():
     parser.add_argument('--tex', action='store_true', default=None, help='Output tables in tex')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
-    parser.add_argument('--common-instances', action='store_true', help='Only show instances which occur for all solvers')
+    parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
     parser.add_argument('--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
     parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, common_instances=False, glob_alias=None, glob_instance=None, tex=False):
+def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, glob_alias=None, glob_instance=None, tex=False):
 
     import subprocess
     if sync:
@@ -769,13 +772,12 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
 
     # replace time_solve to NaN if not solved
-    # df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
-    df["time_solve"] = df["time_solve"].where(df["status"].isin(solved), 2*time_limit)
+    df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
 
     if solved_only:
         df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset(solved), axis=1)]
 
-    if common_instances:
+    if intermediate:
         # Filter to only keep instances that occur for all solvers
         total_solvers = df['alias'].nunique()
         instance_solver_counts = df.groupby(['problem', 'instance'])['alias'].nunique()

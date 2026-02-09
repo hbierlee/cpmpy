@@ -73,8 +73,6 @@ def get_experiments(overrides={}, filters=[]):
                                     (
                                         0,
                                         100,
-                                        10,
-                                        25,
                                     ),
                                 ),
                                 # ("negatives", (0,3)),
