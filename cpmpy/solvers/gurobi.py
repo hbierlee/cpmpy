@@ -46,6 +46,7 @@ from typing import Optional, List
 import time
 from enum import Enum
 
+
 from .solver_interface import SolverInterface, SolverStatus, ExitStatus, Callback
 from ..exceptions import NotSupportedError
 from ..expressions.core import *
@@ -61,6 +62,7 @@ from ..transformations.normalize import toplevel_list
 from ..transformations.reification import only_implies, reify_rewrite, only_bv_reifies
 from ..transformations.safening import no_partial_functions, safen_objective
 from cpmpy.expressions.globalconstraints import Table
+
 
 from cpmpy.expressions.utils import dom_size
 
@@ -82,21 +84,6 @@ class Encoding(Feature):
 
 import types
 
-
-def encode(X, T):
-    dom_sizes = [dom_size(x) for x in X]
-    width = sum(dom_sizes)
-    T_enc = np.zeros((len(T), width), dtype=np.bool)
-
-    # from scipy.sparse import bsr_array, csr_matrix
-    # return csr_matrix(T_enc)
-
-    for t, t_enc_i in zip(T, T_enc):
-        offset = 0
-        for x, x_width, a in zip(X, dom_sizes, t):
-            t_enc_i[offset + a - x.lb] = True
-            offset += x_width
-    return T_enc
 
 
 
@@ -123,20 +110,25 @@ class Encoding(Feature):
     MDD = "mdd"
 
 
-def encode(X, T):
-    dom_sizes = [dom_size(x) for x in X]
-    width = sum(dom_sizes)
-    T_enc = np.zeros((len(T), width), dtype=np.bool)
+def trivial_decomposition(arr, tab):
+    if len(tab) == 0:
+        return [False], []
+    elif len(tab) == 1:
+        return [(x == tab[0][i]) for i, x in enumerate(arr)], []
 
-    # from scipy.sparse import bsr_array, csr_matrix
-    # return csr_matrix(T_enc)
+def encode_intvar_as_bool(arr):
+    shape = sum([dom_size(x) for x in arr])
+    bv = cp.boolvar(shape=shape)
+    cons = []
+    offset = 0
+    for x in arr:
+        cons += [cp.sum(bv[offset:offset+(dom_size(x))]) == 1]
+        cons += [x == cp.sum(bv[offset:offset+dom_size(x)] * range(x.lb, x.lb + dom_size(x)+1))]
+        offset += dom_size(x)
+    return bv, cons
 
-    for t, t_enc_i in zip(T, T_enc):
-        offset = 0
-        for x, x_width, a in zip(X, dom_sizes, t):
-            t_enc_i[offset + a - x.lb] = True
-            offset += x_width
-    return T_enc
+
+
 
 
 
@@ -225,13 +217,10 @@ class CPM_gurobi(SolverInterface):
 
         if encoding == Encoding.XCSP3:
             def xcsp3_decompose(self):
-
                 arr, tab = self.args
 
-                if len(tab) == 0:
-                    return [False], []
-                elif len(tab) == 1:
-                    return [(x == tab[0][i]) for i, x in enumerate(arr)], []
+                if len(tab) < 2:
+                    return trivial_decomposition(arr, tab)
 
                 row_selected = cp.boolvar(shape=len(tab))
 
@@ -247,17 +236,15 @@ class CPM_gurobi(SolverInterface):
         if encoding == Encoding.GLEB:
             def gleb_decompose(self):
                 arr, tab = self.args
-                cons = []
-                if len(tab) == 0:
-                    return [False], []
-                elif len(tab) == 1:
-                    cons += [(x == tab[0][i]) for i, x in enumerate(arr)]
-                else:
-                    row_selected = cp.boolvar(shape=len(tab))
-                    nptab = np.array(tab)
+                if len(tab) < 2:
+                    return trivial_decomposition(arr, tab)
 
-                    cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
-                    cons += [cp.sum(row_selected) == 1]
+                cons = []
+                row_selected = cp.boolvar(shape=len(tab))
+                nptab = np.array(tab)
+
+                cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
+                cons += [cp.sum(row_selected) == 1]
                 return cons, []
 
             Table.decompose = gleb_decompose
@@ -265,16 +252,22 @@ class CPM_gurobi(SolverInterface):
         elif encoding == Encoding.BOOL_GLEB:
             def bool_decompose(self):
                 arr, tab = self.args
-                T_enc = encode(arr, tab)
-                for x in arr:
-                    x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
-                        self.ivarmap, x, "direct", csemap=self._csemap
-                    )
-                    expr, k = x_enc.encode_term()
+                if len(tab) < 2:
+                    return trivial_decomposition(arr, tab)
+                T_enc = cp.solvers.lazy_gurobi.encode(arr, tab)
                 cons = []
+                arr_enc, new_cons = encode_intvar_as_bool(arr)
+                cons += new_cons
 
+                row_selected = cp.boolvar(shape=len(T_enc))
+
+                nptab = np.array(T_enc)
+
+                cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr_enc)]
+                cons += [cp.sum(row_selected) == 1]
 
                 return cons, []
+
 
             Table.decompose = bool_decompose
         elif encoding == Encoding.MDD:
@@ -519,19 +512,13 @@ class CPM_gurobi(SolverInterface):
                                      supported_reified=self.supported_reified_global_constraints,
                                      csemap=self._csemap)
         cpm_cons = flatten_constraint(cpm_cons, csemap=self._csemap)  # flat normal form
-
         cpm_cons = reify_rewrite(cpm_cons, supported=frozenset(['sum', 'wsum']), csemap=self._csemap)  # constraints that support reification
-
         cpm_cons = only_numexpr_equality(cpm_cons, supported=frozenset(["sum", "wsum", "sub"]), csemap=self._csemap)  # supports >, <, !=
-
         cpm_cons = only_bv_reifies(cpm_cons, csemap=self._csemap)
-
         cpm_cons = only_implies(cpm_cons, csemap=self._csemap)  # anything that can create full reif should go above...
-
         # gurobi does not round towards zero, so no 'div' in supported set: https://github.com/CPMpy/cpmpy/pull/593#issuecomment-2786707188
         cpm_cons = linearize_constraint(cpm_cons, supported=frozenset({"sum", "wsum","->","sub","min","max","mul","abs","pow"}), csemap=self._csemap)  # the core of the MIP-linearization
         cpm_cons = only_positive_bv(cpm_cons, csemap=self._csemap)  # after linearization, rewrite ~bv into 1-bv
-
         return cpm_cons
 
     def add(self, cpm_expr_orig):
