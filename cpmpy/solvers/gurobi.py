@@ -220,62 +220,67 @@ class CPM_gurobi(SolverInterface):
         self.verbose = verbose
         self.ivarmap = dict()
 
-        if encoding == Encoding.XCSP3:
-            def xcsp3_decompose(self):
-                arr, tab = self.args
+        match encoding:
+            case Encoding.DEFAULT:
+                pass
+            case Encoding.XCSP3:
+                def xcsp3_decompose(self):
+                    arr, tab = self.args
 
-                if len(tab) < 2:
-                    return trivial_decomposition(arr, tab)
+                    if len(tab) < 2:
+                        return trivial_decomposition(arr, tab)
 
-                row_selected = cp.boolvar(shape=len(tab))
+                    row_selected = cp.boolvar(shape=len(tab))
 
-                cons = []
-                for i, row in enumerate(tab):
-                    subexpr = Operator("and", [x == v for x, v in zip(arr, row)])
-                    cons.append(Operator("->", [row_selected[i], subexpr]))
+                    cons = []
+                    for i, row in enumerate(tab):
+                        subexpr = Operator("and", [x == v for x, v in zip(arr, row)])
+                        cons.append(Operator("->", [row_selected[i], subexpr]))
 
-                return [Operator("or", row_selected)] + cons, []
+                    return [Operator("or", row_selected)] + cons, []
 
-            Table.decompose = xcsp3_decompose
+                Table.decompose = xcsp3_decompose
 
-        if encoding == Encoding.GLEB:
-            def gleb_decompose(self):
-                arr, tab = self.args
-                if len(tab) < 2:
-                    return trivial_decomposition(arr, tab)
+            case Encoding.GLEB:
+                def gleb_decompose(self):
+                    arr, tab = self.args
+                    if len(tab) < 2:
+                        return trivial_decomposition(arr, tab)
 
-                cons = []
-                row_selected = cp.boolvar(shape=len(tab))
-                nptab = np.array(tab)
+                    cons = []
+                    row_selected = cp.boolvar(shape=len(tab))
+                    nptab = np.array(tab)
 
-                cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
-                cons += [cp.sum(row_selected) == 1]
-                return cons, []
+                    cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
+                    cons += [cp.sum(row_selected) == 1]
+                    return cons, []
 
-            Table.decompose = gleb_decompose
+                Table.decompose = gleb_decompose
 
-        elif encoding == Encoding.BOOL_GLEB:
-            def bool_decompose(self_):
-                X, T = self_.args
+            case Encoding.BOOL_GLEB:
+                def bool_decompose(self_):
+                    X, T = self_.args
 
-                if len(T) < 2:
-                    return trivial_decomposition(X, T)
+                    if len(T) < 2:
+                        return trivial_decomposition(X, T)
 
-                # Encode table T to 01 table `T_enc` and X variables to encodings `X_enc`
-                X_enc, T_enc, cons = self.encode_table_constraint(X, T)
+                    # Encode table T to 01 table `T_enc` and X variables to encodings `X_enc`
+                    X_enc, T_enc, cons = self.encode_table_constraint(X, T)
 
-                row_selected = cp.boolvar(shape=len(T_enc))
-                # For an encoding `x_enc`, the encoding variables are in `x_enc.xs_`, so we can iter over each integer variable, then over each of its encoding variables
-                # Then enforce for each column `i` and its associated encoding variable `b_i`, enforce it to be equal to whatever row is selected
-                cons += [b_i == cp.sum(row_selected * col) for b_i, col in zip((b_i for x_enc in X_enc for b_i in x_enc._xs), T_enc.T)]
-                cons += [cp.sum(row_selected) == 1]
+                    row_selected = cp.boolvar(shape=len(T_enc))
+                    # For an encoding `x_enc`, the encoding variables are in `x_enc.xs_`, so we can iter over each integer variable, then over each of its encoding variables
+                    # Then enforce for each column `i` and its associated encoding variable `b_i`, enforce it to be equal to whatever row is selected
+                    cons += [b_i == cp.sum(row_selected * col) for b_i, col in zip((b_i for x_enc in X_enc for b_i in x_enc._xs), T_enc.T)]
+                    cons += [cp.sum(row_selected) == 1]
 
-                return cons, []
+                    return cons, []
 
+                Table.decompose = bool_decompose
+            # case Encoding.MDD:
+            #     pass
+            case _:
+                raise Exception(f"TODO: {encoding}")
 
-            Table.decompose = bool_decompose
-        # elif encoding == Encoding.MDD:
-        #     pass
 
         if verbose:
             pathlib.Path("/tmp/encoding.txt").unlink(missing_ok=True)
