@@ -162,7 +162,7 @@ def get_envs():
             continue
         yield e
 
-    for encoding in ENCODING:
+    for encoding in [Encoding.DEFAULT, Encoding.GLEB]:
         yield {
             "alias": f"base_gurobi-{encoding}",
             "solver": CPM_gurobi,
