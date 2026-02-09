@@ -1,8 +1,6 @@
 import itertools
 import json
 import collections
-import math
-import os
 import pickle
 import pprint
 import sys
@@ -56,15 +54,15 @@ def is_ge(x, y):
 
 
 def eps_floor(x):
-    return math.floor(x + EPS)
+    return np.floor(x + EPS)
 
 
 def eps_ceil(x):
-    return math.ceil(x - EPS)
+    return np.ceil(x - EPS)
 
 
 def eps_round(x):
-    return math.ceil(x - 0.5 + EPS)
+    return np.ceil(x - 0.5 + EPS)
 
 
 def eps_frac(x):
@@ -124,6 +122,10 @@ def show_table(T_enc, index=INDEX):
     return np.astype(T_enc, int) if T_enc.dtype in (bool, np.bool) else T_enc
 
 
+def show_nz(A, index=INDEX):
+    return A.nonzero()[0] + 1
+
+
 def show_ind(a, index=INDEX):
     return a + index
 
@@ -160,11 +162,7 @@ def cols(T, i, j=1):
 
 
 def is_integer(v):
-    return math.isclose(v, v > 0.5, abs_tol=1e-5)
-
-
-def is_integer_solution(A_enc):
-    return all(is_integer(a) for a in A_enc)
+    return np.isclose(v, v > 0.5, abs_tol=1e-5)
 
 
 def union(sets):
@@ -177,13 +175,13 @@ def encode(X, T):
     width = sum(dom_sizes)
     T_enc = np.zeros((len(T), width), dtype=np.bool)
 
-    # from scipy.sparse import bsr_array, csr_matrix
-    # return csr_matrix(T_enc)
-
-    for t, t_enc_i in zip(T, T_enc):
+    for i, row in enumerate(T):
         offset = 0
-        for x, x_width, a in zip(X, dom_sizes, t):
-            t_enc_i[offset + a - x.lb] = True
+        for x, x_width, a in zip(X, dom_sizes, row):
+            try:
+                T_enc[i, offset + a - x.lb] = True
+            except IndexError:
+                np.delete(T_enc, i)
             offset += x_width
     return T_enc
 
@@ -227,12 +225,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "cuts": [],
             "max_iterations": None,
             "seed": 42,
-            # "checker": cp.Model(),
             "checker": None,
             "tables": [],
             "found_feasible": False,
             "model": None,
             "example2": False,
+            "example_frac": False,
             "feasible": None,
             **({} if env is None else env),
         }
@@ -251,10 +249,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         self.tables = []
 
-        if self.env["checker"]:
-            _, self.env["solutions"] = cp.solvers.utils.solutions(cpm_model, projected_solution_limit=None)
+        super().__init__(
+            name="lazy_gurobi",
+            cpm_model=cpm_model,
+            verbose=self.env["verbosity"] >= 4,
+            **kwargs,
+        )
 
-        super().__init__(name="lazy_gurobi", cpm_model=cpm_model, **kwargs)
+        if self.env["checker"]:
+            _, self.env["solutions"] = cp.solvers.utils.solutions(
+                cpm_model, X=sorted(self.user_vars, key=lambda x: x.name), projected_solution_limit=None
+            )
+
         if self.tables:
             self.native_model.Params.LazyConstraints = 1
         # self.native_model.Params.Threads = 1
@@ -321,7 +327,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"cuts (MIPSOL) = {len(cuts_mipsol)}")
             self.log(f"cuts (MIPNODE, explained) = {len(cuts_mipnode_exp)}")
             self.log(f"cuts (MIPNODE, unexplainable) = {len(cuts_mipnode_unexp)}")
-        return {
+        return super().stats() | {
             "time_cb": self.env["time_cb"],
             "n_cuts": len(cuts_mipsol),
             "n_cuts_explained": len(cuts_mipnode_exp),
@@ -331,7 +337,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
     @profile
     def choose(self, choices, T_enc, R, parts, A_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
         if self.env["verbosity"]:
-            self.log(f"Choose from {choices.nonzero()} from remaining rows {R}", verbosity=3)
+            self.log(f"Choose from {choices.nonzero()[0]} from remaining rows {R.nonzero()[0]}", verbosity=3)
             self.log(T_enc[R, :].astype(int), verbosity=3)
             self.log("", parts, "parts", verbosity=3)
             self.log("", A_enc.astype(int), "A_enc", verbosity=3)
@@ -350,7 +356,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return choices.nonzero()[0][
                     np.bitwise_or.reduceat(
                         # get only the relevant rows and columns
-                        T_enc[R, :][:, choices],  # TODO play nice with neg choices
+                        T_enc[np.ix_(R, choices)],
                         # for the columns of each part
                         parts_,
                         # see if there is any 1 in the row
@@ -404,7 +410,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         return X, k
 
     @profile
-    def gencoverlift(self, S, C_enc, k, T_enc):
+    def gencoverlift(self, S, C_enc, k, T_enc, A_enc):
         if self.env["verbosity"]:
             self.log("gencoverlift", verbosity=3)
 
@@ -431,6 +437,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # TODO [peter] C missing from alg
 
         i = 0
+
+        # centre of mass
+        # com = T_enc.sum(axis=0) / len(T_enc)
+
         while not X.all():
             assert (
                 not self.env["example2"]
@@ -458,7 +468,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 ).all()
             ), f"{i}; {[i + 1 for i in X.nonzero()[0]]}"
 
-            j = [3, 7, 0][i] if self.env["example2"] else (~X).argmax()
+            if self.env["example2"]:
+                j = [3, 7, 0][i]
+            elif True:
+                j = np.nanargmax(np.where(~X, A_enc, np.nan))
+            else:
+                assert False
+                # j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
+                # assert not X[j]
 
             RT = (~R_tight) & T_enc[:, j]
             if (~RT).all():
@@ -504,9 +521,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
-    @profile
+    # @profile
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
+
+        def assert_example(A, B):
+            assert (A.nonzero()[0] == [i - 1 for i in B]).all(), A.nonzero()[0]
 
         # TODO convert T_enc to set of tuples?
 
@@ -567,16 +587,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # [ 0 0 1 0 1 1 0 ]  N
         # WF = np.zeros(len(T_enc.T), dtype=bool)
         if self.env["verbosity"]:
-            self.log(f"W = {W}", verbosity=3)
-            self.log(f"F = {F}", verbosity=3)
+            self.log(f"W = {show_nz(W)}", verbosity=3)
+            self.log(f"F = {show_nz(F)}", verbosity=3)
 
         if F.any():
-            D = T_enc[:, W | F].any(1)
+            D = ((W | F) >= T_enc).all(1)
+
+            if self.env["verbosity"]:
+                self.log(f"D = {show_nz(D)}", verbosity=3)
             U = F > ~((~T_enc[D, :]).all(0))  # tricky
 
             if self.env["verbosity"]:
-                self.log(f"D = {D} {T_enc[D, :]}", verbosity=3)
-                self.log(f"U = {U}", verbosity=3)
+                self.log(f"U = {show_nz(U)}", verbosity=3)
 
             if none(U):
                 if self.env["verbosity"]:
@@ -589,6 +611,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 R = np.ones(m, dtype=np.bool)
                 choice = self.choose(U, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
 
+                if self.env["example_frac"]:
+                    assert_example(W, [6])
+                    assert_example(F, [2, 3, 8, 9])
+                    assert_example(D, [2])
+                    assert_example(U, [2, 8])
+                    choice = 2 - 1
+
                 # TODO [peter] should be T_hat[choice]?
                 choices = np.ones(len(T_enc.T), dtype=bool)
                 choices[parts[choice] == parts] = False
@@ -597,11 +626,20 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C_enc[choice] = 1
                 R = T_enc[:, choice]
                 k = 0
-                # if self.env["debug"]:
-                #     self.log(f"chosen {show(choice)}", verbosity=3, indent=self.indent + 2)
-                #     self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
-                #     self.log(f"R ({R.sum()}) = {R}", verbosity=3, indent=self.indent + 2)
-                #     self.log(f"X {X}", verbosity=3, indent=self.indent + 2)
+
+                if self.env["example_frac"]:
+                    assert_example(X, [2])
+                    assert k == 0
+                    assert_example(R, [1, 5])
+                    assert parts[choice] == 1 - 1
+
+                if self.env["verbosity"]:
+                    self.log(f"chosen {show(choice)}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"R ({R.sum()}) = {R}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
+
         else:
             R = np.ones(m, dtype=np.bool)
             X = np.zeros(len(T_enc.T), dtype=bool)
@@ -614,11 +652,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
         for iteration in itertools.count():
             if none(R):
                 break
-
-            def covered(choice):
-                l_parts = parts[choice] == parts
-                C_ = l_parts & is_gt(A_enc, 0.0)
-                return C_, l_parts, T_enc[:, C_].any(1)
 
             neg_choices = choices & ~A_enc_pos
             # make_pos_choice = frm == "MIPNODE-OPT" or R.sum() >= self.env["negatives"] or not neg_choices.any()
@@ -638,7 +671,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             is_pos = A_enc_pos[choice]
 
             if choice is None:
-                return None
+                # this can happen only if assignment is feasible
+                raise Exception("No choices left for ", frm)
 
             l_parts = parts[choice] == parts
             assert not C_enc[choice], f"chosen {choice}"
@@ -647,9 +681,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 choices[l_parts] = False
                 R = R & T_enc[:, C_].any(1)
                 X |= C_
-                C_enc[choice] = 1
+                C_enc[X] = 1
                 k += 1
             else:
+                assert False
                 C_ = choice
                 choices[choice] = False
                 R = R & (~T_enc[:, choice])
@@ -665,14 +700,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     verbosity=3,
                     indent=self.indent + 2,
                 )
-                self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
+                self.log(f"choices {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
                 self.log(f"C_ {C_}", verbosity=3, indent=self.indent + 2)
-                self.log(f"is_pos {is_pos} {choice}", verbosity=2, indent=self.indent + 2)
-                self.log(f"R {choice} ({R.sum()})", verbosity=2, indent=self.indent + 2)
-                self.log(f"= {show_set(R.nonzero())}", verbosity=3, indent=self.indent + 3)
-                self.log(f"== {R}", verbosity=3, indent=self.indent + 4)
-                self.log(f"X {X}", verbosity=3, indent=self.indent + 2)
-                self.log(f"C {C_enc}", verbosity=3, indent=self.indent + 2)
+                self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
+                self.log("FRAC", frm, F.any(), verbosity=2, indent=self.indent + 2)
+                self.log(f"R choice={choice} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
+                self.log(f"= {show_nz(R)}", verbosity=3, indent=self.indent + 3)
+                self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
+                self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
             # [     1   1     ]
             # [ 0 1 1 0 0 0 0 ]  Y
             # [ 0 0 0 0 1 0 0 ]  Y
@@ -689,9 +724,20 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["verbosity"]:
             self.log(f"by explanation of size ({sum(X)})", verbosity=2)
-            self.log(X, verbosity=3)
+            self.log(show_nz(X), verbosity=3)
             self.log("C_enc", C_enc, verbosity=3)
             self.env["cuts"][-1]["cut"] = X.copy()
+            assert C_enc[X].all()
+
+        def show_cut():
+            if self.env["verbosity"]:
+                self.log(
+                    f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
+                    indent=2,
+                    verbosity=2,
+                )
+
+        show_cut()
 
         if self.env["shrink"]:
             X_shrunk, shrunk = self.shrink(X, T_enc)
@@ -706,27 +752,20 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         "cut": X_shrunk,
                     }
             self.env["cuts"][-1]["shrunk"] = shrunk
+            show_cut()
 
-        def show_cut():
-            if self.env["verbosity"]:
-                self.log(
-                    f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
-                    indent=2,
-                    verbosity=3,
-                )
-
-        show_cut()
 
         if self.env["coverlift"]:
             if self.env["verbosity"]:
                 Xl = X.sum()
-            X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc)
+            X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc, A_enc)
             if self.env["verbosity"]:
                 self.log("coverlift added ", X.sum() - Xl, verbosity=3)
 
+            show_cut()
+
         self.env["cuts"][-1]["size"] = len(X)
 
-        show_cut()
 
         return X, C_enc, k
 
@@ -734,6 +773,29 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # Loop termination for debug purposes
         if self.env["max_iterations"] is not None:
             assert i <= self.env["max_iterations"], "Out of iterations"
+
+    def solution_callback_inner(self, x_enc_a, frm):
+        feasible = True  # assume feasible
+        for expr in self._explain_assignment(x_enc_a, frm=frm):
+            if isinstance(expr, Comparison) and expr.name == "<=":
+                feasible = False  # any expr means not feasible
+                assert isinstance(expr.args[0], Operator)
+                expr, k = expr.args
+                yield expr, k
+            elif is_true_cst(expr):
+                continue
+            elif is_false_cst(expr):
+                if self.env["verbosity"]:
+                    self.log("explanation raised infeasible")
+                raise Infeasible
+            else:
+                assert False, f"Unsupported expl: {expr}"
+
+        self.check_max_iterations(len(self.env["cuts"]))
+        if feasible and frm == "MIPSOL":
+            if self.env["verbosity"]:
+                self.log("found feasible", verbosity=2)
+            self.env["found_feasible"] = feasible
 
     def get_solution_callback(self):
         from gurobipy import GRB
@@ -773,42 +835,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     case GRB.Callback.MIPSOL:  # Integer solution
                         x_enc_a = {x_enc_i: cbGetVal(x_enc_i, what.cbGetSolution) for x_enc_i in all_xs}
                         frm = "MIPSOL"
-                        if self.env["debug"]:
-                            assert is_integer_solution(x_enc_a.values()), (
-                                f"Expected integer solution for MIP, but got {x_enc_a}"
-                            )
                     case _:
                         return
 
-                feasible = True  # assume feasible
-                for expr in self._explain_assignment(x_enc_a, frm=frm):
-                    if isinstance(expr, Comparison) and expr.name == "<=":
-                        feasible = False  # any expr means not feasible
-                        assert isinstance(expr.args[0], Operator)
-                        expr, k = expr.args
-                        cut = self._make_numexpr(expr) <= k
-                        what.cbLazy(cut)
-                    elif is_true_cst(expr):
-                        continue
-                    elif is_false_cst(expr):
-                        if self.env["verbosity"]:
-                            self.log("explanation raised infeasible")
-                        raise Infeasible
-                    else:
-                        assert False, f"Unsupported expl: {expr}"
-
-                    # if explanation:
-                    #     # grbs = [self.solver_var(X_enc[c]) for c in explanation]
-                    #     # cut = gp.quicksum(grbs) <= len(grbs) - 1.0
-                    #     # what.cbLazy(cut)
-                    # elif explanation is False:
-                    #     raise Infeasible
-
-                self.check_max_iterations(len(self.env["cuts"]))
-                if feasible and frm == "MIPSOL":
-                    if self.env["verbosity"]:
-                        self.log("found feasible", verbosity=2)
-                    self.env["found_feasible"] = feasible
+                for expr, k in self.solution_callback_inner(x_enc_a, frm):
+                    cut = self._make_numexpr(expr) <= k
+                    what.cbLazy(cut)
             except Exception as e:
                 self.native_model._callback_exception = e
                 what.terminate()
@@ -830,14 +862,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
         else:
             (X, C_enc, k) = explanation
             expr = cp.sum(C_enc[X] * X_enc[X]) <= k
+            if self.env["verbosity"]:
+                self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2)
+                self.log(f"  == {expr}", indent=2, verbosity=2)
+
         if isinstance(expr, (bool, np.bool)):
             expr = cp.BoolVal(expr)
 
-        if self.env["verbosity"]:
-            self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2)
-            self.log(f"  == {expr}", indent=2, verbosity=2)
-
-        self.env["cuts"][-1]["expr"] = expr
+        if self.env["debug"]:
+            self.env["cuts"][-1]["expr"] = expr
 
         # if self.env["debug"]:
         #     self.check_explanation(expr, X_enc, A_enc, T_enc, table)
@@ -849,6 +882,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def _explain_assignment(self, x_enc_a, frm=None):
         # If fully integer, we can check if the tables are feasible yet
+        if self.env["verbosity"]:
+            self.log("EXPLAIN", frm, x_enc_a, verbosity=2)
+
         for i, (X_enc, T_enc, parts, table) in enumerate(self.tables, start=INDEX):
             # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
             A_enc = np.fromiter((x_enc_a[x_enc_i] for x_enc_i in X_enc), dtype=float)
@@ -856,22 +892,28 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # A_enc_ = assign_mipsol(A_enc)
 
             # TODO figure out when can be skipped
-            # if frm == "MIPNODE-OPT" and is_integer_solution(A_enc) and
-            if frm == "MIPSOL":
-                if (T_enc[:] == A_enc_).all(1).any():
-                    if self.env["verbosity"]:
-                        self.log(
-                            f"table {i}/{len(self.tables)} feasible by {A_enc_}\n\n{np.astype(T_enc, int)}",
-                            verbosity=3,
-                        )
-                    # assert False
-                    # assert table.value() # TODO after assigning _value
-                    continue
-                elif self.env["verbosity"]:
+            if (frm == "MIPSOL" or is_integral(A_enc).all()) and (T_enc == A_enc_).all(1).any():
+                if self.env["verbosity"]:
                     self.log(
-                        f"table {i}/{len(self.tables)} INfeasible by {A_enc}\n\n{np.astype(T_enc, int)}",
-                        verbosity=3,
+                        f"table {i}/{len(self.tables)} feasible",
+                        verbosity=2,
                     )
+                    self.log(
+                        f"by {A_enc_}\n\n{np.astype(T_enc, int)}",
+                        verbosity=3,
+                        indent=2,
+                    )
+                continue
+            elif self.env["verbosity"]:
+                self.log(
+                    f"table {i}/{len(self.tables)} INfeasible",
+                    verbosity=3,
+                )
+                self.log(
+                    f"by {A_enc_}\n\n{np.astype(T_enc, int)}",
+                    verbosity=3,
+                    indent=2,
+                )
 
             try:
                 # encode assignment
@@ -918,7 +960,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def solutions_checker(self):
         return cp.solvers.utils.solutions(
-            self.env["checker"], X=self.user_vars, projected_solution_limit=None
+            self.env["checker"], X=sorted(self.user_vars, key=lambda x: x.name), projected_solution_limit=None
         )[1]
 
     def check_explanation(self, expr, X_enc, A_enc, T_enc, frm):
@@ -946,7 +988,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["checker"] and self.env["feasible"]:
             repeated = expr in self.env["checker"].constraints
-            self.env["checker"] += expr
+            # self.env["checker"] += expr
 
             # nsols = self.env["checker"].solveAll()
             # assert nsols >= 3, (
@@ -972,11 +1014,31 @@ class CPM_lazy_gurobi(CPM_gurobi):
             remaining = without(actual_solutions, expected_solutions)
             assert len(np.unique(actual_solutions, axis=0)) == len(actual_solutions)
 
+            self.env["cuts"][-1]["remain"] = remaining
+            self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
+            # print(expected_solutions)
+            # print(actual_solutions)
+            print(remaining)
+            if len(self.env["cuts"]) >= 2:
+                removed = without(self.env["cuts"][-2]["remain"], remaining)
+                print(
+                    "A",
+                    self.user_vars,
+                    tuple(
+                        x.value()
+                        for x in sorted(self.user_vars, key=lambda x: x.name)
+                        if x.value() is not None
+                    ),
+                )
+                print("REMOVED")
+                print(removed)
+
             strength = (
-                self.env["cuts"][-2]["remain"] - len(remaining)
+                len(self.env["cuts"][-2]["remain"]) - len(self.env["cuts"][-1]["remain"])
                 if len(self.env["cuts"]) >= 2
                 else self.env["remain"] - len(remaining)
             )
+            self.env["cuts"][-1]["strength"] = strength
             if not repeated:
                 self.log(self.env["checker"], verbosity=4)
                 self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
@@ -988,10 +1050,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(f"STRENGTH == {strength}", verbosity=2)
 
             # assert repeated or strength
+            assert strength
 
-            self.env["cuts"][-1]["strength"] = strength
-            self.env["cuts"][-1]["remain"] = len(remaining)
-            self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
             assert len(expected_solutions) <= len(actual_solutions), (
                 f"Missing sols:\n\n{show_assignments(expected_solutions)}\n\n {show_assignments(actual_solutions)}\n\n{self.env['checker']}"
             )
@@ -1042,8 +1102,25 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("Solving.. ")
 
         try:
-            solution_callback = self.get_solution_callback()
-            hassol = super().solve(solution_callback=solution_callback, time_limit=time_limit, **kwargs)
+            if self.env["checker"]:
+                # slv = CPM_ortools(cpm_model=self.env["checker"])
+                for iteration in itertools.count():
+                    hassol = self.env["checker"].solve(solver="ortools", time_limit=time_limit, **kwargs)
+                    all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
+                    x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
+                    # show_assignment(x_enc_a)
+                    self.check_max_iterations(iteration)
+                    self.solution_callback_inner(x_enc_a, "MIPSOL")
+                    for expr, k in self.solution_callback_inner(x_enc_a, "MIPSOL"):
+                        self.env["checker"] += [expr <= k]
+                    if self.env["found_feasible"]:
+                        break
+            else:
+                hassol = super().solve(
+                    solution_callback=self.get_solution_callback(),
+                    time_limit=time_limit,
+                    **kwargs,
+                )
 
             if hassol:
                 # if self.env["debug"]:
@@ -1071,10 +1148,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["verbosity"]:
                     self.log("Also exception during stats:", e_)
             raise e
-
-        if "PYTEST_CURRENT_TEST" not in os.environ:
-            for field, stat in self.stats().items():
-                print(f"c Stat={field}={stat}")
 
         # TODO recheck https://or.stackexchange.com/questions/12591/ensure-gurobi-uses-callback-on-all-feasible-solutions It looks like if the solution at the end of the root node is integer, gurobi doesn't pass through callbacks for fractional solutions.
 

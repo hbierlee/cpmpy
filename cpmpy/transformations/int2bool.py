@@ -212,7 +212,8 @@ class IntVarEnc(ABC):
         for x_enc_i in x_enc:
             lit, _ = get_or_make_var(x_enc_i, csemap=csemap)
             # we can remove the definining constraints as the int var will be replaced
-            lit.name = f"⟦{x_enc_i}⟧"
+            if lit.name != x_enc_i.name:
+                lit.name = f"⟦{x_enc_i}⟧"
             self._xs.append(lit)
         self._xs = cp.cpm_array(self._xs)
 

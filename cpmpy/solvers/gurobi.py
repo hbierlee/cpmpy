@@ -45,6 +45,7 @@
 from typing import Optional, List
 import time
 from enum import Enum
+import pathlib
 
 
 from .solver_interface import SolverInterface, SolverStatus, ExitStatus, Callback
@@ -198,7 +199,7 @@ class CPM_gurobi(SolverInterface):
         except PackageNotFoundError:
             return None
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.DEFAULT, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.DEFAULT, output_stats=False, **kwargs):
         """
         Constructor of the native solver object
 
@@ -214,6 +215,8 @@ class CPM_gurobi(SolverInterface):
 
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
         self.grb_model = gp.Model(env=GRB_ENV)
+        self.output_stats = output_stats
+        self.verbose = verbose
 
         if encoding == Encoding.XCSP3:
             def xcsp3_decompose(self):
@@ -272,6 +275,9 @@ class CPM_gurobi(SolverInterface):
             Table.decompose = bool_decompose
         elif encoding == Encoding.MDD:
             pass
+
+        if verbose:
+            pathlib.Path("/tmp/encoding.txt").unlink(missing_ok=True)
 
 
         # initialise everything else and post the constraints/objective
@@ -334,9 +340,10 @@ class CPM_gurobi(SolverInterface):
             self.add(intvar(1, 1) == 1)
         
         # call the solver, with parameters
-        for param, val in kwargs.items():
+        for param, val in ({"Threads": 1} | kwargs).items():
             self.grb_model.setParam(param, val)
 
+        assert self.native_model.Params.Threads == 1
         _ = self.grb_model.optimize(callback=solution_callback)
         grb_objective = self.grb_model.getObjective()
 
@@ -392,6 +399,12 @@ class CPM_gurobi(SolverInterface):
         else: # clear values of variables
             for cpm_var in self.user_vars:
                 cpm_var._value = None
+
+        if self.output_stats:
+            for field, stat in self.stats().items():
+                print(f"c Stat={field}={stat}")
+
+
 
         return has_sol
 
@@ -544,8 +557,16 @@ class CPM_gurobi(SolverInterface):
       # add new user vars to the set
       get_variables(cpm_expr_orig, collect=self.user_vars)
 
+      if self.verbose:
+        with open("/tmp/encoding.txt", "a") as f:
+          print(f"C", cpm_expr_orig, file=f)
+          print("X", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables(cpm_expr_orig)), file=f)
+
+
       # transform and post the constraints
       for cpm_expr in self.transform(cpm_expr_orig):
+        if self.verbose:
+          print("  ", cpm_expr, file=open("/tmp/encoding.txt", "a"))
         if self.time_limit is not None:
             runtime = time.time() - self.time
             if runtime > self.time_limit:
@@ -762,4 +783,11 @@ class CPM_gurobi(SolverInterface):
                     self.cpm_status.exitstatus = ExitStatus.OPTIMAL
         # if unsat or timout with no solution, .solve() will have already set the state accordingly (so nothing to update)
 
+
         return opt_sol_count
+
+    def stats(self):
+        return {
+            "constraints": self.native_model.NumConstrs,
+        }
+

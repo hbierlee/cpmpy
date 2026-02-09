@@ -30,10 +30,10 @@ import json
 import pathlib
 import statistics
 import re
-import matplotlib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
 
 FIELDNAMES = [
     "year",
@@ -58,6 +58,7 @@ FIELDNAMES = [
     "n_cuts_explained",
     "n_cuts_unexplained",
     "time_cb",
+    "constraints",
 ]
 
 
@@ -138,6 +139,130 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
 
     return fig
 
+def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None):
+    """
+    Create a scatter plot comparing the performance of two solvers.
+
+    Parameters
+    ----------
+    df : DataFrame
+        DataFrame containing solver results with columns: alias, instance, and metric
+    solver1 : str, optional
+        Name of the first solver (x-axis). If None, uses the first solver in the dataframe.
+    solver2 : str, optional
+        Name of the second solver (y-axis). If None, uses the second solver in the dataframe.
+    metric : str, default="time_solve"
+        The metric to compare (e.g., "time_solve", "time_total")
+    time_limit : float, optional
+        Maximum time limit for the axes. If specified, unsolved instances are plotted at time_limit.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The generated scatter plot figure
+    """
+    # Get unique solvers
+    solvers = df['alias'].unique()
+
+    # Determine which solvers to compare
+    if solver1 is None:
+        solver1 = solvers[0]
+    if solver2 is None:
+        solver2 = solvers[1] if len(solvers) > 1 else solvers[0]
+
+    if solver1 not in solvers or solver2 not in solvers:
+        raise ValueError(f"Solvers {solver1} and/or {solver2} not found in dataframe. Available: {solvers}")
+
+    df1 = df[df['alias'] == solver1][['instance', metric, 'solved', inst_metric, 'small']].copy()
+    df2 = df[df['alias'] == solver2][['instance', metric, 'solved', inst_metric, 'small']].copy()
+
+    # Merge on instance to get paired data
+    merged = df1.merge(df2, on='instance', suffixes=('_1', '_2'))
+
+    # Handle unsolved instances
+    if time_limit is not None:
+        merged[f'{metric}_1'] = merged[f'{metric}_1'].fillna(time_limit)
+        merged[f'{metric}_2'] = merged[f'{metric}_2'].fillna(time_limit)
+    else:
+        # Drop instances where either solver didn't solve it
+        merged = merged.dropna(subset=[f'{metric}_1', f'{metric}_2'])
+
+    # Extract x and y coordinates
+    x = merged[f'{metric}_1'].values
+    y = merged[f'{metric}_2'].values
+
+    inst_metrics = merged[f'{inst_metric}_1'].values
+
+    # Create figure
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    # Use log normalization if the range is large
+    vmin, vmax = inst_metrics.min(), inst_metrics.max()
+
+    # Create colormap and set colors for special cases
+    cmap = plt.cm.get_cmap('viridis').copy()
+    SET_MIN = None
+    if SET_MIN:
+        cmap.set_under('red')
+
+    # cmap.set_bad('blue')  # Color for masked values (small instances)
+
+    # Plot scatter points colored by median
+    scatter = ax.scatter(
+            x,
+            y,
+            c=inst_metrics,
+            alpha=0.6,
+            s=50,
+            cmap=cmap,
+            edgecolors='black',
+            linewidth=0.5,
+            norm=LogNorm(
+                vmin=max(vmin, 1e-10) if SET_MIN is None else SET_MIN,
+                vmax=vmax
+                ),
+            )
+
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label(f'{inst_metric} table size', rotation=270, labelpad=20)
+
+    # Plot diagonal line (y=x)
+    max_val = max(x.max(), y.max())
+    min_val = min(x.min(), y.min())
+    ax.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=1.5, label='Equal performance', zorder=0)
+
+    # Set plot properties
+    ax.set_xlabel(f'{solver1} - {metric} (seconds)')
+    ax.set_ylabel(f'{solver2} - {metric} (seconds)')
+
+    # Get unique year-track combinations
+    year_track_pairs = df[['year', 'track']].drop_duplicates()
+    datasets = ', '.join([f'{row.year}:{row.track}' for _, row in year_track_pairs.iterrows()])
+
+    # Count wins
+    solver1_wins = sum(1 for i in range(len(x)) if x[i] < y[i])
+    solver2_wins = sum(1 for i in range(len(x)) if x[i] > y[i])
+    ties = sum(1 for i in range(len(x)) if np.isclose(x[i], y[i], rtol=1))
+
+    ax.set_title(f"Scatter Plot: {solver1} vs {solver2} ({datasets})\n"
+                 f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}")
+    ax.grid(True, alpha=0.3)
+
+    # Use log scale if there's a wide range
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+
+    # Set axis limits
+    if time_limit is not None:
+        ax.set_xlim(0, time_limit * 1.1)
+        ax.set_ylim(0, time_limit * 1.1)
+
+    ax.legend()
+    plt.tight_layout()
+
+    return fig
+
 def get_cost(row):
     """
     Get the achieved objective value from the provided row.
@@ -210,6 +335,38 @@ def xcsp3_objective_performance_profile(df):
 
     return fig
 
+def check_inconsistent_instances(df):
+    """
+    Check for instances that have both SAT and UNS results across different solvers/runs.
+    This indicates an inconsistency that should be investigated.
+    """
+    inconsistent = []
+
+    for (problem, instance), group in df.groupby(['problem', 'instance']):
+        statuses = set(group['status'].unique())
+
+        # Check if both SAT and UNS appear
+        if SAT in statuses and UNS in statuses:
+            # Get only the solvers that returned UNS
+            uns_results = group[group['status'] == UNS][['alias', 'time_total']]
+            uns_solvers = [(row['alias'], row['time_total']) for _, row in uns_results.iterrows()]
+
+            inconsistent.append({
+                'problem': problem,
+                'instance': instance,
+                'statuses': statuses,
+                'uns_solvers': uns_solvers
+            })
+
+    if inconsistent:
+        print("\n== INCONSISTENT INSTANCES (both SAT and UNS) ==")
+        for item in inconsistent:
+            uns_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in item['uns_solvers']])
+            print(f"{item['problem']}-{item['instance']}: UNS from [{uns_info}]")
+        print(f"\nTotal inconsistent instances: {len(inconsistent)}")
+
+    return inconsistent
+
 def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
 
     if False:  # TODO FutureWarning: The behavior of Series.idxmax with all-NA values, or any-NA and skipna=False, is deprecated. In a future version this will raise ValueError
@@ -218,41 +375,39 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             if slowest_idx is not None and not pd.isna(slowest_idx):
                 print(f"Slowest {phase}: {df.loc[slowest_idx, f'time_{phase}']}s ({df.loc[slowest_idx, 'instance']}, {df.loc[slowest_idx, 'solver']})")
 
-    print("Solvers", df[['alias', 'solver_kwargs']])
+    # TODO show each unique solver+solver_kwargs row
+    # print("Solvers", df[['alias', 'solver_kwargs']].nunique())
 
+    problems = df['problem'].unique()
     print("Problems", df['problem'].unique())
+    # df = df[df["problem"].isin(problems[:2])]
 
+    # Check for inconsistent instances
+    check_inconsistent_instances(df)
 
-    diff = "Δ"
-    df.insert(df.columns.get_loc("time_solve"), diff, df.groupby(['instance'])["time_solve"].diff())
-    # df["rows"], df["count"] = df["file_name"].map(get_metadata)
     pd.set_option('display.float_format', '{:0.1f}'.format)
 
     df["post"] = ~df["time_post"].isna()
     df["cuts"] = df["n_cuts"] + df["n_cuts_explained"]
+    df["lp_cuts"] = df["n_cuts_explained"]
+    df["no_cuts"] = df["n_cuts_unexplained"]
     df["cb_rel"] = 100 * (df["time_cb"] / df["time_total"])
     df["time_pc"] = (df["time_cb"] / df["cuts"]) * 1000
     df = df.sort_values(by=["problem", "instance", "alias"])
 
 
-    SHOW_DIFF = False
-    if SHOW_DIFF:
-        df = df.drop(df[df["alias"] == "base_gurobi"].index)
-
-    if True:
+    if False:
         print("RESULTS")
-        print(df
+        df_ =df[[
               # .where(df["status"] == OPT)
-              [[
             "problem",
             "instance",
+            # "small",
             "rows",
             # "mean",
             "median",
             "stdev",
-            ] + ([] if SHOW_DIFF else ["alias"])
-             + [
-            diff,
+            # "alias",
             "status",
             "method",
             "obj",
@@ -260,23 +415,28 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             "time_parse",
             "time_post",
             "time_solve",
-            "time_cb",
+            # "time_cb",
             "cb_rel",
-            "time_pc",
+            # "time_pc",
             "cuts",
+            # "lp_cuts",
+            # "no_cuts",
+            "constraints",
             # "exception",
-        ]].sort_values(by=
+        ]]
+
+        if len(df_) == 1:
+            print(df_.loc[0])
+        else:
+            print(df_.sort_values(by=
                        [
-                           "rows",
+                           # "rows",
                            "problem",
                            "instance",
                            "alias"
                            ]
                        # ["time_total"]
-                       + ([] if SHOW_DIFF else ["alias"])
                        ))
-    if SHOW_DIFF:
-        exit(0)
 
     # print(df[["instance", "status", "is_err"]].sort_values(by=["instance"]))
 
@@ -297,13 +457,18 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
         groups = df.groupby(grouping).agg(
                 alias = ("alias", "first"),
                 insts = ("problem", 'count'),
+                min_ = ("min", 'min'),
+                max_ = ("max", 'max'),
                 median = ('median', 'first'),
-                stdev = ('stdev', 'first'),
+                rows = ('rows', 'first'),
+                # stdev = ('stdev', 'first'),
                 # t_totl_hr = ('time_total', 'sum'),
                 t_totl_p2 = ('time_total_p2', 'mean'),
                 t_post_p2 = ('time_post_p2', 'mean'),
                 t_solv_p2 = ('time_solve_p2', 'mean'),
+                # diff = ("diff", 'mean'),
                 # insts = ('status', 'count'),
+                status = ('status', 'first'),
                 err = ('error', 'sum'),
                 unk = ('unknown', 'sum'),
                 mem = ('memory', 'sum'),
@@ -311,6 +476,9 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 feas = ('feasible', 'sum'),
                 solv = ('solved', 'sum'),
                 cuts = ('cuts', 'mean'),
+                lp_cuts = ('lp_cuts', 'mean'),
+                no_cuts = ('no_cuts', 'mean'),
+                constraints = ('constraints', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
                 time_pc = ('time_pc', 'mean'),
                 method = ('method', 'first'),
@@ -320,52 +488,68 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
         track, = df["track"].unique()
         is_cop = "COP" in track
 
+        # TODO sort by given key from CLI arg
+        # groups_ = groups_.reset_index().sort_values(by=["min_", *grouping]).set_index(grouping)
 
-        groups = groups[[
-            # *(["insts"] if PER_PROBLEM else ["insts"]),
-            *([] if grouping_type == "per_alias" else [
-                "median",
-                "stdev",
-                ]),
-            *([
-                "t_post_p2",
-                "t_solv_p2",
-                ]),
-            *(["method","obj"] if grouping_type == "per_inst" else []),
+        groups_ = groups[[
             *([
                 "insts",
+                "min_",
+                "max_",
                 "err",
                 "unk",
                 "mem",
                 "post",
-                ]),
+            ] if not grouping_type == "per_inst" else ["median", "status"]),
+            # *(["insts"] if PER_PROBLEM else ["insts"]),
             *([
-                "feas",
-            ] if is_cop else []),
+                "t_post_p2",
+                "t_solv_p2",
+            ]),
+            *(["method","obj"] if grouping_type == "per_inst" else []),
+            *(["feas"] if is_cop else []),
             *([
                 "solv",
                 "cuts",
+                "lp_cuts",
+                "no_cuts",
+                "constraints",
                 "cb_rel",
                 "time_pc",
             ]),
         ]]
 
 
-        # groups = groups.sort_index(level=["problem"], by="rows")
-        # groups = groups.sort_values(by="rows", ascending=False)
-        if "t_totl_hr" in groups:
-            groups["t_totl_hr"] = groups["t_totl_hr"].map(lambda x: x / 3600)
-        if "rows" in groups:
-            groups["rows"] = groups["rows"].map(lambda x: f"{x:.1e}")
-        # groups.loc[('Total')] = groups.sum(numeric_only=True)
+        if "t_totl_hr" in groups_:
+            groups_["t_totl_hr"] = groups_["t_totl_hr"].map(lambda x: x / 3600)
+        if "rows" in groups_:
+            groups_["rows"] = groups_["rows"].map(lambda x: f"{x:.1e}")
 
         print(f"\n== {grouping_type} ==")
-        print(groups)
+        print(groups_)
+
+        # Show diff for all consecutive rows
+        diff_cols = [c for c in groups.columns if c in ["t_post_p2", "t_solv_p2", "unk", "mem", "post", "solv"]]
+
+        # TODO add cli arg to determine baseline alias
+        baseline = "base_gurobi-gleb."
+        diff_ = groups
+        # TODO show diff for each solver to the baseline (rather than to each other by comparing to the previous row)
+        diff_[diff_cols] = groups[diff_cols].diff()
+        diff_ = diff_.drop(index=baseline, level=grouping[-1] if diff_.index.nlevels > 1 else None)
+
+        print("DIFF")
+        print(diff_)
+
+        # Compute correlations
+        if grouping_type == "per_inst":
+            correlation = diff_[['t_solv_p2', 'median']].corr()
+            print("\n== Correlation between t_solv_p2 and median ==")
+            with pd.option_context('display.float_format', '{:.6f}'.format):
+                print(correlation)
 
         if tex and grouping_type == "per_alias":
             n_instances = len((df["problem"] + "-" + df["instance"]).unique())
-
-            # n_instances = df.groupby(['problem','instance']).nunique()
 
             track, = df["track"].unique()
             track = track[:3]
@@ -403,12 +587,20 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
             ))
 
 
-    errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception"]]
+    errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception", "traceback"]]
     if not errors.empty:
         print("== ERRORS ==")
+        for idx, error in errors.iterrows():
+            print(f"\n[{error['problem']}/{error['instance']} - {error['alias']}]")
+            print(f"Status: {error['status']} | Time: {error['time_total']:.2f}s")
+            if pd.notna(error['exception']):
+                print(f"Exception: {error['exception']}")
+            if pd.notna(error['traceback']):
+                print(f"Traceback:\n{error['traceback']}")
+
+    # if not errors.empty:
         # exc = df[df["status"] == ERR]
         # exc["file"] = exc["problem"] + "-" + exc["instance"]
-        print(errors)
         # print(", ".join(str(x)[:100] for x in df["exception"].unique()))
         # print(", ".join(str(x)[:100] for x in df["exception"].unique()))
 
@@ -455,12 +647,13 @@ def main():
     parser.add_argument('--tex', action='store_true', default=None, help='Output tables in tex')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
+    parser.add_argument('--common-instances', action='store_true', help='Only show instances which occur for all solvers')
     parser.add_argument('--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
     parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, glob_alias=None, glob_instance=None, tex=False):
+def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, common_instances=False, glob_alias=None, glob_instance=None, tex=False):
 
     import subprocess
     if sync:
@@ -492,7 +685,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     for i, file in csv_files:
         print("Reading", file)
         df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
-        df["run"] = chr(65 + i)
+        df["run"] = chr(65 + i) if True else str(file.parent)
         dfs.append(df)
     
     df = pd.concat(dfs, ignore_index=True)
@@ -534,7 +727,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
         return [metadata.get("method", None), sum(rowss), min_(rowss), max_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
 
-    df[["method", "rows", "min", "max", "count", "mean","median", "stdev"]] = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
+    df[["method", "rows", "min", "max", "count", "mean", "median", "stdev"]] = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
 
 
     # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
@@ -542,13 +735,10 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     # df["obj"] = df.where(df["method"] == "minimize", -df["obj"], df["obj"])
     # df["obj"] = df.map(lambda x: -x["obj"] if x["method"] == "minimize" else x["obj"])
     # df = df.drop(df[df["max"] <= 25].index)
-    print(df[["instance", "median", "stdev", "min", "max"]])
-    # assert False
 
-
-
-
-
+    # TODO add "small" as CLI argument
+    df["small"] = df["max"] <= 100
+    # df = df.drop(df[df["small"]].index)
 
     # let solve include post time?
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
@@ -559,8 +749,6 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     for col, glob in [("alias", glob_alias), ("problem", glob_instance), ("track", "COP")]:
         if glob:
             df = df.drop(df[~df[col].map(lambda g: any(g_ in g for g_ in glob))].index)
-
-
 
 
     # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
@@ -579,44 +767,47 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     df["feasible"] = df["status"].isin((OPT, SAT, UNS))
     df["solved"] = df["status"].isin(solved)
 
+
     # replace time_solve to NaN if not solved
-    df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
-
-
-
-    # # temporarily drop all instances where there are any errors
-    # print(df)
-    # print(df.columns)
-    # # statuses = df.apply(lambda x: df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique())
-    # statuses = df.group(by=["problem", "instance"]).unique()
-    # print(statuses)
-    # assert False
-
-    # if no_errors:
-    #     df = df.drop(df[df['instance'].map(lambda x: ERR in df[df["instance"] == x & df["instance"] == x]["status"].unique())].index)
+    # df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
+    df["time_solve"] = df["time_solve"].where(df["status"].isin(solved), 2*time_limit)
 
     if solved_only:
         df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset(solved), axis=1)]
+
+    if common_instances:
+        # Filter to only keep instances that occur for all solvers
+        total_solvers = df['alias'].nunique()
+        instance_solver_counts = df.groupby(['problem', 'instance'])['alias'].nunique()
+        valid_instances = instance_solver_counts[instance_solver_counts == total_solvers].index
+        df = df.set_index(['problem', 'instance']).loc[valid_instances].reset_index()
 
     assert not df.empty
 
     # Print some stats
     xcsp3_stats(df, time_limit=time_limit, save=save, tex=tex)
-    
-    fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
-    # fig = xcsp3_objective_performance_profile(merged_df)
 
-    # Save or show plot
     if plot:
+        # Save or show plot
+        fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
         fig.savefig(plot.with_suffix(".png"), bbox_inches='tight')
         fig.savefig(plot.with_suffix(".svg"), bbox_inches='tight')
         print(f"Plot saved to {plot}.{{png,svg}}")
-    # else:
-    #     plt.show()
 
-    if len(df) == 1:
-        print(df.loc[0])
-
+        aliases = sorted(df["alias"].unique())
+        if len(aliases) == 2 and plot:
+            fig = xcsp3_scatter_plot(
+                    df,
+                    solver1=aliases[0],
+                    solver2=aliases[1],
+                    time_limit=time_limit,
+                    inst_metric="max",
+                    # metric="time_post"
+                    )
+            scatter = plot.with_name("scatter")
+            fig.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
+            fig.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
+            print(f"Plot saved to {scatter}.{{png,svg}}")
 
 
 if __name__ == '__main__':
