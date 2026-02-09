@@ -689,7 +689,7 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     for i, file in csv_files:
         print("Reading", file)
         df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
-        df["run"] = chr(65 + i)
+        df["run"] = chr(65 + i) if True else str(file.parent)
         dfs.append(df)
     
     df = pd.concat(dfs, ignore_index=True)
