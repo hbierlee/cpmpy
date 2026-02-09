@@ -46,8 +46,11 @@ from typing import Optional, List
 import time
 from enum import Enum
 import pathlib
+import numpy as np
 
-
+import cpmpy as cp
+from cpmpy.expressions.globalconstraints import Table
+from cpmpy.expressions.utils import dom_size
 from .solver_interface import SolverInterface, SolverStatus, ExitStatus, Callback
 from ..exceptions import NotSupportedError
 from ..expressions.core import *
@@ -63,38 +66,7 @@ from ..transformations.normalize import toplevel_list
 from ..transformations.reification import only_implies, reify_rewrite, only_bv_reifies
 from ..transformations.safening import no_partial_functions, safen_objective
 from cpmpy.expressions.globalconstraints import Table
-
-
 from cpmpy.expressions.utils import dom_size
-
-# TODO find better place
-
-class Feature(Enum):
-    def __repr__(self):
-        return repr(self.value)
-
-    def __str__(self):
-        return self.value
-
-
-class Encoding(Feature):
-    DEFAULT = "default"
-    GLEB = "gleb"
-    GLEB_BOOL = "gleb_bool"
-    MDD = "mdd"
-
-import types
-
-
-
-
-from cpmpy.expressions.globalconstraints import Table
-
-from cpmpy.expressions.utils import dom_size
-
-
-import types
-
 
 class Feature(Enum):
     def __repr__(self):
@@ -108,7 +80,7 @@ class Encoding(Feature):
     XCSP3 = "xcsp3"
     GLEB = "gleb"
     BOOL_GLEB = "bool-gleb"
-    MDD = "mdd"
+    # MDD = "mdd" # TODO removed for now so all available encodings are tested
 
 
 def trivial_decomposition(arr, tab):
@@ -116,6 +88,8 @@ def trivial_decomposition(arr, tab):
         return [False], []
     elif len(tab) == 1:
         return [(x == tab[0][i]) for i, x in enumerate(arr)], []
+    else:
+        assert False, f"non-trivial {arr} {tabl}"
 
 def encode_intvar_as_bool(arr):
     shape = sum([dom_size(x) for x in arr])
@@ -127,11 +101,6 @@ def encode_intvar_as_bool(arr):
         cons += [x == cp.sum(bv[offset:offset+dom_size(x)] * range(x.lb, x.lb + dom_size(x)+1))]
         offset += dom_size(x)
     return bv, cons
-
-
-
-
-
 
 try:
     import gurobipy as gp
@@ -199,6 +168,38 @@ class CPM_gurobi(SolverInterface):
         except PackageNotFoundError:
             return None
 
+    def encode_table_constraint(self, X, T):
+
+        def encode(X, T):
+            dom_sizes = [dom_size(x) for x in X]
+            width = sum(dom_sizes)
+            T_enc = np.zeros((len(T), width), dtype=np.bool)
+
+            for i, row in enumerate(T):
+                offset = 0
+                for x, x_width, a in zip(X, dom_sizes, row):
+                    try:
+                        T_enc[i, offset + a - x.lb] = True
+                    except IndexError:
+                        np.delete(T_enc, i)
+                    offset += x_width
+            return T_enc
+
+        T_enc = encode(X, T)
+
+        cons = []
+        for x in X:
+            x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
+                self.ivarmap, x, "direct", csemap=self._csemap
+            )
+            expr, k = x_enc.encode_term()
+            # TODO if only BV, then need to assign (but no need to assign if decoding constraint present)
+            # Note: do not use self += [..] to avoid poluting user_vars (and transformation is not really necesary either)
+            cons += exactly_one_con
+            cons += [cp.sum(c * b for c, b in expr) - x == -k]
+
+        return [self.ivarmap[x.name] for x in X], T_enc, cons
+
     def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.DEFAULT, output_stats=False, **kwargs):
         """
         Constructor of the native solver object
@@ -217,6 +218,7 @@ class CPM_gurobi(SolverInterface):
         self.grb_model = gp.Model(env=GRB_ENV)
         self.output_stats = output_stats
         self.verbose = verbose
+        self.ivarmap = dict()
 
         if encoding == Encoding.XCSP3:
             def xcsp3_decompose(self):
@@ -253,28 +255,27 @@ class CPM_gurobi(SolverInterface):
             Table.decompose = gleb_decompose
 
         elif encoding == Encoding.BOOL_GLEB:
-            def bool_decompose(self):
-                arr, tab = self.args
-                if len(tab) < 2:
-                    return trivial_decomposition(arr, tab)
-                T_enc = cp.solvers.lazy_gurobi.encode(arr, tab)
-                cons = []
-                arr_enc, new_cons = encode_intvar_as_bool(arr)
-                cons += new_cons
+            def bool_decompose(self_):
+                X, T = self_.args
+
+                if len(T) < 2:
+                    return trivial_decomposition(X, T)
+
+                # Encode table T to 01 table `T_enc` and X variables to encodings `X_enc`
+                X_enc, T_enc, cons = self.encode_table_constraint(X, T)
 
                 row_selected = cp.boolvar(shape=len(T_enc))
-
-                nptab = np.array(T_enc)
-
-                cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr_enc)]
+                # For an encoding `x_enc`, the encoding variables are in `x_enc.xs_`, so we can iter over each integer variable, then over each of its encoding variables
+                # Then enforce for each column `i` and its associated encoding variable `b_i`, enforce it to be equal to whatever row is selected
+                cons += [b_i == cp.sum(row_selected * col) for b_i, col in zip((b_i for x_enc in X_enc for b_i in x_enc._xs), T_enc.T)]
                 cons += [cp.sum(row_selected) == 1]
 
                 return cons, []
 
 
             Table.decompose = bool_decompose
-        elif encoding == Encoding.MDD:
-            pass
+        # elif encoding == Encoding.MDD:
+        #     pass
 
         if verbose:
             pathlib.Path("/tmp/encoding.txt").unlink(missing_ok=True)

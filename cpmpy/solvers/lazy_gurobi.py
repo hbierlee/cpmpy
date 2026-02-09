@@ -170,22 +170,6 @@ def union(sets):
     return set.union(*sets) if sets else set()
 
 
-def encode(X, T):
-    dom_sizes = [dom_size(x) for x in X]
-    width = sum(dom_sizes)
-    T_enc = np.zeros((len(T), width), dtype=np.bool)
-
-    for i, row in enumerate(T):
-        offset = 0
-        for x, x_width, a in zip(X, dom_sizes, row):
-            try:
-                T_enc[i, offset + a - x.lb] = True
-            except IndexError:
-                np.delete(T_enc, i)
-            offset += x_width
-    return T_enc
-
-
 class Heuristic(Feature):
     INPUT = "input"
     GREEDY = "greedy"
@@ -754,7 +738,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["cuts"][-1]["shrunk"] = shrunk
             show_cut()
 
-
         if self.env["coverlift"]:
             if self.env["verbosity"]:
                 Xl = X.sum()
@@ -765,7 +748,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             show_cut()
 
         self.env["cuts"][-1]["size"] = len(X)
-
 
         return X, C_enc, k
 
@@ -1169,7 +1151,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return [cp.BoolVal(False)]
             assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
 
-            T_enc = encode(X, T)
+            X_enc, T_enc, cons = self.encode_table_constraint(X, T)
+            X_enc = np.fromiter((x_enc_i for x_enc in X_enc for x_enc_i in x_enc._xs), _BoolVarImpl)
 
             if self.env["verbosity"]:
                 self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
@@ -1177,22 +1160,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(T, verbosity=3)
                 self.log("T_enc =", verbosity=3)
                 self.log(np.astype(T_enc, int), verbosity=3)
-
-            cons = []
-            for x in X:
-                x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
-                    self.ivarmap, x, "direct", csemap=self._csemap
-                )
-                expr, k = x_enc.encode_term()
-                # TODO if only BV, then need to assign (but no need to assign if decoding constraint present)
-                # Note: do not use self += [..] to avoid poluting user_vars
-                cons += self.transform([*exactly_one_con, cp.sum(c * b for c, b in expr) + k == x])
-
-            x_encs = [self.ivarmap[x.name]._xs for x in X]
-            parts = np.fromiter((i for i, x_enc in enumerate(x_encs) for _ in x_enc), dtype=int)
-
-            X_enc = np.fromiter((x_enc_i for x_enc in x_encs for x_enc_i in x_enc), _BoolVarImpl)
             assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
+
+            parts = np.fromiter((i for i, x in enumerate(X) for _ in range(dom_size(x))), dtype=int)
             self.tables.append((X_enc, T_enc, parts, cpm_expr))
 
             if self.env["checker"]:
