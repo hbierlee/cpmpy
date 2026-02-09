@@ -122,6 +122,10 @@ def show_table(T_enc, index=INDEX):
     return np.astype(T_enc, int) if T_enc.dtype in (bool, np.bool) else T_enc
 
 
+def show_nz(A, index=INDEX):
+    return A.nonzero()[0] + 1
+
+
 def show_ind(a, index=INDEX):
     return a + index
 
@@ -583,18 +587,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # [ 0 0 1 0 1 1 0 ]  N
         # WF = np.zeros(len(T_enc.T), dtype=bool)
         if self.env["verbosity"]:
-            self.log(f"W = {W}", verbosity=3)
-            self.log(f"F = {F}", verbosity=3)
+            self.log(f"W = {show_nz(W)}", verbosity=3)
+            self.log(f"F = {show_nz(F)}", verbosity=3)
 
         if F.any():
             D = ((W | F) >= T_enc).all(1)
 
             if self.env["verbosity"]:
-                self.log(f"D = {D}", verbosity=3)
+                self.log(f"D = {show_nz(D)}", verbosity=3)
             U = F > ~((~T_enc[D, :]).all(0))  # tricky
 
             if self.env["verbosity"]:
-                self.log(f"U = {U}", verbosity=3)
+                self.log(f"U = {show_nz(U)}", verbosity=3)
 
             if none(U):
                 if self.env["verbosity"]:
@@ -629,11 +633,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     assert_example(R, [1, 5])
                     assert parts[choice] == 1 - 1
 
-                # if self.env["debug"]:
-                #     self.log(f"chosen {show(choice)}", verbosity=3, indent=self.indent + 2)
-                #     self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
-                #     self.log(f"R ({R.sum()}) = {R}", verbosity=3, indent=self.indent + 2)
-                #     self.log(f"X {X}", verbosity=3, indent=self.indent + 2)
+                if self.env["verbosity"]:
+                    self.log(f"chosen {show(choice)}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"R ({R.sum()}) = {R}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
+
         else:
             R = np.ones(m, dtype=np.bool)
             X = np.zeros(len(T_enc.T), dtype=bool)
@@ -675,9 +681,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 choices[l_parts] = False
                 R = R & T_enc[:, C_].any(1)
                 X |= C_
-                C_enc[choice] = 1
+                C_enc[X] = 1
                 k += 1
             else:
+                assert False
                 C_ = choice
                 choices[choice] = False
                 R = R & (~T_enc[:, choice])
@@ -693,15 +700,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     verbosity=3,
                     indent=self.indent + 2,
                 )
-                self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
+                self.log(f"choices {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
                 self.log(f"C_ {C_}", verbosity=3, indent=self.indent + 2)
                 self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
                 self.log("FRAC", frm, F.any(), verbosity=2, indent=self.indent + 2)
                 self.log(f"R choice={choice} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
-                self.log(f"= {show_set(R.nonzero())}", verbosity=3, indent=self.indent + 3)
-                self.log(f"== {R}", verbosity=3, indent=self.indent + 4)
-                self.log(f"X {X}", verbosity=3, indent=self.indent + 2)
-                self.log(f"C {C_enc}", verbosity=3, indent=self.indent + 2)
+                self.log(f"= {show_nz(R)}", verbosity=3, indent=self.indent + 3)
+                self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
+                self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
             # [     1   1     ]
             # [ 0 1 1 0 0 0 0 ]  Y
             # [ 0 0 0 0 1 0 0 ]  Y
@@ -718,9 +724,20 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["verbosity"]:
             self.log(f"by explanation of size ({sum(X)})", verbosity=2)
-            self.log(X, verbosity=3)
+            self.log(show_nz(X), verbosity=3)
             self.log("C_enc", C_enc, verbosity=3)
             self.env["cuts"][-1]["cut"] = X.copy()
+            assert C_enc[X].all()
+
+        def show_cut():
+            if self.env["verbosity"]:
+                self.log(
+                    f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
+                    indent=2,
+                    verbosity=2,
+                )
+
+        show_cut()
 
         if self.env["shrink"]:
             X_shrunk, shrunk = self.shrink(X, T_enc)
@@ -735,16 +752,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         "cut": X_shrunk,
                     }
             self.env["cuts"][-1]["shrunk"] = shrunk
+            show_cut()
 
-        def show_cut():
-            if self.env["verbosity"]:
-                self.log(
-                    f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
-                    indent=2,
-                    verbosity=2,
-                )
-
-        show_cut()
 
         if self.env["coverlift"]:
             if self.env["verbosity"]:
@@ -753,9 +762,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if self.env["verbosity"]:
                 self.log("coverlift added ", X.sum() - Xl, verbosity=3)
 
+            show_cut()
+
         self.env["cuts"][-1]["size"] = len(X)
 
-        show_cut()
 
         return X, C_enc, k
 

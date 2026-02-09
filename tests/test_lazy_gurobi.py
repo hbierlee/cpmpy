@@ -211,7 +211,7 @@ SEED = None
 def get_envs():
 
     debug_env = {
-        "verbosity": 2,
+        "verbosity": 3,
         "debug": 1,
         "max_iterations": 500,
         "seed": 42,
@@ -266,14 +266,16 @@ def load_model(path):
 
 @pytest.mark.timeout(60)
 class TestTables:
-    @pytest.mark.skip()
     def test_repro_explain(self, env):
         path = pathlib.Path("/tmp/failed_cut.pkl")
         if path.exists():
             with open(path, "rb") as f:
                 X_enc, A_enc, T_enc, parts, frm, A_enc_ = pickle.load(f)
             slv = CPM_lazy_gurobi(
-                env={**env, **{"verbosity": 3, "debug": True, "checker": None}},
+                env={
+                    **env,
+                    **{"verbosity": 3, "debug": True, "checker": None, "coverlift": False, "shrink": True},
+                },
             )
 
             COLS = None
