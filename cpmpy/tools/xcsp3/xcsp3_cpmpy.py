@@ -775,12 +775,12 @@ def xcsp3_cpmpy(
                 # print_comment("MODEL2:")
                 # print_comment(repr(model))
                 for c in model.constraints:
-                    assert c.value(), f"Constraint {c} failed for assignment {show_assignment(get_variables(c))}"
+                    assert c.value(), f"Constraint {c} failed for assignment\n\n{show_assignment(get_variables(c))}"
                     # stop in time; we are in danger of being killed
                     if check_time_limit is not None and check_time_limit - (time.time() - time_check) < time_buffer:
                         raise TimeoutError(f"Checking did not finish in time limit {check_time_limit}")
             except (TimeoutError, AssertionError) as e:
-                raise CheckError(f"Check failed for solver {s}") from e
+                raise CheckError(f"Check failed for solver {s}, {solve_kwargs} / {solver_kwargs}") from e
 
             print_comment(f"Checking passed in {time.time() - time_check:.4f}")
         

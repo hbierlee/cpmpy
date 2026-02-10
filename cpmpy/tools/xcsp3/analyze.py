@@ -634,7 +634,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 "no_cuts",
                 "constraints",
                 "cb_rel",
-                "time_pc",
+                # "time_pc",
             ]),
         ]]
 
@@ -712,7 +712,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
     if not errors.empty:
         print("== ERRORS ==")
         for idx, error in errors.iterrows():
-            print(f"\n[{error['problem']}/{error['instance']} - {error['alias']}]")
+            print(f"\n[{error['problem']}-{error['instance']} - {error['alias']}]")
             print(f"Status: {error['status']} | Time: {error['time_total']:.2f}s")
             if pd.notna(error['exception']):
                 print(f"Exception: {error['exception']}")
