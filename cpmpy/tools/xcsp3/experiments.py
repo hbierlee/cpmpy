@@ -65,9 +65,27 @@ def get_experiments(overrides={}, filters=[]):
                         for alias, env in ablate(
                             [
                                 ("heuristic", (Heuristic.GREEDY,)),
-                                ("fractional", (False, True)),
-                                ("coverlift", (True,)),
-                                ("shrink", (True,)),
+                                (
+                                    "fractional",
+                                    (
+                                        False,
+                                        True,
+                                    ),
+                                ),
+                                (
+                                    "coverlift",
+                                    (
+                                        False,
+                                        True,
+                                    ),
+                                ),
+                                (
+                                    "shrink",
+                                    (
+                                        False,
+                                        # True,
+                                    ),
+                                ),
                                 (
                                     "cutoff",
                                     (
