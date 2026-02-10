@@ -34,7 +34,7 @@ DEFAULTS = [
     [
         {
             "year": 2025,
-            "track": "CSP22to25",
+            "track": "COP22to25",
             "glob_instance": None,
         }
     ],
@@ -61,7 +61,7 @@ def get_experiments(overrides={}, filters=[]):
                     }
                     for solver in ["lazy_gurobi"]
                     for alias, solver_kwargs in [
-                        (alias, {"env": env, "encoding": Encoding.GLEB})
+                        (alias, {"env": env, "encoding": Encoding.BOOL})
                         for alias, env in ablate(
                             [
                                 ("heuristic", (Heuristic.GREEDY,)),
