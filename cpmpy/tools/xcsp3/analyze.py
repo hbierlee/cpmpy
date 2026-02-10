@@ -21,7 +21,13 @@ Optional Arguments
     Maximum time limit (in seconds) to display on the x-axis of the plot.
 
 --plot, -o : str, optional
-    Path to save the generated plot image (e.g., "plot.png"). If not provided, the plot will be displayed interactively.
+    Path to save the generated plot image (e.g., "plot.png").
+
+--show : bool, optional
+    Display plots interactively using matplotlib's interactive backend.
+
+--small : int, optional
+    Threshold for filtering instances by largest table size (default: 25). Instances with max rows <= this value are excluded.
 """
 
 import argparse
@@ -32,6 +38,17 @@ import statistics
 import re
 import pandas as pd
 import numpy as np
+
+# Set interactive backend before importing pyplot
+import matplotlib
+try:
+    matplotlib.use('TkAgg')
+except:
+    try:
+        matplotlib.use('Qt5Agg')
+    except:
+        pass  # Use default backend
+
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
@@ -139,7 +156,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
 
     return fig
 
-def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None):
+def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None, small=25):
     """
     Create a scatter plot comparing the performance of two solvers.
 
@@ -173,11 +190,22 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     if solver1 not in solvers or solver2 not in solvers:
         raise ValueError(f"Solvers {solver1} and/or {solver2} not found in dataframe. Available: {solvers}")
 
-    df1 = df[df['alias'] == solver1][['instance', metric, 'solved', inst_metric, 'small']].copy()
-    df2 = df[df['alias'] == solver2][['instance', metric, 'solved', inst_metric, 'small']].copy()
+    # Select columns for merge - include metadata for tooltips
+    base_cols = ['problem', 'instance', metric, 'solved', inst_metric, 'small']
+    metadata_cols = ['rows', 'median', 'stdev', 'min', 'max', 'time_post']
 
-    # Merge on instance to get paired data
-    merged = df1.merge(df2, on='instance', suffixes=('_1', '_2'))
+    # Combine and deduplicate columns (inst_metric might already be in metadata_cols)
+    cols = list(dict.fromkeys(base_cols + metadata_cols))
+
+    df1 = df[df['alias'] == solver1][cols].copy()
+    df2 = df[df['alias'] == solver2][cols].copy()
+
+    # # Remove duplicates (keep first occurrence) to avoid duplicate rows in merge
+    # df1 = df1.drop_duplicates(subset=['problem', 'instance'], keep='first')
+    # df2 = df2.drop_duplicates(subset=['problem', 'instance'], keep='first')
+
+    # Merge on problem and instance to get paired data
+    merged = df1.merge(df2, on=['problem', 'instance'], suffixes=('_1', '_2'))
 
     # Handle unsolved instances
     if time_limit is not None:
@@ -187,39 +215,56 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
         # Drop instances where either solver didn't solve it
         merged = merged.dropna(subset=[f'{metric}_1', f'{metric}_2'])
 
+    # Remove instances where neither solver solved it
+    merged = merged[merged['solved_1'] | merged['solved_2']]
+
+    # # Reset index to ensure clean array extraction
+    merged = merged.reset_index(drop=True)
+    print('m', merged)
+
     # Extract x and y coordinates
     x = merged[f'{metric}_1'].values
     y = merged[f'{metric}_2'].values
 
     inst_metrics = merged[f'{inst_metric}_1'].values
+    print('m', inst_metrics)
+    problems = merged['problem'].values
+    instances = merged['instance'].values
+
+    # Extract additional metadata for tooltips
+    rows = merged['rows_1'].values
+    medians = merged['median_1'].values
+    stdevs = merged['stdev_1'].values
+    mins = merged['min_1'].values
+    maxs = merged['max_1'].values
+    time_posts_1 = merged['time_post_1'].values
+    time_posts_2 = merged['time_post_2'].values
 
     # Create figure
     fig, ax = plt.subplots(figsize=(10, 10))
 
-    # Use log normalization if the range is large
-    vmin, vmax = inst_metrics.min(), inst_metrics.max()
-
     # Create colormap and set colors for special cases
-    cmap = plt.cm.get_cmap('viridis').copy()
-    SET_MIN = None
-    if SET_MIN:
-        cmap.set_under('red')
+    cmap = plt.get_cmap('viridis').copy()
+    # cmap.set_under('red')
 
     # cmap.set_bad('blue')  # Color for masked values (small instances)
+
+    # Create alpha array - lower alpha for red dots (below small threshold)
+    alpha_values = np.where(merged["small_1"], 0.2, 0.8)
 
     # Plot scatter points colored by median
     scatter = ax.scatter(
             x,
             y,
             c=inst_metrics,
-            alpha=0.6,
+            alpha=alpha_values,
             s=50,
             cmap=cmap,
             edgecolors='black',
             linewidth=0.5,
             norm=LogNorm(
-                vmin=max(vmin, 1e-10) if SET_MIN is None else SET_MIN,
-                vmax=vmax
+                vmin=small,
+                vmax=inst_metrics.max(),
                 ),
             )
 
@@ -227,10 +272,36 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     cbar = plt.colorbar(scatter, ax=ax)
     cbar.set_label(f'{inst_metric} table size', rotation=270, labelpad=20)
 
+    # # Add min and max as ticks
+    # effective_vmin = max(vmin, 1e-10) if SET_MIN is None else SET_MIN
+    # existing_ticks = cbar.get_ticks()
+    # new_ticks = sorted(set([effective_vmin, vmax] + list(existing_ticks)))
+    # cbar.set_ticks(new_ticks)
+
     # Plot diagonal line (y=x)
     max_val = max(x.max(), y.max())
     min_val = min(x.min(), y.min())
-    ax.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=1.5, label='Equal performance', zorder=0)
+
+    min_max = [0.1, time_limit * 1.2]
+    ax.plot(min_max, min_max, 'k--', linewidth=1.5, label='Equal performance', zorder=0)
+
+    # Add 10% improvement lines (parallel to diagonal)
+    improvement_factor = 2
+    ax.plot(min_max, [m * improvement_factor for m in min_max], 'k:', linewidth=1, alpha=0.5, zorder=0)
+    ax.plot(min_max, [m / improvement_factor for m in min_max], 'k:', linewidth=1, alpha=0.5, zorder=0)
+
+    # Add time limit borders and grey out areas outside
+    if time_limit is not None:
+        # Vertical line at time_limit
+        # ax.axvline(time_limit, color='red', linewidth=2, linestyle='-', alpha=0.7, zorder=1)
+        # Horizontal line at time_limit
+        # ax.axhline(time_limit, color='red', linewidth=2, linestyle='-', alpha=0.7, zorder=1)
+
+        # Grey out areas outside time limit (non-overlapping regions)
+        # Right vertical strip (x > time_limit)
+        ax.axvspan(time_limit, min_max[1], color='grey', alpha=0.3, zorder=0)
+        # Top horizontal strip (y > time_limit, but only where x <= time_limit to avoid overlap)
+        ax.fill_between([min_max[0], time_limit], time_limit, min_max[1], color='grey', alpha=0.3, zorder=0)
 
     # Set plot properties
     ax.set_xlabel(f'{solver1} - {metric} (seconds)')
@@ -245,8 +316,10 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     solver2_wins = sum(1 for i in range(len(x)) if x[i] > y[i])
     ties = sum(1 for i in range(len(x)) if np.isclose(x[i], y[i], rtol=1))
 
-    ax.set_title(f"Scatter Plot: {solver1} vs {solver2} ({datasets})\n"
-                 f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}")
+    title = f"Scatter Plot: {solver1} vs {solver2} ({datasets})\n"
+    title += f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}"
+    title += f" | Cutoff: {small}"
+    ax.set_title(title)
     ax.grid(True, alpha=0.3)
 
     # Use log scale if there's a wide range
@@ -255,11 +328,55 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # Set axis limits
     if time_limit is not None:
-        ax.set_xlim(0, time_limit * 1.1)
-        ax.set_ylim(0, time_limit * 1.1)
+        ax.set_xlim(*min_max)
+        ax.set_ylim(*min_max)
 
     ax.legend()
     plt.tight_layout()
+
+    # Add hover labels for instance names
+    try:
+        import mplcursors
+        cursor = mplcursors.cursor(scatter, hover=True)
+        @cursor.connect("add")
+        def on_add(sel):
+            idx = sel.index
+            text = (f"{problems[idx]}-{instances[idx]}\n"
+                   f"rows: {rows[idx]:.0f}, median: {medians[idx]:.1f}, "
+                   f"stdev: {stdevs[idx]:.1f if not np.isnan(stdevs[idx]) else 'N/A'}\n"
+                   f"min: {mins[idx]:.0f}, max: {maxs[idx]:.0f}\n"
+                   f"time_post: {time_posts_1[idx]:.3f}s / {time_posts_2[idx]:.3f}s")
+            sel.annotation.set_text(text)
+            sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
+            sel.annotation.set_zorder(1000)  # Draw on top of colorbar
+    except ImportError:
+        # Fallback to manual hover implementation
+        annot = ax.annotate("", xy=(0,0), xytext=(20,20), textcoords="offset points",
+                           bbox=dict(boxstyle="round", fc="white", alpha=0.9),
+                           arrowprops=dict(arrowstyle="->"),
+                           zorder=1000)  # Draw on top of colorbar
+        annot.set_visible(False)
+
+        def hover(event):
+            if event.inaxes == ax:
+                cont, ind = scatter.contains(event)
+                if cont:
+                    idx = ind["ind"][0]
+                    annot.xy = (x[idx], y[idx])
+                    text = (f"{problems[idx]}-{instances[idx]}\n"
+                           f"rows: {rows[idx]:.0f}, median: {medians[idx]:.1f}, "
+                           f"stdev: {stdevs[idx]:.1f}\n"
+                           f"min: {mins[idx]:.0f}, max: {maxs[idx]:.0f}\n"
+                           f"time_post: {time_posts_1[idx]:.3f}s / {time_posts_2[idx]:.3f}s")
+                    annot.set_text(text)
+                    annot.set_visible(True)
+                    fig.canvas.draw_idle()
+                else:
+                    if annot.get_visible():
+                        annot.set_visible(False)
+                        fig.canvas.draw_idle()
+
+        fig.canvas.mpl_connect("motion_notify_event", hover)
 
     return fig
 
@@ -500,7 +617,11 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 "err",
                 "unk",
                 "mem",
+            ]),
+            *(["feas"] if is_cop else []),
+            *([
                 "post",
+                "solv",
             ] if not grouping_type == "per_inst" else ["median", "status"]),
             # *(["insts"] if PER_PROBLEM else ["insts"]),
             *([
@@ -508,9 +629,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 "t_solv_p2",
             ]),
             *(["method","obj"] if grouping_type == "per_inst" else []),
-            *(["feas"] if is_cop else []),
             *([
-                "solv",
                 "cuts",
                 "lp_cuts",
                 "no_cuts",
@@ -580,8 +699,8 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 na_rep="",
                 header=[
                     *(["\\unk", "\\mem", "\\pst"]),
-                    *(["\sat"] if is_cop else []),
-                    *(["\sol", "time [s]", "cuts", "CB [\%]"]),
+                    *(["\\sat"] if is_cop else []),
+                    *(["\\sol", "time [s]", "cuts", "CB [\\%]"]),
                 ],
                 float_format="%.1f",
                 caption=f"{n_instances} {track} instances",
@@ -645,18 +764,21 @@ def main():
     parser.add_argument('files', nargs='+', help='List of CSV files or directories to analyze')
     parser.add_argument('--time-limit', type=float, default=None, help='Maximum time limit in seconds to show on x-axis')
     parser.add_argument('--plot', '-p', type=pathlib.Path, default=None, help='Path to save the plot image (e.g., plot.png)')
+    parser.add_argument('--show', nargs='*', choices=['cactus', 'scatter'], default=None,
+                        help='Display plots interactively. Specify which plots: cactus, scatter, or both. Use --show without args to show all.')
     parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
     parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
     parser.add_argument('--tex', action='store_true', default=None, help='Output tables in tex')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
     parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
+    parser.add_argument('--small', type=int, default=25, help='Threshold for filtering by largest table size (default: 25)')
     parser.add_argument('--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
     parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, glob_alias=None, glob_instance=None, tex=False):
+def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, small=25, glob_alias=None, glob_instance=None, tex=False):
 
     import subprocess
     if sync:
@@ -737,10 +859,10 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
 
     # df["obj"] = df.where(df["method"] == "minimize", -df["obj"], df["obj"])
     # df["obj"] = df.map(lambda x: -x["obj"] if x["method"] == "minimize" else x["obj"])
-    # df = df.drop(df[df["max"] <= 25].index)
+    # df = df.drop(df[df["max"] <= 100].index)
 
-    # TODO add "small" as CLI argument
-    df["small"] = df["max"] <= 100
+    # Filter out instances with max table size <= small threshold
+    df["small"] = df["max"] <= small
     # df = df.drop(df[df["small"]].index)
 
     # let solve include post time?
@@ -789,27 +911,58 @@ def analyze(files=[], time_limit=None, plot=None, sync=None, no_errors=False, sa
     # Print some stats
     xcsp3_stats(df, time_limit=time_limit, save=save, tex=tex)
 
-    if plot:
-        # Save or show plot
-        fig = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
-        fig.savefig(plot.with_suffix(".png"), bbox_inches='tight')
-        fig.savefig(plot.with_suffix(".svg"), bbox_inches='tight')
-        print(f"Plot saved to {plot}.{{png,svg}}")
+    # Determine which plots to generate and show
+    show_cactus = False
+    show_scatter = False
+    if show is not None:
+        # If show is an empty list, show all plots
+        if len(show) == 0:
+            show_cactus = True
+            show_scatter = True
+        else:
+            show_cactus = 'cactus' in show
+            show_scatter = 'scatter' in show
 
-        aliases = sorted(df["alias"].unique())
-        if len(aliases) == 2 and plot:
-            fig = xcsp3_scatter_plot(
-                    df,
-                    solver1=aliases[0],
-                    solver2=aliases[1],
-                    time_limit=time_limit,
-                    inst_metric="max",
-                    # metric="time_post"
-                    )
+    # Generate plots based on plot argument or show argument
+    generate_cactus = plot is not None or show_cactus
+    generate_scatter = plot is not None or show_scatter
+
+    fig_cactus = None
+    fig_scatter = None
+
+    if generate_cactus:
+        # Generate performance/cactus plot
+        fig_cactus = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
+        if plot:
+            fig_cactus.savefig(plot.with_suffix(".png"), bbox_inches='tight')
+            fig_cactus.savefig(plot.with_suffix(".svg"), bbox_inches='tight')
+            print(f"Plot saved to {plot}.{{png,svg}}")
+
+    # Generate scatter plot if exactly 2 solvers
+    aliases = sorted(df["alias"].unique())
+    if generate_scatter and len(aliases) == 2:
+        fig_scatter = xcsp3_scatter_plot(
+                df,
+                solver1=aliases[0],
+                solver2=aliases[1],
+                time_limit=time_limit,
+                inst_metric="median",
+                small=small,
+                # metric="time_post"
+                )
+        if plot:
             scatter = plot.with_name("scatter")
-            fig.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
-            fig.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
+            fig_scatter.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
+            fig_scatter.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
             print(f"Plot saved to {scatter}.{{png,svg}}")
+
+    # Close figures we don't want to show before calling plt.show()
+    if show is not None:
+        if fig_cactus is not None and not show_cactus:
+            plt.close(fig_cactus)
+        if fig_scatter is not None and not show_scatter:
+            plt.close(fig_scatter)
+        plt.show()
 
 
 if __name__ == '__main__':
