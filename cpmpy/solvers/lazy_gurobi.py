@@ -367,14 +367,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"start shrink for X={show_nz(X)}", verbosity=2)
             self.log(show_table(T_enc), verbosity=3)
         for i in X.nonzero()[0]:
+            X[i] = False
+
             if self.env["verbosity"]:
                 self.log(f"shrinking {i + INDEX} in {show_nz(X)}", verbosity=3)
+                self.log(show_table(T_enc[:, X]), verbosity=3)
+                self.log(show_table(T_enc[:, X].all(1, keepdims=True)), verbosity=3)
 
-            # if X.sum() <= 1:  # slightly different from
-            #     return X
-
-            # S = set.intersection(*[rows(T_enc, l) for l in (X - {i})])
-            X[i] = False
 
             # 1 0 | 0 all
             # 0 1 | 0
@@ -403,8 +402,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # shrunk 1
             # shrinking 2 in [2 3]
 
-            self.log(show_table(T_enc[:, X]), verbosity=3)
-            self.log(show_table(T_enc[:, X].all(1, keepdims=True)), verbosity=3)
             if T_enc[:, X].all(axis=1).any():
                 if self.env["verbosity"]:
                     self.log(f"keep", i, f"because {show_nz(T_enc[:, X])} {T_enc[:, X]}", verbosity=3)
