@@ -66,8 +66,8 @@ def get_experiments(overrides={}, filters=[]):
                             [
                                 ("heuristic", (Heuristic.GREEDY,)),
                                 ("fractional", (False, True)),
-                                ("coverlift", (False, True)),
-                                ("shrink", (False,)),
+                                ("coverlift", (True,)),
+                                ("shrink", (True,)),
                                 (
                                     "cutoff",
                                     (

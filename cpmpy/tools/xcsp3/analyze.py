@@ -101,13 +101,16 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
     # Get unique solvers
     solvers = df['alias'].unique()
 
-    # # Determine the status to plot (Opt if at least one opt, otherwise sat)
+    # # Determine the status to plot (Opt if at least one opt, otherwise sad)
     # if filter_by == "solved":
     #     status_filter = solved
     # elif filter_by == "feasible":
     #     status_filter = (OPT, UNS, SAT)
     # else:
     #     raise Exception
+
+    # Count total unique instances before filtering
+    n_instances = len(df.groupby(['problem', 'instance']))
 
     df = df[df["solved"]]  # only those that reached the desired status
     # print(df[["solver", "instance", "status", metric]])
@@ -146,7 +149,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
     # Get unique year-track combinations
     year_track_pairs = df[['year', 'track']].drop_duplicates()
     datasets = ', '.join([f'{row.year}:{row.track}' for _, row in year_track_pairs.iterrows()])
-    plt.title(f"Performance Plot ({datasets}) {' (solved only)' if solved_only else ''}")
+    plt.title(f"Performance Plot ({datasets}, {n_instances} instances){' (solved only)' if solved_only else ''}")
     plt.grid(True)
     plt.legend()
     
@@ -207,10 +210,11 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     # Merge on problem and instance to get paired data
     merged = df1.merge(df2, on=['problem', 'instance'], suffixes=('_1', '_2'))
 
+    PAR = 2 * time_limit
     # Handle unsolved instances
     if time_limit is not None:
-        merged[f'{metric}_1'] = merged[f'{metric}_1'].fillna(time_limit)
-        merged[f'{metric}_2'] = merged[f'{metric}_2'].fillna(time_limit)
+        merged[f'{metric}_1'] = merged[f'{metric}_1'].fillna(PAR)
+        merged[f'{metric}_2'] = merged[f'{metric}_2'].fillna(PAR)
     else:
         # Drop instances where either solver didn't solve it
         merged = merged.dropna(subset=[f'{metric}_1', f'{metric}_2'])
@@ -254,19 +258,19 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # Plot scatter points colored by median
     scatter = ax.scatter(
-            x,
-            y,
-            c=inst_metrics,
-            alpha=alpha_values,
-            s=50,
-            cmap=cmap,
-            edgecolors='black',
-            linewidth=0.5,
-            norm=LogNorm(
-                vmin=small,
-                vmax=inst_metrics.max(),
-                ),
-            )
+        x,
+        y,
+        c=inst_metrics,
+        alpha=alpha_values,
+        s=50,
+        cmap=cmap,
+        edgecolors='black',
+        linewidth=0.5,
+        norm=LogNorm(
+            vmin=inst_metrics.min(),
+            vmax=inst_metrics.max(),
+        ),
+    )
 
     # Add colorbar
     cbar = plt.colorbar(scatter, ax=ax)
@@ -282,7 +286,7 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     max_val = max(x.max(), y.max())
     min_val = min(x.min(), y.min())
 
-    min_max = [0.1, time_limit * 1.2]
+    min_max = [0.1, PAR]
     ax.plot(min_max, min_max, 'k--', linewidth=1.5, label='Equal performance', zorder=0)
 
     # Add 10% improvement lines (parallel to diagonal)
@@ -292,16 +296,11 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # Add time limit borders and grey out areas outside
     if time_limit is not None:
-        # Vertical line at time_limit
-        # ax.axvline(time_limit, color='red', linewidth=2, linestyle='-', alpha=0.7, zorder=1)
-        # Horizontal line at time_limit
-        # ax.axhline(time_limit, color='red', linewidth=2, linestyle='-', alpha=0.7, zorder=1)
+        # Set full background to grey
+        ax.set_facecolor('lightgrey')
 
-        # Grey out areas outside time limit (non-overlapping regions)
-        # Right vertical strip (x > time_limit)
-        ax.axvspan(time_limit, min_max[1], color='grey', alpha=0.3, zorder=0)
-        # Top horizontal strip (y > time_limit, but only where x <= time_limit to avoid overlap)
-        ax.fill_between([min_max[0], time_limit], time_limit, min_max[1], color='grey', alpha=0.3, zorder=0)
+        # Fill the valid area (within time limit) with default background color
+        ax.fill_between([min_max[0], time_limit], min_max[0], time_limit, color='white', zorder=-1)
 
     # Set plot properties
     ax.set_xlabel(f'{solver1} - {metric} (seconds)')
@@ -946,7 +945,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 solver1=aliases[0],
                 solver2=aliases[1],
                 time_limit=time_limit,
-                inst_metric="median",
+                inst_metric="rows",
                 small=small,
                 # metric="time_post"
                 )

@@ -321,10 +321,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
     @profile
     def choose(self, choices, T_enc, R, parts, A_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
         if self.env["verbosity"]:
-            self.log(f"Choose from {choices.nonzero()[0]} from remaining rows {R.nonzero()[0]}", verbosity=3)
-            self.log(T_enc[R, :].astype(int), verbosity=3)
+            self.log(f"Choose from {show_nz(choices)} to allow remaining rows R={show_nz(R)}", verbosity=3)
+            self.log(show_table(T_enc[R, :]), verbosity=3)
             self.log("", parts, "parts", verbosity=3)
-            self.log("", A_enc.astype(int), "A_enc", verbosity=3)
+            self.log("", show_table(A_enc), "A_enc", verbosity=3)
             self.log("", choices.astype(int), "choices", verbosity=3)
 
         if none(choices):
@@ -364,10 +364,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def shrink(self, X, T_enc):
         k = 0
         if self.env["verbosity"]:
-            self.log(f"start shrinkm {X.nonzero()[0]}", verbosity=2)
+            self.log(f"start shrink for X={show_nz(X)}", verbosity=2)
+            self.log(show_table(T_enc), verbosity=3)
         for i in X.nonzero()[0]:
             if self.env["verbosity"]:
-                self.log(f"shrinking {i + INDEX} in {X}", verbosity=3)
+                self.log(f"shrinking {i + INDEX} in {show_nz(X)}", verbosity=3)
 
             # if X.sum() <= 1:  # slightly different from
             #     return X
@@ -382,15 +383,37 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # 1 1 | 1
             # 1,3,5 and 2,5 = 5
 
+            # start shrink [1 2 3]
+            # [[1 1 0]
+            #  [0 0 1]
+            #  [1 1 0]
+            #  [0 0 0]
+            #  [1 1 0]]
+            # shrinking 1 in [1 2 3]
+            # [[1 0]
+            #  [0 1]
+            #  [1 0]
+            #  [0 0]
+            #  [1 0]] # 'and' over all rows
+            # [[0]
+            #  [0]
+            #  [0]
+            #  [0]
+            #  [0]]  # we find no row where b_2 and b_3 are both true, thus at most 1 is added to LHS
+            # shrunk 1
+            # shrinking 2 in [2 3]
+
+            self.log(show_table(T_enc[:, X]), verbosity=3)
+            self.log(show_table(T_enc[:, X].all(1, keepdims=True)), verbosity=3)
             if T_enc[:, X].all(axis=1).any():
                 if self.env["verbosity"]:
-                    self.log(f"keep", i, verbosity=3)
+                    self.log(f"keep", i, f"because {show_nz(T_enc[:, X])} {T_enc[:, X]}", verbosity=3)
                 X[i] = True  # keep i
                 # assert False
             else:
                 k += 1
                 if self.env["verbosity"]:
-                    self.log(f"shrunk", i, verbosity=3)
+                    self.log(f"shrunk", show(i), verbosity=3)
         return X, k
 
     @profile
@@ -472,10 +495,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
             S[j] = True
             C_enc[j] += a_j
 
-            assert (
-                not self.env["example2"]
-                or (RS == [[1.0, 2.0, 0.0, 1.0, 2.0], [1.0, 2.0, 2.0, 1.0, 2.0], RS][i]).all()
-            ), f"{i}; {RS}"
+            assert not self.env["example2"] or (RS == [[1.0, 2.0, 0.0, 1.0, 2.0], [1.0, 2.0, 2.0, 1.0, 2.0], RS][i]).all(), (
+                f"{i}; {RS}"
+            )
 
             RS = RS + a_j * T_enc.T[j]
 
@@ -575,10 +597,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"F = {show_nz(F)}", verbosity=3)
 
         if F.any():
+            # D are the difficult rows which only contains 1s for each W/F columns
+            self.log(show_table((W | F) >= T_enc))
             D = ((W | F) >= T_enc).all(1)
 
             if self.env["verbosity"]:
                 self.log(f"D = {show_nz(D)}", verbosity=3)
+            # then U are rows fractional columns which are not in D
             U = F > ~((~T_enc[D, :]).all(0))  # tricky
 
             if self.env["verbosity"]:
@@ -618,9 +643,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     assert parts[choice] == 1 - 1
 
                 if self.env["verbosity"]:
-                    self.log(f"chosen {show(choice)}", verbosity=3, indent=self.indent + 2)
-                    self.log(f"choices {choices}", verbosity=3, indent=self.indent + 2)
-                    self.log(f"R ({R.sum()}) = {R}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"choices {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"R ({R.sum()}) = {show_nz(R)}", verbosity=3, indent=self.indent + 2)
                     self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
                     self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
 
@@ -685,7 +710,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     indent=self.indent + 2,
                 )
                 self.log(f"choices {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
-                self.log(f"C_ {C_}", verbosity=3, indent=self.indent + 2)
+                self.log(f"C_ {show_nz(C_)}", verbosity=3, indent=self.indent + 2)
                 self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
                 self.log("FRAC", frm, F.any(), verbosity=2, indent=self.indent + 2)
                 self.log(f"R choice={choice} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
@@ -1006,11 +1031,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 print(
                     "A",
                     self.user_vars,
-                    tuple(
-                        x.value()
-                        for x in sorted(self.user_vars, key=lambda x: x.name)
-                        if x.value() is not None
-                    ),
+                    tuple(x.value() for x in sorted(self.user_vars, key=lambda x: x.name) if x.value() is not None),
                 )
                 print("REMOVED")
                 print(removed)

@@ -51,11 +51,7 @@ def generate_edge_case_tables():
     )
 
     # Duplicate rows in table
-    yield cp.Model(
-        cp.Table(
-            [cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]]
-        )
-    )
+    yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]]))
 
     # Constant column (one variable always same value)
     yield cp.Model(
@@ -66,9 +62,7 @@ def generate_edge_case_tables():
     )
 
     # Sparse table (large domain, few tuples)
-    yield cp.Model(
-        cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])
-    )
+    yield cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]]))
 
     # No valid tuples (unsatisfiable - tuples outside domains)
     yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[4, 5], [5, 6], [6, 7]]))
@@ -384,11 +378,11 @@ class TestTables:
 
         print("", a, "a")
         choices = a & [0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
-        print("", choices, "choices")
-        print(T)
+        # print("", choices, "choices")
+        # print(T)
         T = T[[0, 4], :][:, choices]
-        print(T.astype(int))
-        print("", parts, "p")
+        # print(T.astype(int))
+        # print("", parts, "p")
         y = np.bitwise_or.reduceat(
             T,
             parts_,
@@ -397,7 +391,8 @@ class TestTables:
         print("Remaining R", y)
 
     def test_shrink(self, env):
-        X, k = CPM_lazy_gurobi(env={"verbosity": 4}).shrink(
+        env = {"verbosity": 4}
+        X, k = CPM_lazy_gurobi(env=env).shrink(
             np.array([True, True, True]),
             np.array(
                 [
@@ -408,6 +403,20 @@ class TestTables:
                     [True, True, False],
                 ]
             ),
+        )
+        assert k == 1
+        assert (X == np.array([False, True, True])).all()
+
+        X, k = CPM_lazy_gurobi(env=env).shrink(
+            np.array([0.5, 0.5, 0.0]),
+            np.array(
+                [
+                    [1, 1, 0],
+                    [1, 1, 1],
+                    [1, 1, 0],
+                    [1, 1, 1],
+                ]
+            ).astype(bool),
         )
         assert k == 1
         assert (X == np.array([False, True, True])).all()
@@ -425,6 +434,11 @@ class TestTables:
                 np.array([0.0, 0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.5, 0.5, 0.0]),
                 {"fractional": True, "example_frac": True},
             ),
+            # (
+            #     generate_table_from_example(),
+            #     np.array([0.5, 0.5, 0.0, 0.0, 0.5, 0.5, 0.0, 1.0, 0.0, 0.0]),
+            #     {"fractional": True, "shrink": True, "heuristic": Heuristic.GREEDY},
+            # ), # TODO fractional counter example where shrink does not work for frac sol
             # (generate_table_from_data([(2, 1), (2, 1), (2, 1), (1, 2)], 2), np.array([0, 1, 0, 1])),
             # (generate_table(3, 3, 3), None),
             # (generate_table(10, 2000, 10), None),
@@ -576,9 +590,7 @@ class TestModels:
                             generate_table_from_data([[1, 1]], 3),  # single row (actually exists in xcsp3)
                             generate_table_from_data([[1, 1], [2, 2]], 3),  # Feasible (often 0 explanations)
                             generate_table_from_data([[1, 2], [2, 1]], 3),  # Feasible
-                            with_constraints(
-                                generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True
-                            ),  # Infeasible
+                            with_constraints(generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True),  # Infeasible
                             with_constraints(
                                 generate_table_from_data([[1, 2], [2, 1]], 3),
                                 with_alldiff=True,
@@ -606,9 +618,7 @@ class TestModels:
                                     with_alldiff=False,
                                     with_min=False,
                                 ),
-                                with_constraints(
-                                    generate_table(2, 2, 3, k=2, allow_duplicate_vars=allow_duplicate_vars)
-                                ),
+                                with_constraints(generate_table(2, 2, 3, k=2, allow_duplicate_vars=allow_duplicate_vars)),
                                 with_constraints(
                                     generate_table(3, 3, 4, allow_duplicate_vars=allow_duplicate_vars),
                                     # with_alldiff=False,
@@ -617,9 +627,7 @@ class TestModels:
                                 with_constraints(
                                     generate_table(2, 2, 2, allow_duplicate_vars=allow_duplicate_vars)
                                 ),  # minimized 1/1000 bug
-                                with_constraints(
-                                    generate_table(5, 100, 10, allow_duplicate_vars=allow_duplicate_vars)
-                                ),
+                                with_constraints(generate_table(5, 100, 10, allow_duplicate_vars=allow_duplicate_vars)),
                                 with_constraints(
                                     generate_table(4, 3, 4, k=2, allow_duplicate_vars=allow_duplicate_vars)
                                 ),  # TRICKY BUG FINDER NO CHIOCE
