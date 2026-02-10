@@ -374,7 +374,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(show_table(T_enc[:, X]), verbosity=3)
                 self.log(show_table(T_enc[:, X].all(1, keepdims=True)), verbosity=3)
 
-
             # 1 0 | 0 all
             # 0 1 | 0
             # 1 0 | 0
@@ -595,7 +594,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if F.any():
             # D are the difficult rows which only contains 1s for each W/F columns
-            self.log(show_table((W | F) >= T_enc))
+            if self.env["verbosity"]:
+                self.log(show_table((W | F) >= T_enc))
             D = ((W | F) >= T_enc).all(1)
 
             if self.env["verbosity"]:
@@ -749,14 +749,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
             X_shrunk, shrunk = self.shrink(X, T_enc)
             C_enc[~X_shrunk] = 0
             k -= shrunk
-            if self.env["verbosity"]:
-                if shrunk:
-                    self.log(f"shrunk by {shrunk}", indent=2, verbosity=2)
-                    self.env["cuts"][-1] = {
-                        **self.env["cuts"][-1],
-                        "shrunk": shrunk,
-                        "cut": X_shrunk,
-                    }
+            if self.env["verbosity"] and shrunk:
+                self.log(f"shrunk by {shrunk}", indent=2, verbosity=2)
+                self.env["cuts"][-1] = {
+                    **self.env["cuts"][-1],
+                    "shrunk": shrunk,
+                    "cut": X_shrunk,
+                }
             self.env["cuts"][-1]["shrunk"] = shrunk
             show_cut()
 
