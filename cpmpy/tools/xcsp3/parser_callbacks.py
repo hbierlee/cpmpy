@@ -539,7 +539,7 @@ class CallbacksCPMPy(Callbacks):
         cpm_i, cpm_j = self.get_cpm_vars([i, j])
         cpm_rhs = self.get_cpm_var(condition.right_operand())
         # ensure i,j are within bounds, we can do this as it is a toplevel constraint
-        self.cpm_model += [cpm_i >= 0, cpm_i < dim1, cpm_j >= 0, cpm_j < dim2]
+        self.cpm_model += cp.all([cpm_i >= 0, cpm_i < dim1, cpm_j >= 0, cpm_j < dim2])
 
         # flatten matrix and lookup with weighed sum
         self.cpm_model += self.eval_cpm_comp(cp.Element(flatlist(mtrx), dim1 * cpm_i + cpm_j), condition.operator, cpm_rhs)
