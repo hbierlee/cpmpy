@@ -224,14 +224,12 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # # Reset index to ensure clean array extraction
     merged = merged.reset_index(drop=True)
-    print('m', merged)
 
     # Extract x and y coordinates
     x = merged[f'{metric}_1'].values
     y = merged[f'{metric}_2'].values
 
     inst_metrics = merged[f'{inst_metric}_1'].values
-    print('m', inst_metrics)
     problems = merged['problem'].values
     instances = merged['instance'].values
 

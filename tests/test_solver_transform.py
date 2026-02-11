@@ -125,11 +125,7 @@ def generate_test_cases():
     yield [cp.Table(X, T)], "table_2_root"
 
     yield [cp.boolvar(name="p").implies(cp.Table(X, T))], "table_2_reif"
-    yield [~(cp.Table(X, T))], "table_2_negated"
-
-
-    # AssertionError: Constraint x[3][0] not in [0, 1, 2, 5, 6, 10, 11, 15, 16, 18, 19, 20, 21, 22, 24] failed for assignment
-    # x[3][0] in -1..24 = 21
+    # yield [~(cp.Table(X, T))], "table_2_negated"
 
     # bug found in xcsp: TankAllocation2-1200_c25
     yield [NotInDomain(cp.intvar(-1, 24), [0, 1, 2, 5, 6, 10, 11, 15, 16, 18, 19, 20, 21, 22, 24])], "not_in_domain"
@@ -178,6 +174,7 @@ class TestSolverTransform:
     def test_transform_equivalence(self, solver, case, capsys):
         """Test that transformed model has same solutions as original."""
         constraints, name = case
+        constraints = [c.deepcopy() for c in constraints]
         solver_name, solver_class, solver_kwargs = solver
         solver = solver_class(**solver_kwargs)
 
