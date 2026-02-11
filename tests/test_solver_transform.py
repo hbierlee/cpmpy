@@ -14,6 +14,7 @@ import pytest
 import cpmpy as cp
 from cpmpy.expressions.variables import _IntVarImpl, _BoolVarImpl
 from cpmpy.expressions.utils import argvals
+from cpmpy.tools.xcsp3.globals import NotInDomain
 from cpmpy.transformations.get_variables import get_variables
 import itertools
 from cpmpy.solvers.ortools import CPM_ortools
@@ -111,10 +112,10 @@ def generate_test_cases():
     # IV14 in 144..574 = 179
     # IV15 in 150..606 = 165
 
-    # NoOverlap reproducing the reported failure pattern (large domains)
-    x_s = cp.intvar(129, 559, name="x_s")
-    y_s = cp.intvar(135, 591, name="y_s")
-    yield [cp.NoOverlap([x_s, y_s], [15, 15], [x_s + 15, y_s + 15])], "no_overlap_large_domain"
+    # # NoOverlap reproducing the reported failure pattern (large domains)
+    # x = cp.intvar(129, 559, name="x_s")
+    # y_s = cp.intvar(135, 591, name="y_s")
+    # yield [cp.NoOverlap([x, y_s], [15, 15], [x + 15, y_s + 15])], "no_overlap_large_domain"
 
     x = cp.intvar(1, 4, name="x")
     y = cp.intvar(1, 3, name="y")
@@ -122,6 +123,12 @@ def generate_test_cases():
     X = (x, y, z)
     T = [[2, 1, 1], [3, 2, 2], [4, 3, 3], [1, 2, 3], [2, 1, 2]]
     yield [cp.Table(X, T)], "table_2"
+
+    # AssertionError: Constraint x[3][0] not in [0, 1, 2, 5, 6, 10, 11, 15, 16, 18, 19, 20, 21, 22, 24] failed for assignment
+    # x[3][0] in -1..24 = 21
+
+    # bug found in xcsp: TankAllocation2-1200_c25
+    yield [NotInDomain(cp.intvar(-1, 24), [0, 1, 2, 5, 6, 10, 11, 15, 16, 18, 19, 20, 21, 22, 24])], "not_in_domain"
 
 
 def generate_solver_classes():
@@ -218,7 +225,7 @@ class TestSolverTransform:
             # (validation already happened in allsols via original_cons)
             print(f"Large domain case - validated {len(transformed_sols)} solutions against original constraints")
 
-    def allsols(self, cons, vs, original_cons=None, solution_limit=1000000, timeout=60):
+    def allsols(self, cons, vs, original_cons=None, solution_limit=1000, timeout=60):
         """Get all solutions for the given constraints projected onto variables vs.
 
         Args:

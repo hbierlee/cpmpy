@@ -236,7 +236,8 @@ class TestBenchmark:
             # "2025/COP25/RoadefPlaning2-2024-11_c25.xml",
             # "2025/CSP22to25/Soccer-20-12-20-1_c24.xml.lzma",
             # "2025/CSP22to25/CoveringArray-3-05-2-10_c23.xml.lzma",
-            m,
+            # m,
+            "2025/COP22to25/AircraftLanding-table-airland01_c22.xml",
         ):
             if isinstance(m, str):
                 print("MM", m)
