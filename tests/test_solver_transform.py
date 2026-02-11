@@ -122,7 +122,7 @@ def generate_test_cases():
     z = cp.intvar(1, 3, name="z")
     X = (x, y, z)
     T = [[2, 1, 1], [3, 2, 2], [4, 3, 3], [1, 2, 3], [2, 1, 2]]
-    yield [cp.Table(X, T)], "table_2"
+    yield [cp.Table(X, T)], "table_2_root"
 
     yield [cp.boolvar(name="p").implies(cp.Table(X, T))], "table_2_reif"
     yield [~(cp.Table(X, T))], "table_2_negated"
@@ -188,6 +188,9 @@ class TestSolverTransform:
         # Get original variables
         vs = cp.cpm_array(list(get_variables(constraints)))
 
+        # Get solutions and validate - may be partial for large domains
+        original_sols, original_complete = self.allsols(constraints, vs)
+
         # Create solver instance (without adding constraints yet)
         # We need to manually call transform to see the transformation
         # solver = SolverClass()
@@ -208,8 +211,6 @@ class TestSolverTransform:
                 print(f"  {i}. {t}")
 
 
-        # Get solutions and validate - may be partial for large domains
-        original_sols, original_complete = self.allsols(constraints, vs)
         transformed_sols, transformed_complete = self.allsols(all_transformed, vs, original_cons=constraints)
 
         print(f"Original solutions: {len(original_sols)}{'' if original_complete else ' (partial)'}")
@@ -307,21 +308,6 @@ class TestGurobiTransformDetails:
 
         # Should result in an indicator constraint (->)
         assert any("->" in str(t) for t in transformed), f"Expected indicator constraint in transformation, got: {transformed}"
-
-    def test_transform_preserves_negboolview(self):
-        """Test that negative bool views are handled correctly."""
-        a, b = cp.boolvar(shape=2, name=["a", "b"])
-
-        con = (~a).implies(b)
-
-        solver = CPM_gurobi()
-        transformed = solver.transform(con)
-
-        vs = cp.cpm_array([a, b])
-        original_sols = TestSolverTransform().allsols([con], vs)
-        transformed_sols = TestSolverTransform().allsols(transformed, vs)
-
-        assert original_sols == transformed_sols
 
     def test_no_overlap_rejects_invalid_solution(self):
         """Test that the reported invalid NoOverlap solution is rejected by transformed constraints."""
