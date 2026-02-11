@@ -776,7 +776,7 @@ def main():
     parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
     parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
     parser.add_argument('--small', type=int, default=25, help='Threshold for filtering by largest table size (default: 25)')
-    parser.add_argument('--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
+    parser.add_argument('-g', '--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
     parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
     args = parser.parse_args()
     analyze(**vars(args))
@@ -948,9 +948,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         # Generate performance/cactus plot
         fig_cactus = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
         if plot:
-            fig_cactus.savefig(plot.with_suffix(".png"), bbox_inches='tight')
-            fig_cactus.savefig(plot.with_suffix(".svg"), bbox_inches='tight')
-            print(f"Plot saved to {plot}.{{png,svg}}")
+            cactus = plot.with_name(f"{plot}_cactus")
+            fig_cactus.savefig(cactus.with_suffix(".png"), bbox_inches='tight')
+            fig_cactus.savefig(cactus.with_suffix(".svg"), bbox_inches='tight')
+            print(f"Plot saved to {cactus}.{{png,svg}}")
 
     # Generate scatter plot if exactly 2 solvers
     aliases = sorted(df["alias"].unique())
@@ -965,7 +966,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 # metric="time_post"
                 )
         if plot:
-            scatter = plot.with_name("scatter")
+            scatter = plot.with_name(f"{plot}_scatter")
             fig_scatter.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
             fig_scatter.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
             print(f"Plot saved to {scatter}.{{png,svg}}")
