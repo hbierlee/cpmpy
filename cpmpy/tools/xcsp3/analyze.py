@@ -712,6 +712,10 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
     if not errors.empty:
         print("== ERRORS ==")
         for idx, error in errors.iterrows():
+            # Skip errors containing the range object error
+            if pd.notna(error['exception']) and "object has no attribute" in str(error['exception']):
+                continue
+
             print(f"\n[{error['problem']}-{error['instance']} - {error['alias']}]")
             print(f"Status: {error['status']} | Time: {error['time_total']:.2f}s")
             if pd.notna(error['exception']):
@@ -867,6 +871,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     # let solve include post time?
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
+    # Change status to MEM for Gurobi out of memory errors
+    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].str.contains("gurobipy._exception.GurobiError: Out of memory", na=False)
+    df.loc[gurobi_oom_mask, 'status'] = MEM
+
     if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
         df['alias'] = df['alias'] + "-" + df['run']
 
@@ -904,6 +912,13 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         instance_solver_counts = df.groupby(['problem', 'instance'])['alias'].nunique()
         valid_instances = instance_solver_counts[instance_solver_counts == total_solvers].index
         df = df.set_index(['problem', 'instance']).loc[valid_instances].reset_index()
+
+    if no_errors:
+        # Filter out instances where any solver got an error status
+        error_instances = df[df['error']].groupby(['problem', 'instance']).size().index
+        df = df.set_index(['problem', 'instance'])
+        df = df.drop(error_instances, errors='ignore')
+        df = df.reset_index()
 
     assert not df.empty
 

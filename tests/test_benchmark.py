@@ -274,7 +274,7 @@ class TestBenchmark:
                         mem = process.memory_info().rss
                         rep = repr(c)
                         print(f"C{i} ({c.__class__.__name__})", rep[:100], file=f)
-                        print("  ", slv._csemap, file=f)
+                        # print("  ", slv._csemap, file=f)
                         reps[slv.name] += rep
                         row["c"] = rep
                         if getattr(c, "name", None) == "table":
