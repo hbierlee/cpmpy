@@ -124,6 +124,10 @@ def generate_test_cases():
     T = [[2, 1, 1], [3, 2, 2], [4, 3, 3], [1, 2, 3], [2, 1, 2]]
     yield [cp.Table(X, T)], "table_2"
 
+    yield [cp.boolvar(name="p").implies(cp.Table(X, T))], "table_2_reif"
+    yield [~(cp.Table(X, T))], "table_2_negated"
+
+
     # AssertionError: Constraint x[3][0] not in [0, 1, 2, 5, 6, 10, 11, 15, 16, 18, 19, 20, 21, 22, 24] failed for assignment
     # x[3][0] in -1..24 = 21
 
@@ -137,8 +141,8 @@ def generate_solver_classes():
     if CPM_gurobi.supported():
         solvers.append(("gurobi", CPM_gurobi))
 
-    # for encoding in Encoding:
-    for encoding in [Encoding.CPMPY]:
+    for encoding in Encoding:
+    # for encoding in [Encoding.CPMPY]:
         yield (
             f"base_gurobi-{encoding}",
             CPM_gurobi,
@@ -194,15 +198,15 @@ class TestSolverTransform:
         print(f"{'=' * 60}")
 
         all_transformed = []
+        print(f"\nVariables: {', '.join(f'{v} ∈ [{v.lb}, {v.ub}]' for v in vs)}")
         for con in constraints:
-            print(f"\nOriginal: {con}")
+            print(f"Original: {con}")
             transformed = solver.transform(con)
             all_transformed.extend(transformed)
             print(f"Transformed ({len(transformed)} constraint(s)):")
             for i, t in enumerate(transformed, 1):
                 print(f"  {i}. {t}")
 
-        print(f"\nVariables: {', '.join(f'{v} ∈ [{v.lb}, {v.ub}]' for v in vs)}")
 
         # Get solutions and validate - may be partial for large domains
         original_sols, original_complete = self.allsols(constraints, vs)
@@ -225,7 +229,7 @@ class TestSolverTransform:
             # (validation already happened in allsols via original_cons)
             print(f"Large domain case - validated {len(transformed_sols)} solutions against original constraints")
 
-    def allsols(self, cons, vs, original_cons=None, solution_limit=1000, timeout=60):
+    def allsols(self, cons, vs, original_cons=None, solution_limit=10000, timeout=60):
         """Get all solutions for the given constraints projected onto variables vs.
 
         Args:

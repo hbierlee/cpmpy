@@ -252,8 +252,7 @@ class CPM_gurobi(SolverInterface):
                     nptab = np.array(tab)
 
                     cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]
-                    cons += [cp.sum(row_selected) == 1]
-                    return cons, []
+                    return cons, [cp.sum(row_selected) == 1]
 
                 Table.decompose = gleb_decompose
 
