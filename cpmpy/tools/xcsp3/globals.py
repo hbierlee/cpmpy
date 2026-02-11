@@ -766,9 +766,8 @@ class NotInDomain(GlobalConstraint):
             given = len(set(arr))
             missing = ub + 1 - lb - given
             if missing < 2 * given:  # != leads to double the amount of constraints
-                # use == if there is less than twice as many gaps in the domain.
-                row_selected = boolvar(shape=missing)
-                return [any(row_selected)] + [rs.implies(expr == val) for val,rs in zip(range(lb, ub + 1), row_selected) if val not in arr], defining
+                cons, defs = cp.InDomain(expr, set(range(lb, ub + 1)) - set(arr)).decompose()
+                return cons, defining + defs
         return [all([(expr != a) for a in arr])], defining
 
 
