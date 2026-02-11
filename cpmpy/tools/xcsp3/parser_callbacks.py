@@ -567,8 +567,7 @@ class CallbacksCPMPy(Callbacks):
                       zero_ignored: bool):  # in XCSP3 competitions, no 0 permitted in lengths
         cpm_start = self.get_cpm_vars(origins)
         cpm_dur = self.get_cpm_vars(lengths)
-        cpm_end = [cp.intvar(*get_bounds(s + d)) for s, d in zip(cpm_start, cpm_dur)]
-        self.cpm_model += cp.NoOverlap(cpm_start, cpm_dur, cpm_end)
+        self.cpm_model += cp.NoOverlap(cpm_start, cpm_dur)
 
     def ctr_nooverlap_multi(self, origins: list[list[Variable]], lengths: list[list[int]] | list[list[Variable]],
                             zero_ignored: bool):
