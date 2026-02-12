@@ -28,6 +28,19 @@ Optional Arguments
 
 --small : int, optional
     Threshold for filtering instances by largest table size (default: 25). Instances with max rows <= this value are excluded.
+
+--sort-legend : str, optional
+    Sort order for legend/lines. Options: 'alpha' (lexicographic, default), 'performance' (by instances solved).
+
+--scatter : str str, optional
+    Create a scatter plot for two specific solvers. Takes two strings A and B that match solver aliases.
+    Each string must match exactly one solver alias (substring match). Raises exception if multiple matches found.
+
+--tex : path, optional
+    Path to save LaTeX tables generated from the analysis results.
+
+--paper : bool, optional
+    Use larger font sizes (2x) in plots suitable for papers/publications.
 """
 
 import argparse
@@ -97,7 +110,7 @@ MEM = 'MEMORY'
 ERR = 'ERROR'
 UNK = 'UNKNOWN'
 
-def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", solved_only=False):
+def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", solved_only=False, sort_legend='alpha'):
     # Get unique solvers
     solvers = df['alias'].unique()
 
@@ -118,13 +131,18 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
     # Count how many instances each solver solved (with correct status)
     solver_counts = df['alias'].value_counts()
 
-    # Sort solvers descending by number of instances solved
-    solvers_sorted = solver_counts.sort_values(ascending=False).index.tolist()
-    
+    # Sort solvers based on sort_legend parameter
+    if sort_legend == 'performance':
+        # Sort by number of instances solved (descending)
+        solvers_sorted = solver_counts.sort_values(ascending=False).index.tolist()
+    else:  # 'alpha' or default
+        # Sort lexicographically
+        solvers_sorted = sorted(solvers)
+
     # Create figure
     fig = plt.figure(figsize=(10, 6))
-    
-    for solver in sorted(solvers): # Sort solver names for consistent ordering
+
+    for solver in solvers_sorted:
         # Get data for this solver
         solver_data = df[df['alias'] == solver]
         
@@ -313,9 +331,9 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     solver2_wins = sum(1 for i in range(len(x)) if x[i] > y[i])
     ties = sum(1 for i in range(len(x)) if np.isclose(x[i], y[i], rtol=1))
 
-    title = f"Scatter Plot: {solver1} vs {solver2} ({datasets})\n"
-    title += f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}"
-    title += f" | Cutoff: {small}"
+    title = f"{solver1} vs {solver2}"
+    # title += f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}"
+    # title += f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}"
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
 
@@ -481,7 +499,7 @@ def check_inconsistent_instances(df):
 
     return inconsistent
 
-def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
+def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
 
     if False:  # TODO FutureWarning: The behavior of Series.idxmax with all-NA values, or any-NA and skipna=False, is deprecated. In a future version this will raise ValueError
         for phase in ['parse', 'model', 'post']:
@@ -667,12 +685,13 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 with pd.option_context('display.float_format', '{:.6f}'.format):
                     print(correlation)
 
-        if tex and grouping_type == "per_alias":
+        if tex is not None and grouping_type == "per_alias":
+            # tex.mkdir(exist_ok=True, parents=True)
             n_instances = len((df["problem"] + "-" + df["instance"]).unique())
 
             track, = df["track"].unique()
             track = track[:3]
-            print(groups.index)
+
             def rename_idx(x):
                 if "base" in x:
                     return "\\baseline"
@@ -681,12 +700,11 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 elif "none" in x:
                     return "\\explain"
                 else:
-                    print(x)
                     return f"\\{x.split('-')[1:][0]}"
 
-            tex = groups
-            # tex = groups.rename(index=rename_idx)
-            print(tex[
+            tex_df = groups
+            # tex_df = groups.rename(index=rename_idx)
+            latex_output = tex_df[
                 [
                     *(["unk", "mem", "post"]),
                     *(["feas"] if is_cop else [] ),
@@ -703,7 +721,36 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=False):
                 caption=f"{n_instances} {track} instances",
                 label=f"tbl:res:{track.lower()}",
                 escape=True,
-            ))
+            )
+
+            # Move caption to bottom of table
+            lines = latex_output.split('\n')
+            caption_lines = []
+            other_lines = []
+
+            # Separate caption/label lines from other lines
+            for line in lines:
+                if line.strip().startswith('\\caption') or line.strip().startswith('\\label'):
+                    caption_lines.append(line)
+                else:
+                    other_lines.append(line)
+
+            # Reconstruct with caption at the bottom
+            if caption_lines:
+                # Find the \end{table} line
+                for i, line in enumerate(other_lines):
+                    if '\\end{table}' in line:
+                        # Insert caption lines before \end{table}
+                        other_lines = other_lines[:i] + caption_lines + other_lines[i:]
+                        break
+                latex_output = '\n'.join(other_lines)
+            else:
+                latex_output = '\n'.join(other_lines)
+
+            # Save to file
+            with open(tex.with_name(tex.name + "_table.tex"), 'w') as f:
+                f.write(latex_output)
+            print(f"LaTeX table saved to {tex}")
 
 
     errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception", "traceback"]]
@@ -769,17 +816,34 @@ def main():
                         help='Display plots interactively. Specify which plots: cactus, scatter, or both. Use --show without args to show all.')
     parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
     parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
-    parser.add_argument('--tex', action='store_true', default=None, help='Output tables in tex')
+    parser.add_argument('--tex', type=pathlib.Path, default=None, help='Path to save LaTeX tables generated from the analysis')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
     parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
     parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
     parser.add_argument('--small', type=int, default=25, help='Threshold for filtering by largest table size (default: 25)')
     parser.add_argument('-g', '--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
     parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
+    parser.add_argument('--sort-legend', type=str, choices=['alpha', 'performance'], default='alpha',
+                        help='Sort order for legend/lines: alpha (lexicographic, default) or performance (by instances solved)')
+    parser.add_argument('--scatter', type=str, nargs=2, metavar=('A', 'B'), default=None,
+                        help='Create scatter plot for two specific solvers whose aliases contain strings A and B')
+    parser.add_argument('--paper', action='store_true', default=False,
+                        help='Use larger font sizes (2x) in plots suitable for papers/publications')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, small=25, glob_alias=None, glob_instance=None, tex=False):
+def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, small=25, glob_alias=None, glob_instance=None, tex=None, sort_legend='alpha', scatter=None, paper=False):
+
+    # Set font sizes for publication-ready plots
+    if paper:
+        plt.rcParams.update({
+            'font.size': 20,
+            'axes.titlesize': 24,
+            'axes.labelsize': 20,
+            'xtick.labelsize': 18,
+            'ytick.labelsize': 18,
+            'legend.fontsize': 18,
+        })
 
     import subprocess
     if sync:
@@ -944,30 +1008,71 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
     if generate_cactus:
         # Generate performance/cactus plot
-        fig_cactus = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only)
+        fig_cactus = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only, sort_legend=sort_legend)
         if plot:
-            cactus = plot.with_name(f"{plot}_cactus")
+            # plot.mkdir(exist_ok=True, parents=True)
+            cactus = plot.with_name(plot.name + "_cactus")
             fig_cactus.savefig(cactus.with_suffix(".png"), bbox_inches='tight')
             fig_cactus.savefig(cactus.with_suffix(".svg"), bbox_inches='tight')
             print(f"Plot saved to {cactus}.{{png,svg}}")
 
-    # Generate scatter plot if exactly 2 solvers
+    # # Generate scatter plot if exactly 2 solvers
+    # aliases = sorted(df["alias"].unique())
+    # if generate_scatter and len(aliases) == 2:
+    #     fig_scatter = xcsp3_scatter_plot(
+    #             df,
+    #             solver1=aliases[0],
+    #             solver2=aliases[1],
+    #             time_limit=time_limit,
+    #             inst_metric="rows",
+    #             small=small,
+    #             # metric="time_post"
+    #             )
+    #     if plot:
+    #         scatter = plot.with_name("scatter")
+    #         fig_scatter.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
+    #         fig_scatter.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
+    #         print(f"Plot saved to {scatter}.{{png,svg}}")
+
+    # Generate custom scatter plot if --scatter option is provided
+    fig_scatter_custom = None
     aliases = sorted(df["alias"].unique())
-    if generate_scatter and len(aliases) == 2:
-        fig_scatter = xcsp3_scatter_plot(
-                df,
-                solver1=aliases[0],
-                solver2=aliases[1],
-                time_limit=time_limit,
-                inst_metric="rows",
-                small=small,
-                # metric="time_post"
-                )
+    if scatter is not None:
+        solver_str1, solver_str2 = scatter
+
+        # Find all aliases containing the provided strings
+        matches1 = [alias for alias in aliases if solver_str1 in alias]
+        matches2 = [alias for alias in aliases if solver_str2 in alias]
+
+        # Validate that each string matches exactly one solver
+        if len(matches1) == 0:
+            raise ValueError(f"No solver alias found containing '{solver_str1}'. Available aliases: {aliases}")
+        if len(matches1) > 1:
+            raise ValueError(f"Multiple solver aliases match '{solver_str1}': {matches1}. Please use a more specific string.")
+        if len(matches2) == 0:
+            raise ValueError(f"No solver alias found containing '{solver_str2}'. Available aliases: {aliases}")
+        if len(matches2) > 1:
+            raise ValueError(f"Multiple solver aliases match '{solver_str2}': {matches2}. Please use a more specific string.")
+
+        solver1 = matches1[0]
+        solver2 = matches2[0]
+
+        print(f"Creating custom scatter plot: {solver1} vs {solver2}")
+
+        fig_scatter_custom = xcsp3_scatter_plot(
+            df,
+            solver1=solver1,
+            solver2=solver2,
+            time_limit=time_limit,
+            inst_metric="rows",
+            small=small,
+        )
+
         if plot:
-            scatter = plot.with_name(f"{plot}_scatter")
-            fig_scatter.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
-            fig_scatter.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
-            print(f"Plot saved to {scatter}.{{png,svg}}")
+            scatter = plot.with_name(plot.name + "_scatter")
+            fig_scatter_custom.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
+            fig_scatter_custom.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
+            print(f"Custom scatter plot saved to {scatter}.{{png,svg}}")
 
     # Close figures we don't want to show before calling plt.show()
     if show is not None:
@@ -975,6 +1080,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             plt.close(fig_cactus)
         if fig_scatter is not None and not show_scatter:
             plt.close(fig_scatter)
+        # Custom scatter plot is shown if scatter option is enabled or show all
+        if fig_scatter_custom is not None and not show_scatter:
+            plt.close(fig_scatter_custom)
         plt.show()
 
 
