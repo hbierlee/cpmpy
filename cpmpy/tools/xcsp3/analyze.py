@@ -512,7 +512,7 @@ def main():
     parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
     parser.add_argument('--tex', type=pathlib.Path, default=None, help='Path to save LaTeX tables generated from the analysis')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
-    parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
+    parser.add_argument('--solved-only', action='store_true', help='Only keep instances which have been solved by at least one solver')
     parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
     parser.add_argument('--small', type=int, help='Threshold for filtering by largest table size (default: 25)')
     parser.add_argument('-g', '--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
@@ -659,7 +659,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
     # print(df.mask(df["status"] == OPT).groupby(by=['problem', 'instance']).agg(lambda x: ','.join(str(x_) for x_ in x.unique()))['obj'])
 
-    df['alias'] += '.'
+    # df['alias'] += '.'
 
     # Rename tracks for cleaner display
     df['track'] = df['track'].replace({
@@ -685,9 +685,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     df["time_solve"] = df["time_solve"].mask(~df["solved"])
 
     if solved_only:
-        # Filter to only show instances where all solvers solved them
+        # Filter to only keep instances where at least one solver solved them
         df = df[df[['problem', 'instance']].apply(
-            lambda x: all(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["solved"]),
+            lambda x: any(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["solved"]),
             axis=1
         )]
 
@@ -830,7 +830,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 obj = ('obj', 'first'),
                 )
 
-        # is_cop = "COP" in track
+        track = groups.index.get_level_values('track')[0]
+        is_cop = "COP" in track
 
         # TODO sort by given key from CLI arg
         # groups_ = groups_.reset_index().sort_values(by=["min_", *grouping]).set_index(grouping)
@@ -844,9 +845,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 "unk",
                 "mem",
             ]),
-            # *(["feas"] if is_cop else []),
+            *(["feas"] if is_cop else []),
             *([
-                "feas",
+                # "feas",
                 "post",
                 "solv",
             ] if not grouping_type == "per_instance" else ["median", "status"]),
@@ -914,26 +915,114 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 available_metadata = [col for col in METADATA_COLS if col in diff_.columns and col != 'method']
                 available_time = [col for col in time_cols if col in diff_.columns]
                 corr_cols = available_time + available_metadata
-                print("CC", corr_cols)
 
                 if corr_cols and 'alias' in diff_.index.names:
-                    # Get unique solvers (aliases)
-                    solvers = diff_.index.get_level_values('alias').unique()
+                    # Iterate over tracks if present in the grouping
+                    if 'track' in diff_.index.names:
+                        tracks = diff_.index.get_level_values('track').unique()
+                    else:
+                        tracks = [None]
 
-                    for solver in sorted(solvers):
-                        # Get data for this solver
-                        solver_data = diff_.xs(solver, level='alias')
+                    for track in tracks:
+                        # Filter by track if applicable
+                        if track is not None:
+                            track_diff = diff_.xs(track, level='track')
+                        else:
+                            track_diff = diff_
 
-                        # Compute correlation for this solver
-                        correlation = solver_data[corr_cols].corr()
+                        # Get unique solvers (aliases)
+                        solvers = track_diff.index.get_level_values('alias').unique()
 
-                        # Mask upper triangle (including diagonal) to avoid showing duplicate info
-                        mask = np.triu(np.ones_like(correlation, dtype=bool))
-                        correlation_masked = correlation.mask(mask)
+                        for solver in sorted(solvers):
+                            # Get data for this solver
+                            solver_data = track_diff.xs(solver, level='alias')
 
-                        print(f"\n== Correlation Matrix for {solver} (diff vs baseline) ==")
-                        with pd.option_context('display.float_format', '{:.6f}'.format):
-                            print(correlation_masked)
+                            # Compute correlation for this solver
+                            correlation = solver_data[corr_cols].corr()
+
+                            # Mask upper triangle (including diagonal) to avoid showing duplicate info
+                            mask = np.triu(np.ones_like(correlation, dtype=bool))
+                            correlation_masked = correlation.mask(mask)
+
+                            print(f"\n== Correlation Matrix for {solver} (diff vs baseline) ==")
+                            with pd.option_context('display.float_format', '{:.6f}'.format):
+                                print(correlation_masked)
+
+                            # Create scatter plots with fitted lines for t_solv_p2 correlations
+                            for time_col in time_cols:
+                                for metadata_col in available_metadata:
+                                    if metadata_col in solver_data.columns:
+                                        # Remove NaN values for plotting
+                                        plot_data = solver_data[[metadata_col, time_col]].dropna()
+
+                                        if len(plot_data) > 0:
+                                            fig, ax = plt.subplots(figsize=(12, 8))
+
+                                            # Get problem classes if available in index
+                                            if 'problem' in plot_data.index.names:
+                                                problems = plot_data.index.get_level_values('problem')
+                                                unique_problems = sorted(problems.unique())
+
+                                                # Create color and marker maps
+                                                colors = plt.cm.tab20(np.linspace(0, 1, len(unique_problems)))
+                                                problem_colors = dict(zip(unique_problems, colors))
+
+                                                # Different marker shapes for visual distinction
+                                                marker_shapes = ['o', 's', '^', 'v', '<', '>', 'D', 'p', '*', 'h', 'H', '+', 'x', 'd', '|', '_']
+                                                problem_markers = dict(zip(unique_problems,
+                                                                         [marker_shapes[i % len(marker_shapes)]
+                                                                          for i in range(len(unique_problems))]))
+
+                                                # Scatter plot colored and shaped by problem class
+                                                for problem in unique_problems:
+                                                    mask = problems == problem
+                                                    problem_data = plot_data[mask]
+                                                    ax.scatter(problem_data[metadata_col], problem_data[time_col],
+                                                             alpha=0.6, s=50, label=problem,
+                                                             color=problem_colors[problem],
+                                                             marker=problem_markers[problem])
+                                            else:
+                                                # Fallback: single color if no problem info
+                                                ax.scatter(plot_data[metadata_col], plot_data[time_col],
+                                                         alpha=0.6, s=50, label='Data points')
+
+                                            # Fit line
+                                            if len(plot_data) > 1:
+                                                z = np.polyfit(plot_data[metadata_col], plot_data[time_col], 1)
+                                                p = np.poly1d(z)
+                                                x_line = np.linspace(plot_data[metadata_col].min(),
+                                                                   plot_data[metadata_col].max(), 100)
+                                                ax.plot(x_line, p(x_line), 'r-', linewidth=2,
+                                                      label=f'Fitted line (r={correlation.loc[metadata_col, time_col]:.3f})')
+
+                                            # Set axis scales and limits
+                                            ax.set_xscale('log')
+
+                                            # Set y-axis limits to -PAR..PAR with padding
+                                            PAR = 2 * time_limit
+                                            padding = 0.1  # 10% padding
+                                            ax.set_ylim(-PAR * (1 + padding), PAR * (1 + padding))
+
+                                            ax.set_xlabel(metadata_col, fontsize=12)
+                                            ax.set_ylabel(f'{time_col} differential', fontsize=12)
+                                            ax.set_title(f'{solver}: {metadata_col} vs {time_col} differential ({track})', fontsize=14)
+
+                                            # Place legend outside plot area to avoid covering data
+                                            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left',
+                                                    borderaxespad=0., fontsize=9)
+                                            ax.grid(True, alpha=0.3)
+
+                                            plt.tight_layout()
+
+                                            # Save plot
+                                            if plot:
+                                                plot_name = plot / f"correlation_{track}_{solver}_{metadata_col}_vs_{time_col}"
+                                                fig.savefig(f"{plot_name}.png", bbox_inches='tight', dpi=150)
+                                                fig.savefig(f"{plot_name}.svg", bbox_inches='tight')
+                                                print(f"Correlation plot saved to {plot_name}.{{png,svg}}")
+
+                                            plt.close(fig)
+
 
     for track, groups in df.groupby(by="track"):
         is_cop = "COP" in track
