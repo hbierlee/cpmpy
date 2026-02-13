@@ -177,7 +177,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
 
     return fig
 
-def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None, small=25):
+def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None):
     """
     Create a scatter plot comparing the performance of two solvers.
 
@@ -213,7 +213,7 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # Select columns for merge - include metadata for tooltips
     base_cols = ['problem', 'instance', metric, 'solved', inst_metric, 'small']
-    metadata_cols = ['rows', 'median', 'stdev', 'min', 'max', 'time_post']
+    metadata_cols = ['area', 'rows', 'median', 'stdev', 'min', 'max', 'time_post']
 
     # Combine and deduplicate columns (inst_metric might already be in metadata_cols)
     cols = list(dict.fromkeys(base_cols + metadata_cols))
@@ -252,6 +252,7 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     instances = merged['instance'].values
 
     # Extract additional metadata for tooltips
+    area = merged['area_1'].values
     rows = merged['rows_1'].values
     medians = merged['median_1'].values
     stdevs = merged['stdev_1'].values
@@ -290,7 +291,7 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # Add colorbar
     cbar = plt.colorbar(scatter, ax=ax)
-    cbar.set_label(f'{inst_metric} table size', rotation=270, labelpad=20)
+    cbar.set_label(f'table {inst_metric}', rotation=270, labelpad=20)
 
     # # Add min and max as ticks
     # effective_vmin = max(vmin, 1e-10) if SET_MIN is None else SET_MIN
@@ -303,12 +304,15 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     min_val = min(x.min(), y.min())
 
     min_max = [0.1, PAR]
-    ax.plot(min_max, min_max, 'k--', linewidth=1.5, label='Equal performance', zorder=0)
+    padding = 1.5
+    # Extend diagonal lines to the padded plot limits
+    diagonal_range = [min_max[0], min_max[1] * padding]
+    ax.plot(diagonal_range, diagonal_range, 'k--', linewidth=1.5, label='Equal performance', zorder=0)
 
     # Add 10% improvement lines (parallel to diagonal)
     improvement_factor = 2
-    ax.plot(min_max, [m * improvement_factor for m in min_max], 'k:', linewidth=1, alpha=0.5, zorder=0)
-    ax.plot(min_max, [m / improvement_factor for m in min_max], 'k:', linewidth=1, alpha=0.5, zorder=0)
+    ax.plot(diagonal_range, [m * improvement_factor for m in diagonal_range], 'k:', linewidth=1, alpha=0.5, zorder=0)
+    ax.plot(diagonal_range, [m / improvement_factor for m in diagonal_range], 'k:', linewidth=1, alpha=0.5, zorder=0)
 
     # Add time limit borders and grey out areas outside
     if time_limit is not None:
@@ -341,10 +345,10 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     ax.set_xscale('log')
     ax.set_yscale('log')
 
-    # Set axis limits
+    # Set axis limits with padding to prevent dots from being cut off
     if time_limit is not None:
-        ax.set_xlim(*min_max)
-        ax.set_ylim(*min_max)
+        ax.set_xlim(min_max[0], min_max[1] * padding)
+        ax.set_ylim(min_max[0], min_max[1] * padding)
 
     ax.legend()
     plt.tight_layout()
@@ -357,6 +361,7 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
         def on_add(sel):
             idx = sel.index
             text = (f"{problems[idx]}-{instances[idx]}\n"
+                   f"area: {area[idx]:.0f},"
                    f"rows: {rows[idx]:.0f}, median: {medians[idx]:.1f}, "
                    f"stdev: {stdevs[idx]:.1f if not np.isnan(stdevs[idx]) else 'N/A'}\n"
                    f"min: {mins[idx]:.0f}, max: {maxs[idx]:.0f}\n"
@@ -499,8 +504,210 @@ def check_inconsistent_instances(df):
 
     return inconsistent
 
-def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
+def reorder_cols(df, cols):
+    return df[cols + [col for col in df.columns if col not in cols]]
 
+    
+    
+def main():
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Analyze XCSP3 solver performance data')
+    parser.add_argument('files', nargs='+', help='List of CSV files or directories to analyze')
+    parser.add_argument('--time-limit', type=float, default=None, help='Maximum time limit in seconds to show on x-axis')
+    parser.add_argument('--plot', '-p', type=pathlib.Path, default=None, help='Path to save the plot image (e.g., plot.png)')
+    parser.add_argument('--show', nargs='*', choices=['cactus', 'scatter'], default=None,
+                        help='Display plots interactively. Specify which plots: cactus, scatter, or both. Use --show without args to show all.')
+    parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
+    parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
+    parser.add_argument('--tex', type=pathlib.Path, default=None, help='Path to save LaTeX tables generated from the analysis')
+    parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
+    parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
+    parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
+    parser.add_argument('--small', type=int, help='Threshold for filtering by largest table size (default: 25)')
+    parser.add_argument('-g', '--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
+    parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
+    parser.add_argument('--sort-legend', type=str, choices=['alpha', 'performance'], default='alpha',
+                        help='Sort order for legend/lines: alpha (lexicographic, default) or performance (by instances solved)')
+    parser.add_argument('--scatter', type=str, nargs=2, metavar=('A', 'B'), default=None,
+                        help='Create scatter plot for two specific solvers whose aliases contain strings A and B')
+    parser.add_argument('--paper', action='store_true', default=False,
+                        help='Use larger font sizes (2x) in plots suitable for papers/publications')
+    args = parser.parse_args()
+    analyze(**vars(args))
+
+def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, small=None, glob_alias=None, glob_instance=None, tex=None, sort_legend='alpha', scatter=None, paper=False):
+
+    # Set font sizes for publication-ready plots
+    if paper:
+        plt.rcParams.update({
+            'font.size': 20,
+            'axes.titlesize': 24,
+            'axes.labelsize': 20,
+            'xtick.labelsize': 18,
+            'ytick.labelsize': 18,
+            'legend.fontsize': 18,
+        })
+
+    import subprocess
+    if sync:
+        cmd = ["rsync", "-r", sync / files[0], "results"]
+        print("CMD", " ".join(str(c) for c in cmd))
+        subprocess.run(cmd)
+    
+
+
+    # Gather all CSV files
+    csv_files = []
+    for (i, path_str) in enumerate(reversed(files)):
+        path = pathlib.Path(path_str)
+        assert path.exists(), path
+        if path.is_file() and path.suffix == '.csv':
+            csv_files.append((i, pathlib.Path(path)))
+        elif path.is_dir():
+            csv_files.extend((i, pathlib.Path(p)) for p in path.rglob('*.csv'))
+        else:
+            print(f"Warning: {path} is not a valid CSV file or directory")
+
+
+    if not csv_files:
+        print("No CSV files found.")
+        return
+
+    # Read and merge all CSV files
+    dfs = []
+    for i, file in csv_files:
+        print("Reading", file)
+        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
+        df["run"] = chr(65 + i) if True else str(file.parent)
+        dfs.append(df)
+    
+    df = pd.concat(dfs, ignore_index=True)
+
+    pd.set_option("display.max_colwidth", None)
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.max_rows", None)
+    pd.set_option("display.expand_frame_repr", False)
+
+
+    # find problem names
+    df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
+    df['instance'] = df['instance'].map(lambda x: "-".join(x.split("-")[1:]).split(".")[0])
+
+    # rename
+    df = df.rename(columns={"objective_value": "obj"})
+
+    # Create metadata dataframe for unique instances only
+    df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
+
+    def get_metadata(x):
+        with open(x) as f:
+            metadata = json.load(f)
+        rowss = [t["rows"] for t in metadata["tables"]]
+
+        def mean(a):
+            return statistics.mean(a) if a else None
+
+        def median(a):
+            return statistics.median(a) if a else None
+
+        def stdev(a):
+            return statistics.stdev(a) if a else None
+
+        def min_(a):
+            return min(a) if a else None
+
+        def max_(a):
+            return max(a) if a else None
+
+        return [metadata.get("method", None), sum(t["area"] for t in metadata["tables"]), sum(rowss), min_(rowss), max_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
+
+    # Get unique instances to avoid reading the same file multiple times
+    unique_instances = df[["year", "track", "problem", "instance", "file_name"]].drop_duplicates()
+
+    # Read metadata only for unique instances
+    metadata_values = unique_instances["file_name"].map(get_metadata).to_list()
+    unique_instances[["method", "area", "rows", "min", "max", "count", "mean", "median", "stdev"]] = pd.DataFrame(
+        metadata_values, index=unique_instances.index
+    )
+
+    # Merge metadata back into main dataframe
+    df = df.drop(columns=["file_name"]).merge(
+        unique_instances.drop(columns=["file_name"]),
+        on=["year", "track", "problem", "instance"],
+        how="left"
+    )
+
+
+    # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
+
+    # df["obj"] = df.where(df["method"] == "minimize", -df["obj"], df["obj"])
+    # df["obj"] = df.map(lambda x: -x["obj"] if x["method"] == "minimize" else x["obj"])
+    # df = df.drop(df[df["max"] <= 100].index)
+
+    # Filter out instances with max table size <= small threshold
+    
+    df["small"] = (df["max"] <= small) if small is not None else False
+    # df = df.drop(df[df["small"]].index)
+
+    # let solve include post time?
+    df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
+
+    # Change status to MEM for Gurobi out of memory errors
+    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].str.contains("gurobipy._exception.GurobiError: Out of memory", na=False)
+    df.loc[gurobi_oom_mask, 'status'] = MEM
+
+    if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
+        df['alias'] = df['alias'] + "-" + df['run']
+
+    for col, glob in [("alias", glob_alias), ("problem", glob_instance), ("track", glob_instance)]:
+        if glob:
+            df = df.drop(df[~df[col].map(lambda g: any(g_ in g for g_ in glob))].index)
+
+
+    # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
+    # print(df.mask(df["status"] == OPT).groupby(by=['problem', 'instance']).agg(lambda x: ','.join(str(x_) for x_ in x.unique()))['obj'])
+
+    df['alias'] += '.'
+
+    # is_cop = "COP" in track
+
+    # solved = [OPT, UNS] if is_cop else [SAT, UNS]
+    solved = [OPT, UNS]
+
+    df["unknown"] = df["status"] == UNK
+    df["error"] = df["status"] == ERR
+    df["memory"] = df["status"] == MEM
+    df["feasible"] = df["status"].isin((OPT, SAT, UNS))
+    df["solved"] = df["status"].isin(solved)
+
+
+    # replace time_solve to NaN if not solved
+    df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
+
+    if solved_only:
+        df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset(solved), axis=1)]
+
+    if intermediate:
+        # Filter to only keep instances that occur for all solvers
+        total_solvers = df['alias'].nunique()
+        instance_solver_counts = df.groupby(['problem', 'instance'])['alias'].nunique()
+        valid_instances = instance_solver_counts[instance_solver_counts == total_solvers].index
+        df = df.set_index(['problem', 'instance']).loc[valid_instances].reset_index()
+
+    if no_errors:
+        # Filter out instances where any solver got an error status
+        error_instances = df[df['error']].groupby(['problem', 'instance']).size().index
+        df = df.set_index(['problem', 'instance'])
+        df = df.drop(error_instances, errors='ignore')
+        df = df.reset_index()
+
+    assert not df.empty
+
+    # Print some stats
+
+# def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
+
+    # Start stats
     if False:  # TODO FutureWarning: The behavior of Series.idxmax with all-NA values, or any-NA and skipna=False, is deprecated. In a future version this will raise ValueError
         for phase in ['parse', 'model', 'post']:
             slowest_idx = df[f"time_{phase}"].idxmax()
@@ -580,15 +787,16 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
 
     for grouping_type, grouping in (
             # ("per_alias", ['alias', 'problem']),
-            ("per_inst", ['problem','instance','alias']),
-            ("per_problem", ['problem', 'alias']),
-            ("per_alias", ['alias'])
-            ):
+            ("per_instance", ['track', 'problem', 'instance', 'alias']),
+            ("per_problem", ['track', 'problem', 'alias']),
+            ("per_track", ['track', 'alias']),
+        ):
 
         groups = df.assign(
                 time_solve=df["time_solve"].where(df["status"].isin(solved), 2 * time_limit)
             ).groupby(grouping).agg(
-                alias = ("alias", "first"),
+                # track = ("track", "first"),
+                # alias = ("alias", "first"),
                 insts = ("problem", 'count'),
                 min_ = ("min", 'min'),
                 max_ = ("max", 'max'),
@@ -618,8 +826,7 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
                 obj = ('obj', 'first'),
                 )
 
-        track, = df["track"].unique()
-        is_cop = "COP" in track
+        # is_cop = "COP" in track
 
         # TODO sort by given key from CLI arg
         # groups_ = groups_.reset_index().sort_values(by=["min_", *grouping]).set_index(grouping)
@@ -633,17 +840,18 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
                 "unk",
                 "mem",
             ]),
-            *(["feas"] if is_cop else []),
+            # *(["feas"] if is_cop else []),
             *([
+                "feas",
                 "post",
                 "solv",
-            ] if not grouping_type == "per_inst" else ["median", "status"]),
+            ] if not grouping_type == "per_instance" else ["median", "status"]),
             # *(["insts"] if PER_PROBLEM else ["insts"]),
             *([
                 "t_post_p2",
                 "t_solv_p2",
             ]),
-            *(["method","obj"] if grouping_type == "per_inst" else []),
+            *(["method", "obj"] if grouping_type == "per_instance" else []),
             *([
                 "cuts",
                 "lp_cuts",
@@ -679,17 +887,18 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
             print(diff_)
 
             # Compute correlations
-            if grouping_type == "per_inst":
+            if grouping_type == "per_instance":
                 correlation = diff_[['t_solv_p2', 'median']].corr()
                 print("\n== Correlation between t_solv_p2 and median ==")
                 with pd.option_context('display.float_format', '{:.6f}'.format):
                     print(correlation)
 
-        if tex is not None and grouping_type == "per_alias":
-            # tex.mkdir(exist_ok=True, parents=True)
-            n_instances = len((df["problem"] + "-" + df["instance"]).unique())
+    for track, groups in df.groupby(by="track"):
+        is_cop = "COP" in track
+        if tex is not None:
+            tex.mkdir(exist_ok=True, parents=True)
+            n_instances = len((groups["problem"] + "-" + groups["instance"]).unique())
 
-            track, = df["track"].unique()
             track = track[:3]
 
             def rename_idx(x):
@@ -752,6 +961,82 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
                 f.write(latex_output)
             print(f"LaTeX table saved to {tex}")
 
+        # Determine which plots to generate and show
+        show_cactus = False
+        show_scatter = False
+        if show is not None:
+            # If show is an empty list, show all plots
+            if len(show) == 0:
+                show_cactus = True
+                show_scatter = True
+            else:
+                show_cactus = 'cactus' in show
+                show_scatter = 'scatter' in show
+
+        # Generate plots based on plot argument or show argument
+        generate_cactus = plot is not None or show_cactus
+
+        fig_cactus = None
+        fig_scatter = None
+
+        if generate_cactus:
+            # Generate performance/cactus plot
+            fig_cactus = xcsp3_plot(
+                groups.reset_index(),
+                time_limit,
+                filter_by="feasible",
+                solved_only=solved_only,
+                sort_legend=sort_legend,
+            )
+
+            plot_ = plot.with_name(plot.name + "-" + track)
+            if plot_:
+                # plot.mkdir(exist_ok=True, parents=True)
+                cactus = plot_.with_name(plot_.name + "-cactus")
+                fig_cactus.savefig(cactus.with_suffix(".png"), bbox_inches='tight')
+                fig_cactus.savefig(cactus.with_suffix(".svg"), bbox_inches='tight')
+                print(f"Plot saved to {cactus}.{{png,svg}}")
+
+        # Generate custom scatter plot if --scatter option is provided
+        fig_scatter_custom = None
+        aliases = sorted(groups["alias"].unique())
+        if scatter is not None:
+            solver_str1, solver_str2 = scatter
+
+            # Find all aliases containing the provided strings
+            matches1 = [alias for alias in aliases if solver_str1 in alias]
+            matches2 = [alias for alias in aliases if solver_str2 in alias]
+
+            # Validate that each string matches exactly one solver
+            if len(matches1) == 0:
+                raise ValueError(f"No solver alias found containing '{solver_str1}'. Available aliases: {aliases}")
+            if len(matches1) > 1:
+                raise ValueError(f"Multiple solver aliases match '{solver_str1}': {matches1}. Please use a more specific string.")
+            if len(matches2) == 0:
+                raise ValueError(f"No solver alias found containing '{solver_str2}'. Available aliases: {aliases}")
+            if len(matches2) > 1:
+                raise ValueError(f"Multiple solver aliases match '{solver_str2}': {matches2}. Please use a more specific string.")
+
+            solver1 = matches1[0]
+            solver2 = matches2[0]
+
+            print(f"Creating custom scatter plot: {solver1} vs {solver2}")
+
+            fig_scatter_custom = xcsp3_scatter_plot(
+                groups.reset_index(),
+                solver1=solver1,
+                solver2=solver2,
+                time_limit=time_limit,
+                # inst_metric="area",
+                # inst_metric="max",
+                inst_metric="rows",
+            )
+
+            if plot_:
+                scatter = plot_.with_name(plot_.name + "_scatter")
+                fig_scatter_custom.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
+                fig_scatter_custom.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
+                print(f"Custom scatter plot saved to {scatter}.{{png,svg}}")
 
     errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception", "traceback"]]
     if not errors.empty:
@@ -767,6 +1052,21 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
                 print(f"Exception: {error['exception']}")
             if pd.notna(error['traceback']):
                 print(f"Traceback:\n{error['traceback']}")
+
+    # Close figures we don't want to show before calling plt.show()
+    if show is not None:
+        if fig_cactus is not None and not show_cactus:
+            plt.close(fig_cactus)
+        if fig_scatter is not None and not show_scatter:
+            plt.close(fig_scatter)
+        # Custom scatter plot is shown if scatter option is enabled or show all
+        if fig_scatter_custom is not None and not show_scatter:
+            plt.close(fig_scatter_custom)
+        plt.show()
+
+
+
+
 
     # if not errors.empty:
         # exc = df[df["status"] == ERR]
@@ -800,291 +1100,6 @@ def xcsp3_stats(df, time_limit=None, save=None, solved=[OPT, UNS], tex=None):
                     'n_cuts_unexplained',
                     'exception',
                 ]].to_csv(save, float_format='%.1f')
-
-def reorder_cols(df, cols):
-    return df[cols + [col for col in df.columns if col not in cols]]
-
-    
-    
-def main():
-    # Set up argument parser
-    parser = argparse.ArgumentParser(description='Analyze XCSP3 solver performance data')
-    parser.add_argument('files', nargs='+', help='List of CSV files or directories to analyze')
-    parser.add_argument('--time-limit', type=float, default=None, help='Maximum time limit in seconds to show on x-axis')
-    parser.add_argument('--plot', '-p', type=pathlib.Path, default=None, help='Path to save the plot image (e.g., plot.png)')
-    parser.add_argument('--show', nargs='*', choices=['cactus', 'scatter'], default=None,
-                        help='Display plots interactively. Specify which plots: cactus, scatter, or both. Use --show without args to show all.')
-    parser.add_argument('--sync', type=pathlib.Path, default=None, help='Location to sync files from')
-    parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
-    parser.add_argument('--tex', type=pathlib.Path, default=None, help='Path to save LaTeX tables generated from the analysis')
-    parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
-    parser.add_argument('--solved-only', action='store_true', help='Only show instances which have been solved by all solvers')
-    parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
-    parser.add_argument('--small', type=int, default=25, help='Threshold for filtering by largest table size (default: 25)')
-    parser.add_argument('-g', '--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
-    parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
-    parser.add_argument('--sort-legend', type=str, choices=['alpha', 'performance'], default='alpha',
-                        help='Sort order for legend/lines: alpha (lexicographic, default) or performance (by instances solved)')
-    parser.add_argument('--scatter', type=str, nargs=2, metavar=('A', 'B'), default=None,
-                        help='Create scatter plot for two specific solvers whose aliases contain strings A and B')
-    parser.add_argument('--paper', action='store_true', default=False,
-                        help='Use larger font sizes (2x) in plots suitable for papers/publications')
-    args = parser.parse_args()
-    analyze(**vars(args))
-
-def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, small=25, glob_alias=None, glob_instance=None, tex=None, sort_legend='alpha', scatter=None, paper=False):
-
-    # Set font sizes for publication-ready plots
-    if paper:
-        plt.rcParams.update({
-            'font.size': 20,
-            'axes.titlesize': 24,
-            'axes.labelsize': 20,
-            'xtick.labelsize': 18,
-            'ytick.labelsize': 18,
-            'legend.fontsize': 18,
-        })
-
-    import subprocess
-    if sync:
-        cmd = ["rsync", "-r", sync / files[0], "results"]
-        print("CMD", " ".join(str(c) for c in cmd))
-        subprocess.run(cmd)
-    
-
-
-    # Gather all CSV files
-    csv_files = []
-    for (i, path_str) in enumerate(reversed(files)):
-        path = pathlib.Path(path_str)
-        assert path.exists(), path
-        if path.is_file() and path.suffix == '.csv':
-            csv_files.append((i, pathlib.Path(path)))
-        elif path.is_dir():
-            csv_files.extend((i, pathlib.Path(p)) for p in path.rglob('*.csv'))
-        else:
-            print(f"Warning: {path} is not a valid CSV file or directory")
-
-
-    if not csv_files:
-        print("No CSV files found.")
-        return
-
-    # Read and merge all CSV files
-    dfs = []
-    for i, file in csv_files:
-        print("Reading", file)
-        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
-        df["run"] = chr(65 + i) if True else str(file.parent)
-        dfs.append(df)
-    
-    df = pd.concat(dfs, ignore_index=True)
-
-    pd.set_option("display.max_colwidth", None)
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.max_rows", None)
-    pd.set_option("display.expand_frame_repr", False)
-
-
-    # find problem names
-    df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
-    df['instance'] = df['instance'].map(lambda x: "-".join(x.split("-")[1:]).split(".")[0])
-
-    # rename
-    df = df.rename(columns={"objective_value": "obj"})
-
-    df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
-    def get_metadata(x):
-        with open(x) as f:
-            metadata = json.load(f)
-        rowss = [t["rows"] for t in metadata["tables"]]
-
-        def mean(a):
-            return statistics.mean(a) if a else None
-
-        def median(a):
-            return statistics.median(a) if a else None
-
-        def stdev(a):
-            return statistics.stdev(a) if a else None
-
-        def min_(a):
-            return min(a) if a else None
-
-        def max_(a):
-            return max(a) if a else None
-
-
-        return [metadata.get("method", None), sum(rowss), min_(rowss), max_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
-
-    df[["method", "rows", "min", "max", "count", "mean", "median", "stdev"]] = pd.DataFrame(df["file_name"].map(get_metadata).to_list(),index=df.index )
-
-
-    # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
-
-    # df["obj"] = df.where(df["method"] == "minimize", -df["obj"], df["obj"])
-    # df["obj"] = df.map(lambda x: -x["obj"] if x["method"] == "minimize" else x["obj"])
-    # df = df.drop(df[df["max"] <= 100].index)
-
-    # Filter out instances with max table size <= small threshold
-    df["small"] = df["max"] <= small
-    # df = df.drop(df[df["small"]].index)
-
-    # let solve include post time?
-    df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
-
-    # Change status to MEM for Gurobi out of memory errors
-    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].str.contains("gurobipy._exception.GurobiError: Out of memory", na=False)
-    df.loc[gurobi_oom_mask, 'status'] = MEM
-
-    if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
-        df['alias'] = df['alias'] + "-" + df['run']
-
-    for col, glob in [("alias", glob_alias), ("problem", glob_instance), ("track", "COP")]:
-        if glob:
-            df = df.drop(df[~df[col].map(lambda g: any(g_ in g for g_ in glob))].index)
-
-
-    # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
-    # print(df.mask(df["status"] == OPT).groupby(by=['problem', 'instance']).agg(lambda x: ','.join(str(x_) for x_ in x.unique()))['obj'])
-
-    df['alias'] += '.'
-
-    track, = df["track"].unique()
-    is_cop = "COP" in track
-
-    solved = [OPT, UNS] if is_cop else [SAT, UNS]
-
-    df["unknown"] = df["status"] == UNK
-    df["error"] = df["status"] == ERR
-    df["memory"] = df["status"] == MEM
-    df["feasible"] = df["status"].isin((OPT, SAT, UNS))
-    df["solved"] = df["status"].isin(solved)
-
-
-    # replace time_solve to NaN if not solved
-    df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
-
-    if solved_only:
-        df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset(solved), axis=1)]
-
-    if intermediate:
-        # Filter to only keep instances that occur for all solvers
-        total_solvers = df['alias'].nunique()
-        instance_solver_counts = df.groupby(['problem', 'instance'])['alias'].nunique()
-        valid_instances = instance_solver_counts[instance_solver_counts == total_solvers].index
-        df = df.set_index(['problem', 'instance']).loc[valid_instances].reset_index()
-
-    if no_errors:
-        # Filter out instances where any solver got an error status
-        error_instances = df[df['error']].groupby(['problem', 'instance']).size().index
-        df = df.set_index(['problem', 'instance'])
-        df = df.drop(error_instances, errors='ignore')
-        df = df.reset_index()
-
-    assert not df.empty
-
-    # Print some stats
-    xcsp3_stats(df, time_limit=time_limit, save=save, tex=tex)
-
-    # Determine which plots to generate and show
-    show_cactus = False
-    show_scatter = False
-    if show is not None:
-        # If show is an empty list, show all plots
-        if len(show) == 0:
-            show_cactus = True
-            show_scatter = True
-        else:
-            show_cactus = 'cactus' in show
-            show_scatter = 'scatter' in show
-
-    # Generate plots based on plot argument or show argument
-    generate_cactus = plot is not None or show_cactus
-    generate_scatter = plot is not None or show_scatter
-
-    fig_cactus = None
-    fig_scatter = None
-
-    if generate_cactus:
-        # Generate performance/cactus plot
-        fig_cactus = xcsp3_plot(df, time_limit, filter_by="feasible", solved_only=solved_only, sort_legend=sort_legend)
-        if plot:
-            # plot.mkdir(exist_ok=True, parents=True)
-            cactus = plot.with_name(plot.name + "_cactus")
-            fig_cactus.savefig(cactus.with_suffix(".png"), bbox_inches='tight')
-            fig_cactus.savefig(cactus.with_suffix(".svg"), bbox_inches='tight')
-            print(f"Plot saved to {cactus}.{{png,svg}}")
-
-    # # Generate scatter plot if exactly 2 solvers
-    # aliases = sorted(df["alias"].unique())
-    # if generate_scatter and len(aliases) == 2:
-    #     fig_scatter = xcsp3_scatter_plot(
-    #             df,
-    #             solver1=aliases[0],
-    #             solver2=aliases[1],
-    #             time_limit=time_limit,
-    #             inst_metric="rows",
-    #             small=small,
-    #             # metric="time_post"
-    #             )
-    #     if plot:
-    #         scatter = plot.with_name("scatter")
-    #         fig_scatter.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
-    #         fig_scatter.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
-    #         print(f"Plot saved to {scatter}.{{png,svg}}")
-
-    # Generate custom scatter plot if --scatter option is provided
-    fig_scatter_custom = None
-    aliases = sorted(df["alias"].unique())
-    if scatter is not None:
-        solver_str1, solver_str2 = scatter
-
-        # Find all aliases containing the provided strings
-        matches1 = [alias for alias in aliases if solver_str1 in alias]
-        matches2 = [alias for alias in aliases if solver_str2 in alias]
-
-        # Validate that each string matches exactly one solver
-        if len(matches1) == 0:
-            raise ValueError(f"No solver alias found containing '{solver_str1}'. Available aliases: {aliases}")
-        if len(matches1) > 1:
-            raise ValueError(f"Multiple solver aliases match '{solver_str1}': {matches1}. Please use a more specific string.")
-        if len(matches2) == 0:
-            raise ValueError(f"No solver alias found containing '{solver_str2}'. Available aliases: {aliases}")
-        if len(matches2) > 1:
-            raise ValueError(f"Multiple solver aliases match '{solver_str2}': {matches2}. Please use a more specific string.")
-
-        solver1 = matches1[0]
-        solver2 = matches2[0]
-
-        print(f"Creating custom scatter plot: {solver1} vs {solver2}")
-
-        fig_scatter_custom = xcsp3_scatter_plot(
-            df,
-            solver1=solver1,
-            solver2=solver2,
-            time_limit=time_limit,
-            inst_metric="rows",
-            small=small,
-        )
-
-        if plot:
-            scatter = plot.with_name(plot.name + "_scatter")
-            fig_scatter_custom.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
-            fig_scatter_custom.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
-            print(f"Custom scatter plot saved to {scatter}.{{png,svg}}")
-
-    # Close figures we don't want to show before calling plt.show()
-    if show is not None:
-        if fig_cactus is not None and not show_cactus:
-            plt.close(fig_cactus)
-        if fig_scatter is not None and not show_scatter:
-            plt.close(fig_scatter)
-        # Custom scatter plot is shown if scatter option is enabled or show all
-        if fig_scatter_custom is not None and not show_scatter:
-            plt.close(fig_scatter_custom)
-        plt.show()
-
 
 if __name__ == '__main__':
     main()

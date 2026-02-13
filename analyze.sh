@@ -3,7 +3,7 @@ declare -a ARGS
 ARGS+=(--sort-legend alpha)
 ARGS+=(--small 100)
 ARGS+=(--time-limit 600)
-ARGS+=(--no-errors)
+# ARGS+=(--no-errors)
 ARGS+=(--scatter all bool)
 ARGS+=(--paper)
 # ARGS+=(--tex analysis)
