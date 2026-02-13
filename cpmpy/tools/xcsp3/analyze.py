@@ -43,6 +43,8 @@ Optional Arguments
     Use larger font sizes (2x) in plots suitable for papers/publications.
 """
 
+import builtins
+import subprocess
 import argparse
 import ast
 import json
@@ -90,6 +92,8 @@ FIELDNAMES = [
     "time_cb",
     "constraints",
 ]
+
+METADATA_COLS = ["method", "area", "rows", "min", "max", "count", "mean", "median", "stdev"]
 
 
 def _extract_cost(solution_str):
@@ -266,9 +270,6 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # Create colormap and set colors for special cases
     cmap = plt.get_cmap('viridis').copy()
-    # cmap.set_under('red')
-
-    # cmap.set_bad('blue')  # Color for masked values (small instances)
 
     # Create alpha array - lower alpha for red dots (below small threshold)
     alpha_values = np.where(merged["small_1"], 0.2, 0.8)
@@ -292,16 +293,6 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     # Add colorbar
     cbar = plt.colorbar(scatter, ax=ax)
     cbar.set_label(f'table {inst_metric}', rotation=270, labelpad=20)
-
-    # # Add min and max as ticks
-    # effective_vmin = max(vmin, 1e-10) if SET_MIN is None else SET_MIN
-    # existing_ticks = cbar.get_ticks()
-    # new_ticks = sorted(set([effective_vmin, vmax] + list(existing_ticks)))
-    # cbar.set_ticks(new_ticks)
-
-    # Plot diagonal line (y=x)
-    max_val = max(x.max(), y.max())
-    min_val = min(x.min(), y.min())
 
     min_max = [0.1, PAR]
     padding = 1.5
@@ -532,10 +523,12 @@ def main():
                         help='Create scatter plot for two specific solvers whose aliases contain strings A and B')
     parser.add_argument('--paper', action='store_true', default=False,
                         help='Use larger font sizes (2x) in plots suitable for papers/publications')
+    parser.add_argument('--baseline', type=str, default=None,
+                        help='Baseline solver alias to compare against (for diff and correlation analysis)')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, small=None, glob_alias=None, glob_instance=None, tex=None, sort_legend='alpha', scatter=None, paper=False):
+def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, small=None, glob_alias=None, glob_instance=None, tex=None, sort_legend='alpha', scatter=None, paper=False, baseline=None):
 
     # Set font sizes for publication-ready plots
     if paper:
@@ -548,7 +541,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             'legend.fontsize': 18,
         })
 
-    import subprocess
     if sync:
         cmd = ["rsync", "-r", sync / files[0], "results"]
         print("CMD", " ".join(str(c) for c in cmd))
@@ -626,7 +618,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
     # Read metadata only for unique instances
     metadata_values = unique_instances["file_name"].map(get_metadata).to_list()
-    unique_instances[["method", "area", "rows", "min", "max", "count", "mean", "median", "stdev"]] = pd.DataFrame(
+    unique_instances[METADATA_COLS] = pd.DataFrame(
         metadata_values, index=unique_instances.index
     )
 
@@ -669,23 +661,35 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
     df['alias'] += '.'
 
-    # is_cop = "COP" in track
+    # Rename tracks for cleaner display
+    df['track'] = df['track'].replace({
+        'COP22to25': 'COP',
+        'CSP22to25': 'CSP'
+    })
 
-    # solved = [OPT, UNS] if is_cop else [SAT, UNS]
-    solved = [OPT, UNS]
+    # Set solved status based on track type
+    def is_solved(row):
+        if 'COP' in row['track']:
+            return row['status'] in [OPT, UNS]
+        else:
+            return row['status'] in [SAT, UNS]
 
     df["unknown"] = df["status"] == UNK
     df["error"] = df["status"] == ERR
     df["memory"] = df["status"] == MEM
     df["feasible"] = df["status"].isin((OPT, SAT, UNS))
-    df["solved"] = df["status"].isin(solved)
+    df["solved"] = df.apply(is_solved, axis=1)
 
 
     # replace time_solve to NaN if not solved
-    df["time_solve"] = df["time_solve"].mask(~df["status"].isin(solved))
+    df["time_solve"] = df["time_solve"].mask(~df["solved"])
 
     if solved_only:
-        df = df[df[['problem', 'instance']].apply(lambda x: set(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["status"].unique()).issubset(solved), axis=1)]
+        # Filter to only show instances where all solvers solved them
+        df = df[df[['problem', 'instance']].apply(
+            lambda x: all(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["solved"]),
+            axis=1
+        )]
 
     if intermediate:
         # Filter to only keep instances that occur for all solvers
@@ -793,15 +797,15 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         ):
 
         groups = df.assign(
-                time_solve=df["time_solve"].where(df["status"].isin(solved), 2 * time_limit)
+                time_solve=df["time_solve"].where(df["solved"], 2 * time_limit)
             ).groupby(grouping).agg(
                 # track = ("track", "first"),
                 # alias = ("alias", "first"),
                 insts = ("problem", 'count'),
                 min_ = ("min", 'min'),
                 max_ = ("max", 'max'),
-                median = ('median', 'first'),
-                rows = ('rows', 'first'),
+                median = ('median', 'mean'),
+                rows = ('rows', 'mean'),
                 # stdev = ('stdev', 'first'),
                 # t_totl_hr = ('time_total', 'sum'),
                 t_totl_p2 = ('time_total_p2', 'mean'),
@@ -874,24 +878,62 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         # Show diff for all consecutive rows
         diff_cols = [c for c in groups.columns if c in ["t_post_p2", "t_solv_p2", "unk", "mem", "post", "solv"]]
 
-        # TODO add cli arg to determine baseline alias
-        baseline = "base_gurobi-gleb."
-        baseline = None
         if baseline:
-            diff_ = groups
-            # TODO show diff for each solver to the baseline (rather than to each other by comparing to the previous row)
-            diff_[diff_cols] = groups[diff_cols].diff()
-            diff_ = diff_.drop(index=baseline, level=grouping[-1] if diff_.index.nlevels > 1 else None)
+            # Check if baseline exists in this grouping
+            aliases = groups.index.get_level_values('alias').unique()
 
-            print("DIFF")
+            # Find all aliases containing the baseline string
+            baseline, = [alias for alias in aliases if baseline in alias]
+            print(f"Using baseline: {baseline}")
+
+            # Get baseline data
+            baseline_data = groups.xs(baseline, level='alias')[diff_cols]
+
+            # Compute diff against baseline for each solver
+            diff_ = groups.copy()
+            for col in diff_cols:
+                # Subtract baseline values from all solvers
+                # For MultiIndex, we need to align by the non-alias levels
+                diff_[col] = groups[col] - baseline_data[col]
+
+            # Drop the baseline itself from the diff
+            diff_ = diff_.drop(index=baseline, level="alias", errors='ignore')
+
+            print("DIFF (relative to baseline)")
             print(diff_)
 
-            # Compute correlations
+            # Compute correlations for each solver separately
             if grouping_type == "per_instance":
-                correlation = diff_[['t_solv_p2', 'median']].corr()
-                print("\n== Correlation between t_solv_p2 and median ==")
-                with pd.option_context('display.float_format', '{:.6f}'.format):
-                    print(correlation)
+                # Get baseline data
+                baseline_data = groups.xs(baseline, level='alias')[diff_cols]
+
+                # Time metrics
+                time_cols = ['t_post_p2', 't_solv_p2']
+
+                # Select available columns
+                available_metadata = [col for col in METADATA_COLS if col in diff_.columns and col != 'method']
+                available_time = [col for col in time_cols if col in diff_.columns]
+                corr_cols = available_time + available_metadata
+                print("CC", corr_cols)
+
+                if corr_cols and 'alias' in diff_.index.names:
+                    # Get unique solvers (aliases)
+                    solvers = diff_.index.get_level_values('alias').unique()
+
+                    for solver in sorted(solvers):
+                        # Get data for this solver
+                        solver_data = diff_.xs(solver, level='alias')
+
+                        # Compute correlation for this solver
+                        correlation = solver_data[corr_cols].corr()
+
+                        # Mask upper triangle (including diagonal) to avoid showing duplicate info
+                        mask = np.triu(np.ones_like(correlation, dtype=bool))
+                        correlation_masked = correlation.mask(mask)
+
+                        print(f"\n== Correlation Matrix for {solver} (diff vs baseline) ==")
+                        with pd.option_context('display.float_format', '{:.6f}'.format):
+                            print(correlation_masked)
 
     for track, groups in df.groupby(by="track"):
         is_cop = "COP" in track
@@ -1102,4 +1144,25 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 ]].to_csv(save, float_format='%.1f')
 
 if __name__ == '__main__':
-    main()
+    # Create custom print function that writes to both console and file
+    # Open output file for logging
+    output_file = open('./analysis.txt', 'w')
+
+    original_print = builtins.print
+    def print_to_both(*args, **kwargs):
+        original_print(*args, **kwargs)
+        kwargs_file = kwargs.copy()
+        kwargs_file['file'] = output_file
+        kwargs_file['flush'] = True
+        original_print(*args, **kwargs_file)
+
+    # Replace built-in print
+    builtins.print = print_to_both
+
+    try:
+        main()
+    finally:
+        # Restore original print and close file
+        builtins.print = original_print
+        output_file.close()
+        print(f"Analysis output saved to ./analysis.txt")
