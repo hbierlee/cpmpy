@@ -96,6 +96,7 @@ FIELDNAMES = [
 METADATA_COLS = ["method", "area", "rows", "min", "max", "count", "mean", "median", "stdev"]
 
 
+
 def _extract_cost(solution_str):
     """
     Extract numeric cost from solution string like '<instantiation ... cost="69">'
@@ -498,8 +499,27 @@ def check_inconsistent_instances(df):
 def reorder_cols(df, cols):
     return df[cols + [col for col in df.columns if col not in cols]]
 
-    
-    
+
+def save_plot(fig, path, name):
+    """
+    Save a matplotlib figure to both PNG and SVG formats.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        The figure to save
+    path : pathlib.Path
+        The base path for saving (without extension)
+    name : str
+        The plot name/suffix to append to the path
+    """
+    plot_path = path / name
+    fig.savefig(f"{plot_path}.png", bbox_inches='tight', dpi=150)
+    fig.savefig(f"{plot_path}.svg", bbox_inches='tight')
+    print(f"Plot saved to {plot_path}.{{png,svg}}")
+
+
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Analyze XCSP3 solver performance data')
@@ -1016,10 +1036,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
                                             # Save plot
                                             if plot:
-                                                plot_name = plot / f"correlation_{track}_{solver}_{metadata_col}_vs_{time_col}"
-                                                fig.savefig(f"{plot_name}.png", bbox_inches='tight', dpi=150)
-                                                fig.savefig(f"{plot_name}.svg", bbox_inches='tight')
-                                                print(f"Correlation plot saved to {plot_name}.{{png,svg}}")
+                                                save_plot(fig, plot, f"correlation-{track}-{solver}-{metadata_col}-{time_col}")
 
                                             plt.close(fig)
 
@@ -1120,16 +1137,11 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 sort_legend=sort_legend,
             )
 
-            plot_ = plot.with_name(plot.name + "-" + track)
-            if plot_:
-                # plot.mkdir(exist_ok=True, parents=True)
-                cactus = plot_.with_name(plot_.name + "-cactus")
-                fig_cactus.savefig(cactus.with_suffix(".png"), bbox_inches='tight')
-                fig_cactus.savefig(cactus.with_suffix(".svg"), bbox_inches='tight')
-                print(f"Plot saved to {cactus}.{{png,svg}}")
+            if plot:
+                save_plot(fig_cactus, plot, f"cactus-{track}")
 
         # Generate custom scatter plot if --scatter option is provided
-        fig_scatter_custom = None
+        fig_scatter = None
         aliases = sorted(groups["alias"].unique())
         if scatter is not None:
             solver_str1, solver_str2 = scatter
@@ -1153,7 +1165,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
             print(f"Creating custom scatter plot: {solver1} vs {solver2}")
 
-            fig_scatter_custom = xcsp3_scatter_plot(
+            fig_scatter = xcsp3_scatter_plot(
                 groups.reset_index(),
                 solver1=solver1,
                 solver2=solver2,
@@ -1163,11 +1175,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 inst_metric="rows",
             )
 
-            if plot_:
-                scatter = plot_.with_name(plot_.name + "_scatter")
-                fig_scatter_custom.savefig(scatter.with_suffix(".png"), bbox_inches='tight')
-                fig_scatter_custom.savefig(scatter.with_suffix(".svg"), bbox_inches='tight')
-                print(f"Custom scatter plot saved to {scatter}.{{png,svg}}")
+            if plot:
+                save_plot(fig_scatter, plot, f"scatter-{track}")
 
     errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception", "traceback"]]
     if not errors.empty:
@@ -1191,8 +1200,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         if fig_scatter is not None and not show_scatter:
             plt.close(fig_scatter)
         # Custom scatter plot is shown if scatter option is enabled or show all
-        if fig_scatter_custom is not None and not show_scatter:
-            plt.close(fig_scatter_custom)
+        if fig_scatter is not None and not show_scatter:
+            plt.close(fig_scatter)
         plt.show()
 
 
