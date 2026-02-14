@@ -32,8 +32,10 @@ Optional Arguments
 --sort-legend : str, optional
     Sort order for legend/lines. Options: 'alpha' (lexicographic, default), 'performance' (by instances solved).
 
---scatter : str str, optional
-    Create a scatter plot for two specific solvers. Takes two strings A and B that match solver aliases.
+--compare : str [str], optional
+    Compare solvers. Takes 1 or 2 arguments:
+    - --compare A: Compare all solvers against A (baseline). Creates correlation plots and scatter plots for all solvers vs A.
+    - --compare A B: Compare A vs B. Creates scatter plot and correlation analysis with A as baseline.
     Each string must match exactly one solver alias (substring match). Raises exception if multiple matches found.
 
 --tex : path, optional
@@ -66,6 +68,10 @@ except:
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
+from matplotlib.markers import MarkerStyle
+
+# Different marker shapes for visual distinction (use all filled markers from matplotlib)
+marker_shapes = list(MarkerStyle.filled_markers)
 
 FIELDNAMES = [
     "year",
@@ -182,7 +188,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
 
     return fig
 
-def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None):
+def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None, track=None):
     """
     Create a scatter plot comparing the performance of two solvers.
 
@@ -275,24 +281,38 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     # Create alpha array - lower alpha for red dots (below small threshold)
     alpha_values = np.where(merged["small_1"], 0.2, 0.8)
 
-    # Plot scatter points colored by median
-    scatter = ax.scatter(
-        x,
-        y,
-        c=inst_metrics,
-        alpha=alpha_values,
-        s=50,
-        cmap=cmap,
-        edgecolors='black',
-        linewidth=0.5,
-        norm=LogNorm(
-            vmin=inst_metrics.min(),
-            vmax=inst_metrics.max(),
-        ),
-    )
+    # Get unique problem classes
+    unique_problems = sorted(problems.unique())
 
-    # Add colorbar
-    cbar = plt.colorbar(scatter, ax=ax)
+    problem_markers = dict(zip(unique_problems,
+                             [marker_shapes[i % len(marker_shapes)]
+                              for i in range(len(unique_problems))]))
+
+    # Plot scatter points for each problem class with different markers
+    scatter_plots = []
+    for problem in unique_problems:
+        mask = problems == problem
+        n_instances = mask.sum()
+        scatter = ax.scatter(
+            x[mask],
+            y[mask],
+            c=inst_metrics[mask],
+            alpha=alpha_values[mask],
+            s=50,
+            cmap=cmap,
+            edgecolors='black',
+            linewidth=0.5,
+            marker=problem_markers[problem],
+            label=f"{problem} ({n_instances})",
+            norm=LogNorm(
+                vmin=inst_metrics.min(),
+                vmax=inst_metrics.max(),
+            ),
+        )
+        scatter_plots.append(scatter)
+
+    # Add colorbar using the first scatter plot
+    cbar = plt.colorbar(scatter_plots[0], ax=ax)
     cbar.set_label(f'table {inst_metric}', rotation=270, labelpad=20)
 
     min_max = [0.1, PAR]
@@ -328,6 +348,8 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     ties = sum(1 for i in range(len(x)) if np.isclose(x[i], y[i], rtol=1))
 
     title = f"{solver1} vs {solver2}"
+    if track:
+        title += f" ({track})"
     # title += f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}"
     # title += f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}"
     ax.set_title(title)
@@ -342,13 +364,14 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
         ax.set_xlim(min_max[0], min_max[1] * padding)
         ax.set_ylim(min_max[0], min_max[1] * padding)
 
-    ax.legend()
+    # Place legend inside plot area at top-left with transparency
+    ax.legend(loc='upper left', fontsize=9, framealpha=0.5)
     plt.tight_layout()
 
     # Add hover labels for instance names
     try:
         import mplcursors
-        cursor = mplcursors.cursor(scatter, hover=True)
+        cursor = mplcursors.cursor(scatter_plots, hover=True)
         @cursor.connect("add")
         def on_add(sel):
             idx = sel.index
@@ -371,19 +394,24 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
         def hover(event):
             if event.inaxes == ax:
-                cont, ind = scatter.contains(event)
-                if cont:
-                    idx = ind["ind"][0]
-                    annot.xy = (x[idx], y[idx])
-                    text = (f"{problems[idx]}-{instances[idx]}\n"
-                           f"rows: {rows[idx]:.0f}, median: {medians[idx]:.1f}, "
-                           f"stdev: {stdevs[idx]:.1f}\n"
-                           f"min: {mins[idx]:.0f}, max: {maxs[idx]:.0f}\n"
-                           f"time_post: {time_posts_1[idx]:.3f}s / {time_posts_2[idx]:.3f}s")
-                    annot.set_text(text)
-                    annot.set_visible(True)
-                    fig.canvas.draw_idle()
-                else:
+                # Check all scatter plots
+                found = False
+                for scatter in scatter_plots:
+                    cont, ind = scatter.contains(event)
+                    if cont:
+                        idx = ind["ind"][0]
+                        annot.xy = (x[idx], y[idx])
+                        text = (f"{problems[idx]}-{instances[idx]}\n"
+                               f"rows: {rows[idx]:.0f}, median: {medians[idx]:.1f}, "
+                               f"stdev: {stdevs[idx]:.1f}\n"
+                               f"min: {mins[idx]:.0f}, max: {maxs[idx]:.0f}\n"
+                               f"time_post: {time_posts_1[idx]:.3f}s / {time_posts_2[idx]:.3f}s")
+                        annot.set_text(text)
+                        annot.set_visible(True)
+                        fig.canvas.draw_idle()
+                        found = True
+                        break
+                if not found:
                     if annot.get_visible():
                         annot.set_visible(False)
                         fig.canvas.draw_idle()
@@ -532,23 +560,22 @@ def main():
     parser.add_argument('--save', type=pathlib.Path, default=None, help='Location to save post-processed full csv to')
     parser.add_argument('--tex', type=pathlib.Path, default=None, help='Path to save LaTeX tables generated from the analysis')
     parser.add_argument('--no-errors', action='store_true', help='Omit instances which have an error for any solver')
-    parser.add_argument('--solved-only', action='store_true', help='Only keep instances which have been solved by at least one solver')
     parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
     parser.add_argument('--small', type=int, help='Threshold for filtering by largest table size (default: 25)')
     parser.add_argument('-g', '--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
     parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
     parser.add_argument('--sort-legend', type=str, choices=['alpha', 'performance'], default='alpha',
                         help='Sort order for legend/lines: alpha (lexicographic, default) or performance (by instances solved)')
-    parser.add_argument('--scatter', type=str, nargs=2, metavar=('A', 'B'), default=None,
-                        help='Create scatter plot for two specific solvers whose aliases contain strings A and B')
+    parser.add_argument('--compare', type=str, nargs='+', metavar='SOLVER', default=None,
+                        help='Compare solvers: --compare A (compare all vs A), --compare A B (compare A vs B). Creates scatter and correlation plots with A as baseline.')
+    parser.add_argument('--metric', type=str, default='t_solv_p2',
+                        help='Metric to use for scatter/correlation analysis (default: t_solv_p2). Options: t_solv_p2 (solve time), t_post_p2 (posting time), t_totl_p2 (total time). Requires --time-limit.')
     parser.add_argument('--paper', action='store_true', default=False,
                         help='Use larger font sizes (2x) in plots suitable for papers/publications')
-    parser.add_argument('--baseline', type=str, default=None,
-                        help='Baseline solver alias to compare against (for diff and correlation analysis)')
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, solved_only=False, intermediate=False, small=None, glob_alias=None, glob_instance=None, tex=None, sort_legend='alpha', scatter=None, paper=False, baseline=None):
+def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, intermediate=False, small=None, glob_alias=None, glob_instance=None, tex=None, sort_legend='alpha', compare=None, metric='t_solv_p2', paper=False):
 
     # Set font sizes for publication-ready plots
     if paper:
@@ -671,9 +698,16 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
         df['alias'] = df['alias'] + "-" + df['run']
 
-    for col, glob in [("alias", glob_alias), ("problem", glob_instance), ("track", glob_instance)]:
-        if glob:
-            df = df.drop(df[~df[col].map(lambda g: any(g_ in g for g_ in glob))].index)
+    # Filter by alias
+    if glob_alias:
+        df = df[df['alias'].map(lambda g: any(g_ in g for g_ in glob_alias))].copy()
+
+    # Filter by instance: keep rows where glob_instance matches track OR problem OR instance
+    if glob_instance:
+        track_match = df['track'].map(lambda g: any(g_ in g for g_ in glob_instance))
+        problem_match = df['problem'].map(lambda g: any(g_ in g for g_ in glob_instance))
+        instance_match = df['instance'].map(lambda g: any(g_ in g for g_ in glob_instance))
+        df = df[track_match | problem_match | instance_match].copy()
 
 
     # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
@@ -687,29 +721,21 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         'CSP22to25': 'CSP'
     })
 
-    # Set solved status based on track type
-    def is_solved(row):
-        if 'COP' in row['track']:
-            return row['status'] in [OPT, UNS]
-        else:
-            return row['status'] in [SAT, UNS]
-
+    # Set solved status based on track type (vectorized for performance)
     df["unknown"] = df["status"] == UNK
     df["error"] = df["status"] == ERR
     df["memory"] = df["status"] == MEM
     df["feasible"] = df["status"].isin((OPT, SAT, UNS))
-    df["solved"] = df.apply(is_solved, axis=1)
+
+    # For COP tracks: solved if status is OPT or UNS
+    # For other tracks: solved if status is SAT or UNS
+    is_cop = df["track"].str.contains("COP", na=False)
+    df["solved"] = ((is_cop & df["status"].isin([OPT, UNS])) |
+                    (~is_cop & df["status"].isin([SAT, UNS])))
 
 
     # replace time_solve to NaN if not solved
     df["time_solve"] = df["time_solve"].mask(~df["solved"])
-
-    if solved_only:
-        # Filter to only keep instances where at least one solver solved them
-        df = df[df[['problem', 'instance']].apply(
-            lambda x: any(df[(df['problem'] == x['problem']) & (df['instance'] == x['instance'])]["solved"]),
-            axis=1
-        )]
 
     if intermediate:
         # Filter to only keep instances that occur for all solvers
@@ -831,7 +857,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 t_totl_p2 = ('time_total_p2', 'mean'),
                 t_post_p2 = ('time_post_p2', 'mean'),
                 t_solv_p2 = ('time_solve_p2', 'mean'),
-                # diff = ("diff", 'mean'),
                 # insts = ('status', 'count'),
                 status = ('status', 'first'),
                 err = ('error', 'sum'),
@@ -849,6 +874,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 method = ('method', 'first'),
                 obj = ('obj', 'first'),
                 )
+
+        # Filter out instances which have not been solved by at least one solver
+        if grouping_type == "per_instance":
+            # Get the instance-level keys (excluding 'alias')
+            instance_keys = [k for k in grouping if k != 'alias']
+            # For each instance, check if any solver solved it
+            solved_mask = groups.groupby(instance_keys)['solv'].transform('max') > 0
+            groups = groups[solved_mask]
 
         track = groups.index.get_level_values('track')[0]
         is_cop = "COP" in track
@@ -896,31 +929,59 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         print(f"\n== {grouping_type} ==")
         print(groups_)
 
-        # Show diff for all consecutive rows
-        diff_cols = [c for c in groups.columns if c in ["t_post_p2", "t_solv_p2", "unk", "mem", "post", "solv"]]
 
-        if baseline:
+        if compare:
+            # Show diff for all consecutive rows
+            diff_cols = [c for c in groups.columns if c in ["t_post_p2", "t_solv_p2", "unk", "mem", "post", "solv"]]
+            # Use first compare argument as baseline
+            baseline_str = compare[0]
+
             # Check if baseline exists in this grouping
             aliases = groups.index.get_level_values('alias').unique()
 
             # Find all aliases containing the baseline string
-            baseline, = [alias for alias in aliases if baseline in alias]
+            matching_baselines = [alias for alias in aliases if baseline_str in alias]
+            if len(matching_baselines) == 0:
+                raise ValueError(f"No solver alias found containing '{baseline_str}'. Available aliases: {aliases}")
+            if len(matching_baselines) > 1:
+                raise ValueError(f"Multiple solver aliases match '{baseline_str}': {matching_baselines}. Please use a more specific string.")
+
+            baseline = matching_baselines[0]
             print(f"Using baseline: {baseline}")
 
             # Get baseline data
             baseline_data = groups.xs(baseline, level='alias')[diff_cols]
+
+            # # Filter out instances that are unsolved by either baseline or any compared solver
+            # # Keep only instances where both baseline AND at least one other solver solved it
+            # baseline_solved_mask = baseline_data['solv'] > 0
+            # baseline_solved_instances = baseline_data[baseline_solved_mask].index
+            # # For each instance, check if baseline AND the current solver both solved it
+            # groups_index_without_alias = groups.index.droplevel('alias')
+            # baseline_solved_filter = groups_index_without_alias.isin(baseline_solved_instances)
+            # solver_solved_filter = groups['solv'] > 0
+            # # Keep instances where baseline OR solver solved it (at least one)
+            # groups = groups[baseline_solved_filter | solver_solved_filter]
+
+            # Update baseline_data after filtering
+            baseline_data = groups.xs(baseline, level='alias')[diff_cols]
+            print(baseline_data)
 
             # Compute diff against baseline for each solver
             diff_ = groups.copy()
             for col in diff_cols:
                 # Subtract baseline values from all solvers
                 # For MultiIndex, we need to align by the non-alias levels
+                if "t_" in col:
+                    print("D", col)
+                    print(groups[col])
+                    print(baseline_data[col])
                 diff_[col] = groups[col] - baseline_data[col]
 
             # Drop the baseline itself from the diff
             diff_ = diff_.drop(index=baseline, level="alias", errors='ignore')
 
-            print("DIFF (relative to baseline)")
+            print("DIFF (relative to baseline {baseline})")
             print(diff_)
 
             # Compute correlations for each solver separately
@@ -928,15 +989,18 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 # Get baseline data
                 baseline_data = groups.xs(baseline, level='alias')[diff_cols]
 
-                # Time metrics
-                time_cols = ['t_post_p2', 't_solv_p2']
+                # Time metrics - use the specified metric
+                if metric not in diff_.columns:
+                    raise ValueError(f"Metric '{metric}' not found in data. Available metrics: {diff_.columns.tolist()}")
+                time_cols = [metric]
 
                 # Select available columns
                 available_metadata = [col for col in METADATA_COLS if col in diff_.columns and col != 'method']
+                available_metadata = ["rows"]
                 available_time = [col for col in time_cols if col in diff_.columns]
                 corr_cols = available_time + available_metadata
 
-                if corr_cols and 'alias' in diff_.index.names:
+                if corr_cols:
                     # Iterate over tracks if present in the grouping
                     if 'track' in diff_.index.names:
                         tracks = diff_.index.get_level_values('track').unique()
@@ -947,13 +1011,30 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                         # Filter by track if applicable
                         if track is not None:
                             track_diff = diff_.xs(track, level='track')
+                            track_baseline = baseline_data.xs(track, level='track')
                         else:
                             track_diff = diff_
+                            track_baseline = baseline_data
 
                         # Get unique solvers (aliases)
-                        solvers = track_diff.index.get_level_values('alias').unique()
+                        all_solvers = track_diff.index.get_level_values('alias').unique()
 
-                        for solver in sorted(solvers):
+                        # Determine which solvers to create correlation plots for
+                        if len(compare) == 1:
+                            # Compare all other solvers against baseline
+                            solvers_to_plot = [s for s in all_solvers if s != baseline]
+                        elif len(compare) == 2:
+                            # Only plot for the specific solver being compared
+                            solver_str2 = compare[1]
+                            matches2 = [alias for alias in all_solvers if solver_str2 in alias]
+                            if len(matches2) == 1:
+                                solvers_to_plot = matches2
+                            else:
+                                solvers_to_plot = []  # Skip if no unique match
+                        else:
+                            solvers_to_plot = []
+
+                        for solver in sorted(solvers_to_plot):
                             # Get data for this solver
                             solver_data = track_diff.xs(solver, level='alias')
 
@@ -984,11 +1065,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                                                 unique_problems = sorted(problems.unique())
 
                                                 # Create color and marker maps
-                                                colors = plt.cm.tab20(np.linspace(0, 1, len(unique_problems)))
-                                                problem_colors = dict(zip(unique_problems, colors))
+                                                # colors = plt.cm.tab20(np.linspace(0, 1, len(unique_problems)))
+                                                # problem_colors = dict(zip(unique_problems, colors))
 
                                                 # Different marker shapes for visual distinction
-                                                marker_shapes = ['o', 's', '^', 'v', '<', '>', 'D', 'p', '*', 'h', 'H', '+', 'x', 'd', '|', '_']
                                                 problem_markers = dict(zip(unique_problems,
                                                                          [marker_shapes[i % len(marker_shapes)]
                                                                           for i in range(len(unique_problems))]))
@@ -997,10 +1077,16 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                                                 for problem in unique_problems:
                                                     mask = problems == problem
                                                     problem_data = plot_data[mask]
-                                                    ax.scatter(problem_data[metadata_col], problem_data[time_col],
-                                                             alpha=0.6, s=50, label=problem,
-                                                             color=problem_colors[problem],
-                                                             marker=problem_markers[problem])
+                                                    n_instances = len(problem_data)
+                                                    ax.scatter(
+                                                            problem_data[metadata_col],
+                                                            problem_data[time_col],
+                                                             alpha=0.6,
+                                                             s=50,
+                                                             label=f"{problem} ({n_instances})",
+                                                             # color=problem_colors[problem],
+                                                             marker=problem_markers[problem]
+                                                             )
                                             else:
                                                 # Fallback: single color if no problem info
                                                 ax.scatter(plot_data[metadata_col], plot_data[time_col],
@@ -1025,7 +1111,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
                                             ax.set_xlabel(metadata_col, fontsize=12)
                                             ax.set_ylabel(f'{time_col} differential', fontsize=12)
-                                            ax.set_title(f'{solver}: {metadata_col} vs {time_col} differential ({track})', fontsize=14)
+                                            ax.set_title(f'{baseline} - {solver}: {metadata_col} vs {time_col} differential ({track})', fontsize=14)
 
                                             # Place legend outside plot area to avoid covering data
                                             ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left',
@@ -1036,10 +1122,13 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
                                             # Save plot
                                             if plot:
-                                                save_plot(fig, plot, f"correlation-{track}-{solver}-{metadata_col}-{time_col}")
+                                                save_plot(fig, plot, f"correlation-{track}-{baseline}-{solver}-{metadata_col}-{time_col}")
 
                                             plt.close(fig)
 
+
+    # Collect all scatter plots for show logic
+    fig_scatters = []
 
     for track, groups in df.groupby(by="track"):
         is_cop = "COP" in track
@@ -1125,7 +1214,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         generate_cactus = plot is not None or show_cactus
 
         fig_cactus = None
-        fig_scatter = None
 
         if generate_cactus:
             # Generate performance/cactus plot
@@ -1133,50 +1221,69 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 groups.reset_index(),
                 time_limit,
                 filter_by="feasible",
-                solved_only=solved_only,
                 sort_legend=sort_legend,
             )
 
             if plot:
                 save_plot(fig_cactus, plot, f"cactus-{track}")
 
-        # Generate custom scatter plot if --scatter option is provided
-        fig_scatter = None
+        # Generate scatter plot(s) if --compare option is provided
+        fig_scatters = []
         aliases = sorted(groups["alias"].unique())
-        if scatter is not None:
-            solver_str1, solver_str2 = scatter
+        if compare is not None:
+            # Find baseline solver
+            baseline_str = compare[0]
+            matches_baseline = [alias for alias in aliases if baseline_str in alias]
+            if len(matches_baseline) == 0:
+                raise ValueError(f"No solver alias found containing '{baseline_str}'. Available aliases: {aliases}")
+            if len(matches_baseline) > 1:
+                raise ValueError(f"Multiple solver aliases match '{baseline_str}': {matches_baseline}. Please use a more specific string.")
+            baseline_solver = matches_baseline[0]
 
-            # Find all aliases containing the provided strings
-            matches1 = [alias for alias in aliases if solver_str1 in alias]
-            matches2 = [alias for alias in aliases if solver_str2 in alias]
+            # Determine which solvers to compare against baseline
+            if len(compare) == 1:
+                # Compare all other solvers against baseline
+                compare_solvers = [alias for alias in aliases if alias != baseline_solver]
+            elif len(compare) == 2:
+                # Compare specific solver against baseline
+                solver_str2 = compare[1]
+                matches2 = [alias for alias in aliases if solver_str2 in alias]
+                if len(matches2) == 0:
+                    raise ValueError(f"No solver alias found containing '{solver_str2}'. Available aliases: {aliases}")
+                if len(matches2) > 1:
+                    raise ValueError(f"Multiple solver aliases match '{solver_str2}': {matches2}. Please use a more specific string.")
+                compare_solvers = [matches2[0]]
+            else:
+                raise ValueError(f"--compare takes 1 or 2 arguments, got {len(compare)}")
 
-            # Validate that each string matches exactly one solver
-            if len(matches1) == 0:
-                raise ValueError(f"No solver alias found containing '{solver_str1}'. Available aliases: {aliases}")
-            if len(matches1) > 1:
-                raise ValueError(f"Multiple solver aliases match '{solver_str1}': {matches1}. Please use a more specific string.")
-            if len(matches2) == 0:
-                raise ValueError(f"No solver alias found containing '{solver_str2}'. Available aliases: {aliases}")
-            if len(matches2) > 1:
-                raise ValueError(f"Multiple solver aliases match '{solver_str2}': {matches2}. Please use a more specific string.")
+            # Create scatter plot for each comparison
+            for solver2 in compare_solvers:
+                print(f"Creating scatter plot: {baseline_solver} vs {solver2}")
 
-            solver1 = matches1[0]
-            solver2 = matches2[0]
+                # Map aggregated metric names to raw column names for scatter plot
+                metric_map = {
+                    't_solv_p2': 'time_solve_p2',
+                    't_post_p2': 'time_post_p2',
+                    't_totl_p2': 'time_total_p2',
+                }
+                scatter_metric = metric_map.get(metric, metric)
 
-            print(f"Creating custom scatter plot: {solver1} vs {solver2}")
+                fig_scatter = xcsp3_scatter_plot(
+                    groups.reset_index(),
+                    solver1=baseline_solver,
+                    solver2=solver2,
+                    metric=scatter_metric,
+                    time_limit=time_limit,
+                    inst_metric="rows",
+                    track=track,
+                )
+                fig_scatters.append(fig_scatter)
 
-            fig_scatter = xcsp3_scatter_plot(
-                groups.reset_index(),
-                solver1=solver1,
-                solver2=solver2,
-                time_limit=time_limit,
-                # inst_metric="area",
-                # inst_metric="max",
-                inst_metric="rows",
-            )
-
-            if plot:
-                save_plot(fig_scatter, plot, f"scatter-{track}")
+                if plot:
+                    # Include both solver names in filename for clarity
+                    solver1_short = baseline_solver.replace('gurobi-', '').replace('-', '')
+                    solver2_short = solver2.replace('gurobi-', '').replace('-', '')
+                    save_plot(fig_scatter, plot, f"scatter-{track}-{solver1_short}-vs-{solver2_short}")
 
     errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception", "traceback"]]
     if not errors.empty:
@@ -1197,11 +1304,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     if show is not None:
         if fig_cactus is not None and not show_cactus:
             plt.close(fig_cactus)
-        if fig_scatter is not None and not show_scatter:
-            plt.close(fig_scatter)
-        # Custom scatter plot is shown if scatter option is enabled or show all
-        if fig_scatter is not None and not show_scatter:
-            plt.close(fig_scatter)
+        # Close scatter plots if not showing them
+        if not show_scatter:
+            for fig in fig_scatters:
+                plt.close(fig)
         plt.show()
 
 
