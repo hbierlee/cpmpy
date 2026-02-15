@@ -76,10 +76,6 @@ def get_experiments(overrides={}, filters=[]):
                                 (
                                     "coverlift",
                                     list(Coverlift),
-                                    (
-                                        False,
-                                        True,
-                                    ),
                                 ),
                                 (
                                     "shrink",
@@ -126,6 +122,7 @@ def experiment(experiments, overrides={}, filters=None):
 
 
 def ablate(feats, add_one=True, add_none=True, add_all=False, filters=None):
+    print(feats)
     return [
         *([("none", {feat: feat_vals[0] for feat, feat_vals in feats})] if add_none else []),
         *(
