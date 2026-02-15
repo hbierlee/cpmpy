@@ -175,6 +175,17 @@ class Heuristic(Feature):
     GREEDY = "greedy"
     REDUCE = "reduce"
 
+class Coverlift(Feature):
+    No = "no"
+    INPUT = "input"
+    COM_MIN = "com_min"
+    COM_MAX = "com_max"
+
+    def __bool__(self):
+        return self is not Coverlift.No
+
+
+
 
 def normalize_table(table):
     """Merge columns with duplicate variables (removing rows where values are different)"""
@@ -204,7 +215,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "cutoff": 0,
             "shrink": False,
             "fractional": False,
-            "coverlift": False,
+            "coverlift": Coverlift.No,
             "negatives": 0,
             "cuts": [],
             "max_iterations": None,
@@ -406,7 +417,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["verbosity"]:
                     self.log(f"keep", i, f"because {show_nz(T_enc[:, X])} {T_enc[:, X]}", verbosity=3)
                 X[i] = True  # keep i
-                # assert False
             else:
                 k += 1
                 if self.env["verbosity"]:
@@ -414,7 +424,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         return X, k
 
     @profile
-    def gencoverlift(self, S, C_enc, k, T_enc, A_enc):
+    def gencoverlift(self, S, C_enc, k, T_enc, A_enc, heuristic=Coverlift.INPUT):
         if self.env["verbosity"]:
             self.log("gencoverlift", verbosity=3)
 
@@ -443,7 +453,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         i = 0
 
         # centre of mass
-        # com = T_enc.sum(axis=0) / len(T_enc)
+        com = T_enc.sum(axis=0) / len(T_enc)
 
         while not X.all():
             assert (
@@ -472,14 +482,16 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 ).all()
             ), f"{i}; {[i + 1 for i in X.nonzero()[0]]}"
 
-            if self.env["example2"]:
-                j = [3, 7, 0][i]
-            elif True:
-                j = np.nanargmax(np.where(~X, A_enc, np.nan))
-            else:
-                assert False
-                # j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
-                # assert not X[j]
+            match heuristic:
+                case _ if self.env["example2"]:
+                    j = [3, 7, 0][i]
+                case Coverlift.INPUT:
+                    j = np.nanargmax(np.where(~X, A_enc, np.nan))
+                case Coverlift.COM_MIN:
+                    j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
+                case Coverlift.COM_MAX:
+                    j = np.nanargmax(com - (np.where(~X, A_enc, np.nan)))
+            assert not X[j]
 
             RT = (~R_tight) & T_enc[:, j]
             if (~RT).all():
@@ -554,7 +566,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             #     indent=0,
             # )
             # self.log(np.array(parts_), verbosity=2, indent=0)
-            self.log("", indent=0)
 
         assert len(A_enc) == len(T_enc.T)
 
@@ -763,7 +774,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["coverlift"]:
             if self.env["verbosity"]:
                 Xl = X.sum()
-            X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc, A_enc)
+            X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc, A_enc, heuristic=self.env["coverlift"])
             if self.env["verbosity"]:
                 self.log("coverlift added ", X.sum() - Xl, verbosity=3)
 
@@ -867,7 +878,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             (X, C_enc, k) = explanation
             expr = cp.sum(C_enc[X] * X_enc[X]) <= k
             if self.env["verbosity"]:
-                self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2)
+                self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2, verbosity=2)
                 self.log(f"  == {expr}", indent=2, verbosity=2)
 
         if isinstance(expr, (bool, np.bool)):
@@ -1029,18 +1040,19 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             self.env["cuts"][-1]["remain"] = remaining
             self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
-            # print(expected_solutions)
-            # print(actual_solutions)
-            print(remaining)
+            # self.log(expected_solutions, verbosity=3)
+            # self.log(actual_solutions, verbosity=3)
+            self.log(remaining, verbosity=3)
             if len(self.env["cuts"]) >= 2:
                 removed = without(self.env["cuts"][-2]["remain"], remaining)
-                print(
+                self.log(
                     "A",
                     self.user_vars,
                     tuple(x.value() for x in sorted(self.user_vars, key=lambda x: x.name) if x.value() is not None),
+                    verbosity=3
                 )
-                print("REMOVED")
-                print(removed)
+                self.log("REMOVED {len(removed)}", verbosity=2)
+                self.log(removed, verbosity=3)
 
             strength = (
                 len(self.env["cuts"][-2]["remain"]) - len(self.env["cuts"][-1]["remain"])

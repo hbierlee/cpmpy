@@ -545,8 +545,11 @@ def main(args):
     if args.reverse_experiments:
         experiments.reverse()
 
-    print("Experiments:", ", ".join(e['alias'] for e in experiments))
-    pprint.pprint(experiments)
+    print("Experiments")
+    for e in experiments:
+        print(e["alias"])
+        pprint.pprint(e["solver_kwargs"] for e in experiments)
+
     assert experiments
 
     if args.dry:
