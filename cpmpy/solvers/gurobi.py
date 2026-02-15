@@ -68,6 +68,10 @@ from ..transformations.safening import no_partial_functions, safen_objective
 from cpmpy.expressions.globalconstraints import Table
 from cpmpy.expressions.utils import dom_size
 
+
+# save this to reset it (for unit tests)
+cpmpy_decompose = Table.decompose
+
 class Feature(Enum):
     def __repr__(self):
         return repr(self.value)
@@ -211,7 +215,7 @@ class CPM_gurobi(SolverInterface):
 
         match encoding:
             case Encoding.CPMPY:
-                pass
+                Table.decompose = cpmpy_decompose
             case Encoding.XCSP3:
                 def xcsp3_decompose(self):
                     arr, tab = self.args
