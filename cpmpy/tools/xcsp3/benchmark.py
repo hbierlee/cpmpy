@@ -424,6 +424,7 @@ def xcsp3_benchmark(
     glob_instance: Optional[str] = None,
     first: Optional[bool] = False,
     profile: Optional[pathlib.Path] = False,
+    filter_feasible: Optional[list] = None,
 ) -> str:
     """
     Benchmark a solver on XCSP3 instances.
@@ -499,6 +500,30 @@ def xcsp3_benchmark(
         dataset = dataset_
     # dataset = [(filename, metadata) for filename, metadata in dataset if min((t["rows"] for t in metadata["tables"]), default=0) >= 25]
     dataset = [(filename, metadata) for filename, metadata in dataset if metadata["area"]]
+
+    # Filter by feasible instances from CSV files if requested
+    if filter_feasible is not None:
+        print(f"Loading feasible instances from: {filter_feasible}")
+        df_feasible = analyze.load_and_process_csvs(files=filter_feasible, time_limit=time_limit)
+
+        if df_feasible is not None:
+            # Get instances that were found feasible by at least one solver
+            feasible_instances = df_feasible[df_feasible["feasible"]].groupby(['problem', 'instance']).size()
+            feasible_set = set((prob + "-" + inst) for prob, inst in feasible_instances.index)
+
+            print(f"Found {len(feasible_set)} feasible instances in CSV files")
+
+            # Filter dataset to only include feasible instances
+            original_size = len(dataset)
+            dataset = [
+                (filename, metadata)
+                for filename, metadata in dataset
+                if metadata["name"].split(".")[0] in feasible_set
+            ]
+            print(f"Filtered dataset from {original_size} to {len(dataset)} instances based on feasibility")
+        else:
+            print("Warning: Could not load CSV files for filtering, proceeding with all instances")
+
     assert dataset
 
     # Process instances in parallel
@@ -526,7 +551,7 @@ def main(args):
     args_ = {
         k: v
         for k, v in vars(args).items()
-        if v is not None and k not in ("cp_cuts", "analyze", "glob_alias", "dry", "reverse_experiments", "debug")
+        if v is not None and k not in ("analyze", "glob_alias", "dry", "reverse_experiments", "debug")
     }
 
     if not args_["verbose"]:
@@ -535,7 +560,8 @@ def main(args):
     experiments = get_experiments(
         overrides=args_,
         filters=[("alias", args.glob_alias)] if args.glob_alias else []
-    ) if args.cp_cuts else [args_]
+    )
+
     for e in experiments:
         if type(e["solver"]) != str and e["solver"]().name == "lazy_gurobi":
             if args.debug:
@@ -548,7 +574,7 @@ def main(args):
     print("Experiments")
     for e in experiments:
         print(e["alias"])
-        pprint.pprint(e["solver_kwargs"] for e in experiments)
+        pprint.pprint(e["solver_kwargs"])
 
     assert experiments
 
@@ -576,7 +602,6 @@ def main(args):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Benchmark solvers on XCSP3 instances')
-    parser.add_argument('--cp-cuts', action='store_true', help='Run CP-CUTS experiment')
     parser.add_argument('--year', type=int, help='Competition year (e.g., 2023)')
     parser.add_argument('--track', type=str, help='Track type (e.g., COP, CSP, MiniCOP)')
     parser.add_argument('--solver', type=str, help='Solver name (e.g., ortools, exact, choco, ...)')
@@ -599,5 +624,6 @@ if __name__ == "__main__":
     parser.add_argument('--dry', action='store_true', help='Dry run')
     parser.add_argument('--debug', action='store_true', help='Debug run')
     parser.add_argument('--reverse-experiments', action='store_true', help='Reverse experiment order')
-    
+    parser.add_argument('--filter-feasible', type=str, nargs='+', help='Filter to only run instances found feasible in these CSV files/directories')
+
     main(parser.parse_args())

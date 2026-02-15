@@ -364,7 +364,7 @@ def get_envs():
             "alias": f"base_gurobi-{encoding}",
             "solver": CPM_gurobi,
             "solver_kwargs": {
-                "verbose": 0,
+                "verbose": 1,
                 "encoding": encoding,
             },
         }

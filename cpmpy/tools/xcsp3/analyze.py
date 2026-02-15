@@ -547,6 +547,176 @@ def save_plot(fig, path, name):
     print(f"Plot saved to {plot_path}.{{png,svg}}")
 
 
+def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=False, small=None, glob_alias=None, glob_instance=None):
+    """
+    Load and process CSV files containing benchmark results.
+
+    Parameters
+    ----------
+    files : list
+        List of CSV file paths or directories
+    time_limit : float, optional
+        Time limit for PAR-2 calculations
+    no_errors : bool
+        Filter out instances with errors
+    intermediate : bool
+        Only keep instances present for all solvers
+    small : int, optional
+        Filter out instances with max table size <= this value
+    glob_alias : list, optional
+        Filter by solver alias patterns
+    glob_instance : list, optional
+        Filter by instance patterns
+
+    Returns
+    -------
+    pd.DataFrame
+        Processed dataframe with all solver results
+    """
+    # Gather all CSV files
+    csv_files = []
+    for (i, path_str) in enumerate(reversed(files)):
+        path = pathlib.Path(path_str)
+        assert path.exists(), path
+        if path.is_file() and path.suffix == '.csv':
+            csv_files.append((i, pathlib.Path(path)))
+        elif path.is_dir():
+            csv_files.extend((i, pathlib.Path(p)) for p in path.rglob('*.csv'))
+        else:
+            print(f"Warning: {path} is not a valid CSV file or directory")
+
+    if not csv_files:
+        print("No CSV files found.")
+        return None
+
+    # Read and merge all CSV files
+    dfs = []
+    for i, file in csv_files:
+        print(f"Reading {file}")
+        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
+        df["run"] = chr(65 + i) if True else str(file.parent)
+        dfs.append(df)
+
+    df = pd.concat(dfs, ignore_index=True)
+
+    # Find problem names
+    df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
+    df['instance'] = df['instance'].map(lambda x: "-".join(x.split("-")[1:]).split(".")[0])
+
+    # Rename
+    df = df.rename(columns={"objective_value": "obj"})
+
+    # Create metadata dataframe for unique instances only
+    df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
+
+    def get_metadata(x):
+        with open(x) as f:
+            metadata = json.load(f)
+        rowss = [t["rows"] for t in metadata["tables"]]
+
+        def mean(a):
+            return statistics.mean(a) if a else None
+
+        def median(a):
+            return statistics.median(a) if a else None
+
+        def stdev(a):
+            return statistics.stdev(a) if a else None
+
+        def min_(a):
+            return min(a) if a else None
+
+        def max_(a):
+            return max(a) if a else None
+
+        return [metadata.get("method", None), sum(t["area"] for t in metadata["tables"]), sum(rowss), min_(rowss), max_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
+
+    # Get unique instances to avoid reading the same file multiple times
+    unique_instances = df[["year", "track", "problem", "instance", "file_name"]].drop_duplicates()
+
+    # Read metadata only for unique instances
+    metadata_values = unique_instances["file_name"].map(get_metadata).to_list()
+    unique_instances[METADATA_COLS] = pd.DataFrame(
+        metadata_values, index=unique_instances.index
+    )
+
+    # Merge metadata back into main dataframe
+    df = df.drop(columns=["file_name"]).merge(
+        unique_instances.drop(columns=["file_name"]),
+        on=["year", "track", "problem", "instance"],
+        how="left"
+    )
+
+    # Filter out instances with max table size <= small threshold
+    df["small"] = (df["max"] <= small) if small is not None else False
+
+    # Let solve include post time
+    df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
+
+    # Change status to MEM for Gurobi out of memory errors
+    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].astype(str).str.contains("gurobipy._exception.GurobiError: Out of memory", na=False)
+    df.loc[gurobi_oom_mask, 'status'] = MEM
+
+    if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
+        df['alias'] = df['alias'] + "-" + df['run']
+
+    # Filter by alias
+    if glob_alias:
+        df = df[df['alias'].map(lambda g: any(g_ in g for g_ in glob_alias))].copy()
+
+    # Filter by instance
+    if glob_instance:
+        track_match = df['track'].map(lambda g: any(g_ in g for g_ in glob_instance))
+        problem_match = df['problem'].map(lambda g: any(g_ in g for g_ in glob_instance))
+        instance_match = df['instance'].map(lambda g: any(g_ in g for g_ in glob_instance))
+        df = df[track_match | problem_match | instance_match].copy()
+
+    # Rename tracks for cleaner display
+    df['track'] = df['track'].replace({
+        'COP22to25': 'COP',
+        'CSP22to25': 'CSP'
+    })
+
+    # Set solved status based on track type
+    df["unknown"] = df["status"] == UNK
+    df["error"] = df["status"] == ERR
+    df["memory"] = df["status"] == MEM
+    df["feasible"] = df["status"].isin((OPT, SAT, UNS))
+
+    # For COP tracks: solved if status is OPT or UNS
+    # For other tracks: solved if status is SAT or UNS
+    is_cop = df["track"].str.contains("COP", na=False)
+    df["solved"] = ((is_cop & df["status"].isin([OPT, UNS])) |
+                    (~is_cop & df["status"].isin([SAT, UNS])))
+
+    # Replace time_solve to NaN if not solved
+    df["time_solve"] = df["time_solve"].mask(~df["solved"])
+
+    if intermediate:
+        # Filter to only keep instances that occur for all solvers
+        total_solvers = df['alias'].nunique()
+        instance_solver_counts = df.groupby(['problem', 'instance'])['alias'].nunique()
+        valid_instances = instance_solver_counts[instance_solver_counts == total_solvers].index
+        df = df.set_index(['problem', 'instance']).loc[valid_instances].reset_index()
+
+    if no_errors:
+        # Filter out instances where any solver got an error status
+        error_instances = df[df['error']].groupby(['problem', 'instance']).size().index
+        df = df.set_index(['problem', 'instance'])
+        df = df.drop(error_instances, errors='ignore')
+        df = df.reset_index()
+
+    assert not df.empty
+
+    # Add PAR-2 time columns if time_limit is provided
+    if time_limit is not None:
+        TIMES = ("post", "solve", "total")
+        for t in TIMES:
+            df[f"time_{t}_p2"] = df[f"time_{t}"].fillna(value=time_limit * 2)
+
+    return df
+
+
 
 def main():
     # Set up argument parser
@@ -592,166 +762,25 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         cmd = ["rsync", "-r", sync / files[0], "results"]
         print("CMD", " ".join(str(c) for c in cmd))
         subprocess.run(cmd)
-    
-
-
-    # Gather all CSV files
-    csv_files = []
-    for (i, path_str) in enumerate(reversed(files)):
-        path = pathlib.Path(path_str)
-        assert path.exists(), path
-        if path.is_file() and path.suffix == '.csv':
-            csv_files.append((i, pathlib.Path(path)))
-        elif path.is_dir():
-            csv_files.extend((i, pathlib.Path(p)) for p in path.rglob('*.csv'))
-        else:
-            print(f"Warning: {path} is not a valid CSV file or directory")
-
-
-    if not csv_files:
-        print("No CSV files found.")
-        return
-
-    # Read and merge all CSV files
-    dfs = []
-    for i, file in csv_files:
-        print("Reading", file)
-        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
-        df["run"] = chr(65 + i) if True else str(file.parent)
-        dfs.append(df)
-    
-    df = pd.concat(dfs, ignore_index=True)
 
     pd.set_option("display.max_colwidth", None)
     pd.set_option("display.max_columns", None)
     pd.set_option("display.max_rows", None)
     pd.set_option("display.expand_frame_repr", False)
 
-
-    # find problem names
-    df['problem'] = df['instance'].map(lambda x: x.split("-")[0])
-    df['instance'] = df['instance'].map(lambda x: "-".join(x.split("-")[1:]).split(".")[0])
-
-    # rename
-    df = df.rename(columns={"objective_value": "obj"})
-
-    # Create metadata dataframe for unique instances only
-    df["file_name"] = df["year"].map(str) + "/" + df["track"] + "/" + df["problem"] + "-" + df["instance"] + ".json"
-
-    def get_metadata(x):
-        with open(x) as f:
-            metadata = json.load(f)
-        rowss = [t["rows"] for t in metadata["tables"]]
-
-        def mean(a):
-            return statistics.mean(a) if a else None
-
-        def median(a):
-            return statistics.median(a) if a else None
-
-        def stdev(a):
-            return statistics.stdev(a) if a else None
-
-        def min_(a):
-            return min(a) if a else None
-
-        def max_(a):
-            return max(a) if a else None
-
-        return [metadata.get("method", None), sum(t["area"] for t in metadata["tables"]), sum(rowss), min_(rowss), max_(rowss), len(rowss), mean(rowss), median(rowss), stdev(rowss) if len(rowss) > 1 else None]
-
-    # Get unique instances to avoid reading the same file multiple times
-    unique_instances = df[["year", "track", "problem", "instance", "file_name"]].drop_duplicates()
-
-    # Read metadata only for unique instances
-    metadata_values = unique_instances["file_name"].map(get_metadata).to_list()
-    unique_instances[METADATA_COLS] = pd.DataFrame(
-        metadata_values, index=unique_instances.index
+    # Use shared function to load and process CSVs
+    df = load_and_process_csvs(
+        files=files,
+        time_limit=time_limit,
+        no_errors=no_errors,
+        intermediate=intermediate,
+        small=small,
+        glob_alias=glob_alias,
+        glob_instance=glob_instance
     )
 
-    # Merge metadata back into main dataframe
-    df = df.drop(columns=["file_name"]).merge(
-        unique_instances.drop(columns=["file_name"]),
-        on=["year", "track", "problem", "instance"],
-        how="left"
-    )
-
-
-    # df[df["method"] == "minimize"]["obj"] *= -1  # higher is better
-
-    # df["obj"] = df.where(df["method"] == "minimize", -df["obj"], df["obj"])
-    # df["obj"] = df.map(lambda x: -x["obj"] if x["method"] == "minimize" else x["obj"])
-    # df = df.drop(df[df["max"] <= 100].index)
-
-    # Filter out instances with max table size <= small threshold
-    
-    df["small"] = (df["max"] <= small) if small is not None else False
-    # df = df.drop(df[df["small"]].index)
-
-    # let solve include post time?
-    df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
-
-    # Change status to MEM for Gurobi out of memory errors
-    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].astype(str).str.contains("gurobipy._exception.GurobiError: Out of memory", na=False)
-    df.loc[gurobi_oom_mask, 'status'] = MEM
-
-    if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
-        df['alias'] = df['alias'] + "-" + df['run']
-
-    # Filter by alias
-    if glob_alias:
-        df = df[df['alias'].map(lambda g: any(g_ in g for g_ in glob_alias))].copy()
-
-    # Filter by instance: keep rows where glob_instance matches track OR problem OR instance
-    if glob_instance:
-        track_match = df['track'].map(lambda g: any(g_ in g for g_ in glob_instance))
-        problem_match = df['problem'].map(lambda g: any(g_ in g for g_ in glob_instance))
-        instance_match = df['instance'].map(lambda g: any(g_ in g for g_ in glob_instance))
-        df = df[track_match | problem_match | instance_match].copy()
-
-
-    # print(df.where(df["status"] == OPT).groupby(by=['problem', 'instance'])['obj'].nunique())
-    # print(df.mask(df["status"] == OPT).groupby(by=['problem', 'instance']).agg(lambda x: ','.join(str(x_) for x_ in x.unique()))['obj'])
-
-    # df['alias'] += '.'
-
-    # Rename tracks for cleaner display
-    df['track'] = df['track'].replace({
-        'COP22to25': 'COP',
-        'CSP22to25': 'CSP'
-    })
-
-    # Set solved status based on track type (vectorized for performance)
-    df["unknown"] = df["status"] == UNK
-    df["error"] = df["status"] == ERR
-    df["memory"] = df["status"] == MEM
-    df["feasible"] = df["status"].isin((OPT, SAT, UNS))
-
-    # For COP tracks: solved if status is OPT or UNS
-    # For other tracks: solved if status is SAT or UNS
-    is_cop = df["track"].str.contains("COP", na=False)
-    df["solved"] = ((is_cop & df["status"].isin([OPT, UNS])) |
-                    (~is_cop & df["status"].isin([SAT, UNS])))
-
-
-    # replace time_solve to NaN if not solved
-    df["time_solve"] = df["time_solve"].mask(~df["solved"])
-
-    if intermediate:
-        # Filter to only keep instances that occur for all solvers
-        total_solvers = df['alias'].nunique()
-        instance_solver_counts = df.groupby(['problem', 'instance'])['alias'].nunique()
-        valid_instances = instance_solver_counts[instance_solver_counts == total_solvers].index
-        df = df.set_index(['problem', 'instance']).loc[valid_instances].reset_index()
-
-    if no_errors:
-        # Filter out instances where any solver got an error status
-        error_instances = df[df['error']].groupby(['problem', 'instance']).size().index
-        df = df.set_index(['problem', 'instance'])
-        df = df.drop(error_instances, errors='ignore')
-        df = df.reset_index()
-
-    assert not df.empty
+    if df is None:
+        return
 
     # Print some stats
 
