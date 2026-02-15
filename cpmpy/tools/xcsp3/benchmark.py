@@ -544,7 +544,6 @@ def xcsp3_benchmark(
             if filter_easy is not None:
                 filters.append("time")
             print(f"Filtered dataset from {original_size} to {len(dataset)} instances based on {' and '.join(filters)}")
-    exit(0)
 
     assert dataset
 
