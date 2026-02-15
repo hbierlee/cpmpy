@@ -601,7 +601,8 @@ def main(args):
         if config_key not in seen_configs:
             seen_configs.add(config_key)
             print(f"  {e['alias']}")
-            pprint.pprint(e["solver_kwargs"], indent=4)
+
+            pprint.pprint(getattr(e, "solver_kwargs", e["solver"]), indent=4)
 
     assert experiments
 
