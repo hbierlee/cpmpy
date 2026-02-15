@@ -355,7 +355,7 @@ def get_envs():
         if "base" in e["alias"]:
             continue
 
-        if "env" in e["solver_kwargs"]:
+        if "solver_kwargs" in e and "env" in e["solver_kwargs"]:
             e["solver_kwargs"]["env"] |= debug_env
         yield e
 

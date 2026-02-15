@@ -424,7 +424,9 @@ def xcsp3_benchmark(
     glob_instance: Optional[str] = None,
     first: Optional[bool] = False,
     profile: Optional[pathlib.Path] = False,
-    filter_feasible: Optional[list] = None,
+    results: Optional[list] = None,
+    filter_feasible: bool = False,
+    filter_easy: Optional[float] = None,
 ) -> str:
     """
     Benchmark a solver on XCSP3 instances.
@@ -501,28 +503,48 @@ def xcsp3_benchmark(
     # dataset = [(filename, metadata) for filename, metadata in dataset if min((t["rows"] for t in metadata["tables"]), default=0) >= 25]
     dataset = [(filename, metadata) for filename, metadata in dataset if metadata["area"]]
 
-    # Filter by feasible instances from CSV files if requested
-    if filter_feasible is not None:
-        print(f"Loading feasible instances from: {filter_feasible}")
-        df_feasible = analyze.load_and_process_csvs(files=filter_feasible, time_limit=time_limit)
+    # Filter by results from CSV files if requested
+    if results is not None:
+        print(f"Loading results from: {results}")
+        df_results = analyze.load_and_process_csvs(files=results, time_limit=time_limit)
 
-        if df_feasible is not None:
-            # Get instances that were found feasible by at least one solver
-            feasible_instances = df_feasible[df_feasible["feasible"]].groupby(['problem', 'instance']).size()
+        # Start with all instances in results
+        filtered_set = set((prob + "-" + inst) for prob, inst in df_results.groupby(['problem', 'instance']).size().index)
+        print(f"Found {len(filtered_set)} instances in results")
+
+        # Filter by feasibility if requested
+        if filter_feasible:
+            print("Filtering to feasible instances only")
+            feasible_instances = df_results[df_results["feasible"]].groupby(['problem', 'instance']).size()
             feasible_set = set((prob + "-" + inst) for prob, inst in feasible_instances.index)
+            print(f"Found {len(feasible_set)} feasible instances")
+            filtered_set = filtered_set & feasible_set
 
-            print(f"Found {len(feasible_set)} feasible instances in CSV files")
+        # Filter by solve time if requested
+        if filter_easy is not None:
+            print(f"Filtering to instances solved in at most {filter_easy} seconds")
+            easy_instances = df_results[
+                df_results["solved"] & (df_results["time_solve"] <= filter_easy)
+            ].groupby(['problem', 'instance']).size()
+            easy_set = set((prob + "-" + inst) for prob, inst in easy_instances.index)
+            print(f"Found {len(easy_set)} easy instances (solved <= {filter_easy}s)")
+            filtered_set = filtered_set & easy_set
 
-            # Filter dataset to only include feasible instances
+        # Apply filtering to dataset
+        if filter_feasible or filter_easy is not None:
             original_size = len(dataset)
             dataset = [
                 (filename, metadata)
                 for filename, metadata in dataset
-                if metadata["name"].split(".")[0] in feasible_set
+                if metadata["name"].split(".")[0] in filtered_set
             ]
-            print(f"Filtered dataset from {original_size} to {len(dataset)} instances based on feasibility")
-        else:
-            print("Warning: Could not load CSV files for filtering, proceeding with all instances")
+            filters = []
+            if filter_feasible:
+                filters.append("feasibility")
+            if filter_easy is not None:
+                filters.append("time")
+            print(f"Filtered dataset from {original_size} to {len(dataset)} instances based on {' and '.join(filters)}")
+    exit(0)
 
     assert dataset
 
@@ -571,10 +593,15 @@ def main(args):
     if args.reverse_experiments:
         experiments.reverse()
 
-    print("Experiments")
+    print("Solvers")
+    # Print only unique alias/solver_kwargs combinations
+    seen_configs = set()
     for e in experiments:
-        print(e["alias"])
-        pprint.pprint(e["solver_kwargs"])
+        config_key = (e["alias"], str(sorted(e.get("solver_kwargs", {}).items())))
+        if config_key not in seen_configs:
+            seen_configs.add(config_key)
+            print(f"  {e['alias']}")
+            pprint.pprint(e["solver_kwargs"], indent=4)
 
     assert experiments
 
@@ -624,6 +651,8 @@ if __name__ == "__main__":
     parser.add_argument('--dry', action='store_true', help='Dry run')
     parser.add_argument('--debug', action='store_true', help='Debug run')
     parser.add_argument('--reverse-experiments', action='store_true', help='Reverse experiment order')
-    parser.add_argument('--filter-feasible', type=str, nargs='+', help='Filter to only run instances found feasible in these CSV files/directories')
+    parser.add_argument('--results', type=str, nargs='+', help='CSV files/directories with previous benchmark results for filtering')
+    parser.add_argument('--filter-feasible', action='store_true', help='When used with --results, filter to only run instances found feasible')
+    parser.add_argument('--filter-easy', type=float, help='When used with --results, only keep instances solved in at most this many seconds by any solver')
 
     main(parser.parse_args())
