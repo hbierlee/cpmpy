@@ -34,9 +34,9 @@ DEFAULTS = [
     [
         {
             "year": 2025,
-            "track": "COP22to25",
+            "track": track,
             "glob_instance": None,
-        }
+        } for track in ["CSP22to25", "COP22to25"]
     ],
 ]
 
@@ -93,6 +93,8 @@ def get_experiments(overrides={}, filters=[]):
                                     (
                                         0,
                                         100,
+                                        200,
+                                        500,
                                     ),
                                 ),
                                 # ("negatives", (0,3)),
