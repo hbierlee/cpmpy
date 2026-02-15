@@ -599,9 +599,9 @@ def main(args):
         config_key = (e["alias"], str(sorted(e.get("solver_kwargs", {}).items())))
         if config_key not in seen_configs:
             seen_configs.add(config_key)
-            print(f"  {e['alias']}")
-
-            pprint.pprint(getattr(e, "solver_kwargs", e["solver"]), indent=4)
+            print(f"{e['alias']}")
+            if "solver_kwargs" in e:
+                pprint.pprint(e["solver_kwargs"])
 
     assert experiments
 
