@@ -393,7 +393,7 @@ class TestTables:
             slv = CPM_lazy_gurobi(
                 env={
                     **env,
-                    **{"verbosity": 3, "debug": True, "checker": None, "coverlift": False, "shrink": True},
+                    **{"verbosity": 3, "debug": True, "checker": None, "coverlift": False, "shrink": False, "fractional": True},
                 },
             )
 

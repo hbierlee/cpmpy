@@ -20,57 +20,52 @@ from scalene import scalene_profiler
 
 from line_profiler import profile
 
-# https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
-# Functions for approximate comparison of floating point numbers
-EPS = 1e-6
-
-
-def dbg(x):
-    return x
+# Using Gurobi's default tolerance values:
+# https://www.gurobi.com/documentation/current/refman/parameters.html#sec:Parameters
+INT_FEAS_TOL = 1e-5  # Gurobi's IntFeasTol: for checking integrality
+# FEAS_TOL = 1e-6  # Gurobi's FeasibilityTol: for checking constraint satisfaction
+FEAS_TOL = 1e-5  # relaxed tolerance; slightly slower but easier to work with
 
 
 def none(A):
     return not A.any()
 
-
+# Baed on https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
+# Functions for approximate comparison of floating point numbers
 def is_eq(x, y):
-    return abs(x - y) <= EPS
+    return abs(x - y) <= FEAS_TOL
 
 
 def is_lt(x, y):
-    return x - y < -EPS
+    return x - y < -FEAS_TOL
 
 
 def is_le(x, y):
-    return x - y <= EPS
+    return x - y <= FEAS_TOL
 
 
 def is_gt(x, y):
-    return x - y > EPS
+    return x - y > FEAS_TOL
 
 
 def is_ge(x, y):
-    return x - y >= -EPS
+    return x - y >= -FEAS_TOL
 
 
 def eps_floor(x):
-    return np.floor(x + EPS)
+    return np.floor(x + INT_FEAS_TOL)
 
 
 def eps_ceil(x):
-    return np.ceil(x - EPS)
+    return np.ceil(x - INT_FEAS_TOL)
 
 
 def eps_round(x):
-    return np.ceil(x - 0.5 + EPS)
-
-
-def eps_frac(x):
-    return x - eps_floor(x)
+    return np.ceil(x - 0.5 + INT_FEAS_TOL)
 
 
 def is_integral(x):
-    return eps_frac(x) <= EPS
+    return np.abs(x - np.round(x)) <= INT_FEAS_TOL
 
 
 def assign_mipsol(A_enc):
@@ -175,6 +170,7 @@ class Heuristic(Feature):
     GREEDY = "greedy"
     REDUCE = "reduce"
 
+
 class Coverlift(Feature):
     No = "no"
     INPUT = "input"
@@ -183,8 +179,6 @@ class Coverlift(Feature):
 
     def __bool__(self):
         return self is not Coverlift.No
-
-
 
 
 def normalize_table(table):
@@ -1049,7 +1043,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     "A",
                     self.user_vars,
                     tuple(x.value() for x in sorted(self.user_vars, key=lambda x: x.name) if x.value() is not None),
-                    verbosity=3
+                    verbosity=3,
                 )
                 self.log("REMOVED {len(removed)}", verbosity=2)
                 self.log(removed, verbosity=3)
