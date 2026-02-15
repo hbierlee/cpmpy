@@ -2,6 +2,7 @@ import itertools
 import math
 from cpmpy.solvers.lazy_gurobi import Heuristic, CPM_lazy_gurobi
 from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
+from cpmpy.solvers.ortools import CPM_ortools
 
 
 MEM_LIMIT = 8
@@ -45,6 +46,7 @@ def get_experiments(overrides={}, filters=[]):
     return experiment(
         [
             [
+                {"solver": "ortools", "alias": f"ortools"},
                 *[
                     {
                         "solver": CPM_gurobi,

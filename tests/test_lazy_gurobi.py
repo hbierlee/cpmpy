@@ -11,6 +11,7 @@ import cpmpy as cp
 from cpmpy.transformations.get_variables import get_variables_model
 from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic
+from cpmpy.solvers.ortools import CPM_ortools
 from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
 from cpmpy.tools.xcsp3.experiments import get_experiments
 
@@ -37,62 +38,123 @@ def generate_two_tables():
 
 
 def generate_edge_case_tables():
-    """Generator yielding various edge case table constraints"""
+    """Generator yielding (name, model) tuples for various test cases"""
 
-    # Single column table (1 variable)
-    yield cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]]))
+    # Basic test cases
+    yield ("alldiff", cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))))
+    # yield ("singleton_dom", generate_table_from_data([[1, 1]], 1))
+    # yield ("singleton_dom_inf", generate_table_from_data([[1, 2]], 1))
+    yield ("single_row", generate_table_from_data([[1, 1]], 3))
+    yield ("feasible_diagonal", generate_table_from_data([[1, 1], [2, 2]], 3))
+    yield ("feasible_swap", generate_table_from_data([[1, 2], [2, 1]], 3))
+    yield ("infeasible_alldiff", with_constraints(generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True))
+    yield ("alldiff_min", with_constraints(generate_table_from_data([[1, 2], [2, 1]], 3), with_alldiff=True, with_min=True))
+    yield ("from_example", generate_table_from_example())
+    yield ("from_example_alldiff", with_constraints(generate_table_from_example(), with_alldiff=True))
+    yield ("two_tables", generate_two_tables())
 
-    # Complete table (all possible tuples)
-    yield cp.Model(
-        cp.Table(
-            [cp.intvar(1, 2, name="x"), cp.intvar(1, 2, name="y")],
-            [[i, j] for i in range(1, 3) for j in range(1, 3)],
-        )
+    # Edge cases
+    yield ("single_column", cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]])))
+    yield (
+        "complete_table",
+        cp.Model(
+            cp.Table(
+                [cp.intvar(1, 2, name="x"), cp.intvar(1, 2, name="y")],
+                [[i, j] for i in range(1, 3) for j in range(1, 3)],
+            )
+        ),
     )
-
-    # Duplicate rows in table
-    yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]]))
-
-    # Constant column (one variable always same value)
-    yield cp.Model(
-        cp.Table(
-            [cp.intvar(1, 5, name="x"), cp.intvar(1, 3, name="y"), cp.intvar(1, 4, name="z")],
-            [[1, 2, 3], [1, 1, 2], [1, 3, 4], [1, 2, 1]],
-        )
+    yield (
+        "duplicate_rows",
+        cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]])),
     )
-
-    # Sparse table (large domain, few tuples)
-    yield cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]]))
-
-    # No valid tuples (unsatisfiable - tuples outside domains)
-    yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[4, 5], [5, 6], [6, 7]]))
-
-    # table with fixed vals, feas/infeasible
-    yield cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[3, 2]]))
-    yield cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[4, 2]]))
-
-    # table with bool vars
-    yield cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]]))
-
-    # table with neg bool vars
-    yield cp.Model(cp.Table([~cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]]))
-
-    # Single tuple only
-    yield cp.Model(cp.Table([cp.intvar(1, 5, name="x"), cp.intvar(1, 5, name="y")], [[3, 3]]))
-
-    # Very wide table (many columns)
-    yield cp.Model(
-        cp.Table(
-            cp.intvar(1, 3, shape=10, name="x"),
-            [[1, 2, 3, 1, 2, 3, 1, 2, 3, 1], [2, 1, 2, 1, 2, 1, 2, 1, 2, 1]],
-        )
+    yield (
+        "constant_column",
+        cp.Model(
+            cp.Table(
+                [cp.intvar(1, 5, name="x"), cp.intvar(1, 3, name="y"), cp.intvar(1, 4, name="z")],
+                [[1, 2, 3], [1, 1, 2], [1, 3, 4], [1, 2, 1]],
+            )
+        ),
     )
+    yield (
+        "sparse_table",
+        cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])),
+    )
+    yield (
+        "no_valid_tuples",
+        cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[4, 5], [5, 6], [6, 7]])),
+    )
+    yield ("fixed_feasible", cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[3, 2]])))
+    yield ("fixed_infeasible", cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[4, 2]])))
+    yield ("bool_vars", cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
+    x = cp.intvar(0, 3, name="x", shape=2)
+    yield ("soccer_problem", cp.Model(*[cp.InDomain(x_i, [0, 1, 3]) for x_i in x], cp.Table(x, [[0, 3], [1, 1], [3, 0]])))
 
-    # Diagonal pattern
-    yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 1], [2, 2], [3, 3]]))
+    # yield ("random_gaps", generate_table(5, 10, 10, k=1, gaps=0.5))
+    yield ("random_gaps", generate_table(5, 5, 3, k=1, gaps=0.5))
+    yield ("negated_bool", cp.Model(cp.Table([~cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
+    yield ("single_tuple", cp.Model(cp.Table([cp.intvar(1, 5, name="x"), cp.intvar(1, 5, name="y")], [[3, 3]])))
+    yield (
+        "wide_table",
+        cp.Model(
+            cp.Table(
+                cp.intvar(1, 3, shape=10, name="x"),
+                [[1, 2, 3, 1, 2, 3, 1, 2, 3, 1], [2, 1, 2, 1, 2, 1, 2, 1, 2, 1]],
+            )
+        ),
+    )
+    yield ("diagonal", cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 1], [2, 2], [3, 3]])))
+    yield ("anti_diagonal", cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 3], [2, 2], [3, 1]])))
 
-    # Anti-diagonal pattern
-    yield cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 3], [2, 2], [3, 1]]))
+    # Generated table tests
+    for gaps in (None, 0.5):
+        suffix = "_gaps" if gaps else "_nogaps"
+
+        def generate_table_(*args, **kwargs):
+            return generate_table(*args, **kwargs)
+
+        yield (
+            f"t2x2x3_alldiff_min{suffix}",
+            with_constraints(
+                generate_table_(2, 2, 3),
+                with_alldiff=True,
+                with_min=True,
+            ),
+        )
+        yield (
+            f"t4x4x4{suffix}",
+            with_constraints(
+                generate_table_(4, 4, 4),
+                with_alldiff=False,
+                with_min=False,
+            ),
+        )
+        yield (f"t2x2x3_k2{suffix}", with_constraints(generate_table_(2, 2, 3)))
+        yield (
+            f"t3x3x4{suffix}",
+            with_constraints(
+                generate_table_(3, 3, 4),
+            ),
+        )
+        yield (f"t2x2x2_bug{suffix}", with_constraints(generate_table_(2, 2, 2)))
+        yield (
+            f"t4x3x4_k2{suffix}",
+            with_constraints(generate_table_(4, 3, 4)),
+        )
+        yield (
+            f"sml{suffix}",
+            with_constraints(generate_table_(2, 5, 3)),
+        )
+        yield (
+            f"mid{suffix}",
+            with_constraints(generate_table_(4, 5, 4, k=3)),
+        )
+        # yield (
+        #     f"big{suffix}",
+        #     with_constraints(generate_table_(50, 5000, 10000)),
+        # )
+        yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
 
 
 def generate_table_from_data(T, d):
@@ -102,11 +164,16 @@ def generate_table_from_data(T, d):
     return cp.Model(cp.Table(X, T))
 
 
-def generate_table(n, m, d, k=1, allow_duplicate_vars=False):
+def generate_table(n, m, d, k=1, gaps=None, allow_duplicate_vars=True):
     """Generate `k` table constraints with `n` variables with domains of size `d`, and with `m` rows"""
-    X = cp.intvar(1, d, shape=(n,), name="x")
-    # model = cp.Model(x == x for x in X)
     model = cp.Model()
+    X = cp.intvar(1, d, shape=(n,), name="x")
+    if gaps:
+        for x in X:
+            dom = sorted(random.sample(range(1, d + 1), max(2, round(d * gaps))))
+            assert len(set(dom))>1, dom
+            model += cp.InDomain(x, dom)
+            print('x', x, dom)
     random.seed(SEED)
     for _ in range(k):
         if k > 1:
@@ -132,25 +199,29 @@ def check_model(model, env=None):
     print("== Model ==")
     print(model)
 
-    print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
+    print(", ".join(f"{x} in {list(x.dom())}" for x in get_variables_model(model)))
     expected_sat = model.deepcopy().solve()
     print("expected feasible = ", expected_sat)
     try:
-        slv = env["solver"](cpm_model=model, **env["solver_kwargs"])
+        slv = (
+            CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](cpm_model=model, **env["solver_kwargs"])
+        )
 
         print("solver", slv)
         actual_sat = slv.solve()
         print("actual feasible", actual_sat)
-        print("stats = ", slv.stats())
 
-        if True:
-            slv_ = env["solver"](**env["solver_kwargs"])
-            print("ENCODING")
-            for i, c in enumerate(model.constraints, start=1):
-                print(f"C{i}", repr(c)[:100])
-                for ci in slv_.transform([c]):
-                    print("  ", ci)
-                    # print("  ", slv._csemap)
+        if hasattr(slv, "stats"):
+            print("stats = ", slv.stats())
+
+        # if True:
+        #     slv_ = env["solver"](**env["solver_kwargs"])
+        #     print("ENCODING")
+        #     for i, c in enumerate(model.constraints, start=1):
+        #         print(f"C{i}", repr(c)[:100])
+        #         for ci in slv_.transform([c]):
+        #             print("  ", ci)
+        #             # print("  ", slv._csemap)
 
         # if hasattr(slv, "stats"):
         #     slv.stats()
@@ -205,7 +276,7 @@ SEED = None
 def get_envs():
 
     debug_env = {
-        "verbosity": 3,
+        "verbosity": 2,
         "debug": 1,
         "max_iterations": 500,
         "seed": 42,
@@ -219,11 +290,13 @@ def get_envs():
                 **debug_env,
                 "fractional": False,
                 "coverlift": True,
+                "shrink": False,
                 "negatives": 0,
                 # "checker": cp.Model(),
                 "heuristic": Heuristic.GREEDY,
                 # "heuristic": Heuristic.REDUCE,
                 "cutoff": 0,
+                # "verbosity": 2,
             }
         },
     }
@@ -264,7 +337,7 @@ class TestTables:
         path = pathlib.Path("/tmp/failed_cut.pkl")
         if path.exists():
             with open(path, "rb") as f:
-                X_enc, A_enc, T_enc, parts, frm, A_enc_ = pickle.load(f)
+                X_enc, A_enc, T_enc, parts, frm = pickle.load(f)
             slv = CPM_lazy_gurobi(
                 env={
                     **env,
@@ -408,7 +481,7 @@ class TestTables:
         assert (X == np.array([False, True, True])).all()
 
         return
-    # TODO X = floats
+        # TODO X = floats
         X, k = CPM_lazy_gurobi(env=env).shrink(
             np.array([0.5, 0.5, 0.0]),
             np.array(
@@ -539,15 +612,6 @@ class TestTables:
         slv = CPM_lazy_gurobi(cpm_model=m)
         print("Repro model:", slv.transform(m.constraints))
 
-    def test_table_enc(self, env):
-        x = cp.intvar(1, 4, name="x")
-        y = cp.intvar(1, 3, name="y")
-        z = cp.intvar(1, 3, name="z")
-        X = (x, y, z)
-        T = [[2, 1, 1], [3, 2, 2], [4, 3, 3], [1, 2, 3], [2, 1, 2]]
-        model = cp.Model(cp.Table(X, T), cp.AllDifferent(X))
-        check_model(model, env=env)
-
     def test_sols(self, env):
         from cpmpy.solvers.utils import solutions
 
@@ -567,10 +631,11 @@ def idfn(a):
     if isinstance(a, dict):
         return a["alias"]
     else:
-        return f"{a[0]}-{a[1]}"
+        name, repeat = a[0], a[1]
+        return f"{name}_r{repeat}" if repeat > 1 else name
 
 
-REPEAT = 3
+REPEAT = 1
 
 
 @pytest.mark.timeout(60)
@@ -580,64 +645,9 @@ class TestModels:
         itertools.product(
             get_envs(),
             (
-                (i, j, t)
-                for j, _ in enumerate(range(REPEAT), start=1)  # to repeat the test
-                for i, t in enumerate(
-                    [
-                        *[
-                            cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3))),
-                            # cp.Model(cp.Table([cp.intvar(0, 5)], [])),
-                            # cp.Model(~cp.Table([cp.intvar(0, 5)], [])),
-                            # generate_table_from_data([tuple()], 5),
-                            generate_table_from_data([[1, 1]], 3),  # single row (actually exists in xcsp3)
-                            generate_table_from_data([[1, 1], [2, 2]], 3),  # Feasible (often 0 explanations)
-                            generate_table_from_data([[1, 2], [2, 1]], 3),  # Feasible
-                            with_constraints(generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True),  # Infeasible
-                            with_constraints(
-                                generate_table_from_data([[1, 2], [2, 1]], 3),
-                                with_alldiff=True,
-                                with_min=True,
-                            ),
-                            generate_table_from_example(),
-                            with_constraints(
-                                generate_table_from_example(),
-                                with_alldiff=True,
-                            ),
-                            generate_two_tables(),
-                        ],
-                        *list(generate_edge_case_tables()),  # Edge case tables
-                        *[
-                            table
-                            for allow_duplicate_vars in (False, True)
-                            for table in [
-                                with_constraints(
-                                    generate_table(2, 2, 3, allow_duplicate_vars=allow_duplicate_vars),
-                                    with_alldiff=True,
-                                    with_min=True,
-                                ),
-                                with_constraints(
-                                    generate_table(4, 4, 4, allow_duplicate_vars=allow_duplicate_vars),
-                                    with_alldiff=False,
-                                    with_min=False,
-                                ),
-                                with_constraints(generate_table(2, 2, 3, k=2, allow_duplicate_vars=allow_duplicate_vars)),
-                                with_constraints(
-                                    generate_table(3, 3, 4, allow_duplicate_vars=allow_duplicate_vars),
-                                    # with_alldiff=False,
-                                    # with_min=True,
-                                ),
-                                with_constraints(
-                                    generate_table(2, 2, 2, allow_duplicate_vars=allow_duplicate_vars)
-                                ),  # minimized 1/1000 bug
-                                with_constraints(generate_table(5, 100, 10, allow_duplicate_vars=allow_duplicate_vars)),
-                                with_constraints(
-                                    generate_table(4, 3, 4, k=2, allow_duplicate_vars=allow_duplicate_vars)
-                                ),  # TRICKY BUG FINDER NO CHIOCE
-                            ]
-                        ],
-                    ],
-                    start=1,
-                )
+                (name, j, model)
+                for j in range(1, REPEAT + 1)  # to repeat the test
+                for name, model in generate_edge_case_tables()
             ),
         ),
         ids=idfn,

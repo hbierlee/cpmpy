@@ -263,7 +263,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["checker"]:
             self.log("SOLS", len(self.env["solutions"]))
             self.env["remain"] = len(self.solutions_checker())
-            self.log("SEARCH", self.env["remain"])
+            self.log("TO REMOVE", self.env["remain"])
 
     def log(self, *mess, verbosity=1, end="\n", indent=None):
         assert self.env["verbosity"]
@@ -316,6 +316,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "n_cuts": len(cuts_mipsol),
             "n_cuts_explained": len(cuts_mipnode_exp),
             "n_cuts_unexplained": len(cuts_mipnode_unexp),
+            "avg_strength": (sum(s["strength"] for s in cuts) / len(cuts)) if cuts and self.env["checker"] else None,
         }
 
     @profile
@@ -890,19 +891,28 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         for i, (X_enc, T_enc, parts, table) in enumerate(self.tables, start=INDEX):
             # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
-            A_enc = np.fromiter((x_enc_a[x_enc_i] for x_enc_i in X_enc), dtype=float)
-            A_enc_ = A_enc > 0.5
-            # A_enc_ = assign_mipsol(A_enc)
+            if frm == "MIPSOL":
+                A_enc = np.fromiter((x_enc_a[x_enc_i] > 0.5 for x_enc_i in X_enc), dtype=bool)
+                is_integer = True
+            else:
+                A_enc = np.fromiter((x_enc_a[x_enc_i] for x_enc_i in X_enc), dtype=float)
+                is_integer = False
+                if is_integral(A_enc).all():
+                    A_enc = A_enc > 0.5
+                    assert A_enc.dtype == bool
+                    is_integer = True
+            if self.env["verbosity"]:
+                self.log("A_enc", show_table(A_enc), verbosity=2)
 
             # TODO figure out when can be skipped
-            if (frm == "MIPSOL" or is_integral(A_enc).all()) and (T_enc == A_enc_).all(1).any():
+            if is_integer and (T_enc == A_enc).all(1).any():
                 if self.env["verbosity"]:
                     self.log(
-                        f"table {i}/{len(self.tables)} feasible",
+                        f"table {i}/{len(self.tables)} feasible: ({show_nz((T_enc == A_enc).all(1))})",
                         verbosity=2,
                     )
                     self.log(
-                        f"by {A_enc_}\n\n{np.astype(T_enc, int)}",
+                        f"by {A_enc}\n\n{np.astype(T_enc, int)}",
                         verbosity=3,
                         indent=2,
                     )
@@ -913,7 +923,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     verbosity=3,
                 )
                 self.log(
-                    f"by {A_enc_}\n\n{np.astype(T_enc, int)}",
+                    f"by {A_enc}\n\n{np.astype(T_enc, int)}",
                     verbosity=3,
                     indent=2,
                 )
@@ -949,7 +959,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 raise Infeasible
             except Exception as e:
                 with open("/tmp/failed_cut.pkl", "wb") as f:
-                    pickle.dump((X_enc, A_enc, T_enc, parts, frm, A_enc_), f)
+                    pickle.dump((X_enc, A_enc, T_enc, parts, frm), f)
                 raise e
 
     def add(self, cons):
@@ -1044,7 +1054,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(expected_solutions, verbosity=4, indent=2)
                 self.log(f"ACTUAL ({len(actual_solutions)})", verbosity=2)
                 self.log(actual_solutions, verbosity=4, indent=2)
-                self.log(f"TO REMOVE ({len(remaining)}):", verbosity=2)
+                self.log(f"TO REMOVE ({len(remaining)})", verbosity=2)
                 self.log(remaining, verbosity=4)
                 self.log(f"STRENGTH == {strength}", verbosity=2)
 

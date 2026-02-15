@@ -692,7 +692,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
     # Change status to MEM for Gurobi out of memory errors
-    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].str.contains("gurobipy._exception.GurobiError: Out of memory", na=False)
+    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].astype(str).str.contains("gurobipy._exception.GurobiError: Out of memory", na=False)
     df.loc[gurobi_oom_mask, 'status'] = MEM
 
     if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
@@ -981,7 +981,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             # Drop the baseline itself from the diff
             diff_ = diff_.drop(index=baseline, level="alias", errors='ignore')
 
-            print("DIFF (relative to baseline {baseline})")
+            print(f"DIFF (relative to baseline {baseline})")
             print(diff_)
 
             # Compute correlations for each solver separately

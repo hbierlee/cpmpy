@@ -91,17 +91,6 @@ def trivial_decomposition(arr, tab):
     else:
         assert False, f"non-trivial {arr} {tabl}"
 
-def encode_intvar_as_bool(arr):
-    shape = sum([dom_size(x) for x in arr])
-    bv = cp.boolvar(shape=shape)
-    cons = []
-    offset = 0
-    for x in arr:
-        cons += [cp.sum(bv[offset:offset+(dom_size(x))]) == 1]
-        cons += [x == cp.sum(bv[offset:offset+dom_size(x)] * range(x.lb, x.lb + dom_size(x)+1))]
-        offset += dom_size(x)
-    return bv, cons
-
 try:
     import gurobipy as gp
     GRB_ENV = None
