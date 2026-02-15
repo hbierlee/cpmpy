@@ -16,10 +16,6 @@ from cpmpy.solvers.gurobi import CPM_gurobi, Feature
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.transformations.linearize import only_positive_bv
 
-from scalene import scalene_profiler
-
-from line_profiler import profile
-
 # Using Gurobi's default tolerance values:
 # https://www.gurobi.com/documentation/current/refman/parameters.html#sec:Parameters
 INT_FEAS_TOL = 1e-5  # Gurobi's IntFeasTol: for checking integrality
@@ -30,7 +26,7 @@ FEAS_TOL = 1e-5  # relaxed tolerance; slightly slower but easier to work with
 def none(A):
     return not A.any()
 
-# Baed on https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
+# Based on https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
 # Functions for approximate comparison of floating point numbers
 def is_eq(x, y):
     return abs(x - y) <= FEAS_TOL
@@ -114,7 +110,7 @@ DEBUG_NP_PRINTOPTIONS = {
 
 
 def show_table(T_enc, index=INDEX):
-    return np.astype(T_enc, int) if T_enc.dtype in (bool, np.bool) else T_enc
+    return np.astype(T_enc, int) if T_enc.dtype == bool else T_enc
 
 
 def show_nz(A, index=INDEX):
@@ -134,7 +130,7 @@ def show(S, index=INDEX):
         return show_set(S, index=index)
     elif isinstance(S, (int, np.integer)):
         return show_ind(S, index=index)
-    elif isinstance(S, (bool, np.bool)):
+    elif isinstance(S, (bool, np.bool_)):
         return "T" if S else "F"
     else:
         raise TypeError(f"{S}, {type(S)}")
@@ -154,10 +150,6 @@ def cols(T, i, j=1):
     """Col indices where T[i]==j"""
     # TODO replace for rows(T.T, ..)?
     return set(i for i in np.where(T[i, :] == j)[0].flatten())
-
-
-def is_integer(v):
-    return np.isclose(v, v > 0.5, abs_tol=1e-5)
 
 
 def union(sets):
@@ -191,7 +183,7 @@ def normalize_table(table):
             if x.name == y.name:
                 T = [r for r in T if r[i] == r[j]]
                 to_delete.add(j)
-    for d in to_delete:
+    if to_delete:
         table.args[0] = [x for i, x in enumerate(X) if i not in to_delete]
         table.args[1] = [[ri for i, ri in enumerate(r) if i not in to_delete] for r in T]
 
@@ -202,7 +194,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def __init__(self, env=None, cpm_model=None, **kwargs):
         self.env = {
             "debug": False,
-            "profile": False,
             "verbosity": 0,
             "log": None,
             "heuristic": Heuristic.GREEDY,
@@ -324,7 +315,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "avg_strength": (sum(s["strength"] for s in cuts) / len(cuts)) if cuts and self.env["checker"] else None,
         }
 
-    @profile
     def choose(self, choices, T_enc, R, parts, A_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
         if self.env["verbosity"]:
             self.log(f"Choose from {show_nz(choices)} to allow remaining rows R={show_nz(R)}", verbosity=3)
@@ -417,12 +407,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     self.log(f"shrunk", show(i), verbosity=3)
         return X, k
 
-    @profile
     def gencoverlift(self, S, C_enc, k, T_enc, A_enc, heuristic=Coverlift.INPUT):
         if self.env["verbosity"]:
             self.log("gencoverlift", verbosity=3)
 
-        R = np.ones(len(T_enc), dtype=np.bool)
+        R = np.ones(len(T_enc), dtype=bool)
 
         def tight(R, RS):
             # TODO [peter] incorrect def in alg?
@@ -530,7 +519,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
-    # @profile
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
 
@@ -617,10 +605,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     self.log("unexplainable, because U is empty", indent=2, verbosity=3)
                 return True
             else:
-                # R = np.ones(m, dtype=np.bool)
-                # choice = self.choose(U, T_enc, set(range(m)), heuristic=self.env["heuristic"])
-                # choice = U.argmax()
-                R = np.ones(m, dtype=np.bool)
+                R = np.ones(m, dtype=bool)
                 choice = self.choose(U, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
@@ -653,7 +638,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
 
         else:
-            R = np.ones(m, dtype=np.bool)
+            R = np.ones(m, dtype=bool)
             X = np.zeros(len(T_enc.T), dtype=bool)
             choices = np.ones(len(T_enc.T), dtype=bool)
             k = -1
@@ -812,8 +797,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
         all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
 
         def solution_callback(what, where):
-            if self.env["profile"]:
-                scalene_profiler.start()
             time_cb = time.time()
 
             try:
@@ -859,10 +842,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     self.log(f"end callback, dt = {time_cb}", verbosity=4)
                 self.env["time_cb"] += time_cb
 
-                if self.env["profile"]:
-                    scalene_profiler.stop()
-                # assert time_cb < 1.0 or self.env["debug"]
-
         return solution_callback
 
     def explanation_to_expr(self, explanation, A_enc, X_enc, T_enc, frm):
@@ -875,7 +854,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2, verbosity=2)
                 self.log(f"  == {expr}", indent=2, verbosity=2)
 
-        if isinstance(expr, (bool, np.bool)):
+        if isinstance(expr, (bool, np.bool_)):
             expr = cp.BoolVal(expr)
 
         if self.env["debug"]:
@@ -1045,7 +1024,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     tuple(x.value() for x in sorted(self.user_vars, key=lambda x: x.name) if x.value() is not None),
                     verbosity=3,
                 )
-                self.log("REMOVED {len(removed)}", verbosity=2)
+                self.log(f"REMOVED {len(removed)}", verbosity=2)
                 self.log(removed, verbosity=3)
 
             strength = (
