@@ -365,15 +365,15 @@ def get_envs():
             e["solver_kwargs"]["env"] |= debug_env
         yield e
 
-    # for encoding in Encoding:
-    #     yield {
-    #         "alias": f"base_gurobi-{encoding}",
-    #         "solver": CPM_gurobi,
-    #         "solver_kwargs": {
-    #             "verbose": 1,
-    #             "encoding": encoding,
-    #         },
-    #     }
+    for encoding in Encoding:
+        yield {
+            "alias": f"base_gurobi-{encoding}",
+            "solver": CPM_gurobi,
+            "solver_kwargs": {
+                "verbose": 0,
+                "encoding": encoding,
+            },
+        }
 
 
 @pytest.fixture
