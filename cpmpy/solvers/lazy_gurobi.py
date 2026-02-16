@@ -502,7 +502,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(f"Lift j = {show(j)}", verbosity=2)
 
             non_tight = (~R_tight) & T_enc[:, j]
-            print(f'NON TIGHT = {show_nz(non_tight)}', )
+            # print(f'NON TIGHT = {show_nz(non_tight)}', )
             # KRS = k - RS[non_tight] if RS.any() else k
             KRS = k - RS[non_tight]
             a_j = np.min(KRS, initial=0)
