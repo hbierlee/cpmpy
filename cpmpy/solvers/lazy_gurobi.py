@@ -430,9 +430,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         R = np.ones(len(T_enc), dtype=bool)
 
+        # TODO add to alg: RS>=k, and X |= S
+
         def tight(R, RS):
             # TODO [peter] incorrect def in alg?
-            return R & (RS <= k)
+            return R & (RS >= k)
 
         # RS = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
         # X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
@@ -504,8 +506,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             non_tight = (~R_tight) & T_enc[:, j]
             # print(f'NON TIGHT = {show_nz(non_tight)}', )
             # KRS = k - RS[non_tight] if RS.any() else k
-            KRS = k - RS[non_tight]
-            a_j = np.min(KRS, initial=0)
+            a_j = k - np.max(RS[non_tight], initial=0)
+
             RS = RS + a_j * T_enc.T[j]
             N_tight = tight(~R_tight, RS)
             R_tight |= N_tight
@@ -521,14 +523,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(f"X = {show_nz(X)}", verbosity=3)
                 # self.log("A", a_j * T_enc.T[j], verbosity=3)
 
-
-
             # assert not S[j] and C_enc[j] == 0, f"Already chosen {show(j)} in {show_nz(S)}"
 
             S[j] = True
-            C_enc[j] += 1
+            C_enc[j] = a_j
 
             X |= T_enc[N_tight, :].any(0)
+            X[j] = True
             # X = T_enc[R_tight, :].any(0)  # slightly slower
 
 
