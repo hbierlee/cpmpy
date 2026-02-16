@@ -353,7 +353,7 @@ def get_envs():
                 "heuristic": Heuristic.GREEDY,
                 # "heuristic": Heuristic.REDUCE,
                 "cutoff": 0,
-                "verbosity": 2,
+                "verbosity": 3,
             }
         },
     }
@@ -737,7 +737,7 @@ def benchmark_table_constraints(envs=None, glob=None):
         ],
         control=False,
         add_all=False,
-        # add_none=False,
+        add_none=True,
     )
 
     # envs = get_experiments(filters=[("coverlift", list(Coverlift))])
@@ -753,7 +753,8 @@ def benchmark_table_constraints(envs=None, glob=None):
     test_cases = list(generate_models_w_tables(hard=1))
 
     checked = True
-    verbosity = 2
+    verbosity = 3
+    max_iterations = 10
 
     for env in envs:
         env_alias = env.get("alias", "unknown")
@@ -763,10 +764,15 @@ def benchmark_table_constraints(envs=None, glob=None):
         # print("ENV", env)
         env["solver_kwargs"]["env"]["verbosity"] = verbosity
         env["solver_kwargs"]["env"]["checked"] = checked
+        # env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
+        # env["solver_kwargs"]["env"]["debug"] = True
 
+        GLOB = tuple()
+        # GLOB = ("example_alldiff",)
+        # GLOB = ("single_row",)
         for name, model in test_cases:
-            # if "example." not in name:
-            #     continue
+            if any(g not in name for g in GLOB):
+                continue
             print(f"Running {name} with {env_alias}...")
 
             try:
@@ -812,11 +818,7 @@ def benchmark_table_constraints(envs=None, glob=None):
         original_order = [name for name, _ in test_cases]
         df["name"] = pd.Categorical(df["name"], categories=original_order, ordered=True)
 
-        values = ["n_cuts"]
-        if checked:
-            values += ["avg_strength"]
-        else:
-            values += ["time_solve"]
+        values = ["n_cuts"] + (["avg_strength"] if checked else ["time_solve"])
 
         comparison = df.pivot_table(
             index="name",

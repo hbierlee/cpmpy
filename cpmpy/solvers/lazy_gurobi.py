@@ -425,7 +425,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def gencoverlift(self, S, C_enc, k, T_enc, A_enc, heuristic=Coverlift.INPUT):
         if self.env["verbosity"]:
-            self.log("gencoverlift", verbosity=3)
+            self.log("gencoverlift", verbosity=2)
+            self.log(show_table(T_enc), verbosity=3)
 
         R = np.ones(len(T_enc), dtype=bool)
 
@@ -437,7 +438,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
 
         # TODO perf do we need RS for every row?
-        RS = (C_enc[S] * T_enc[:, S]).sum(axis=1)
+        # RS = (C_enc[S] * T_enc[:, S]).sum(axis=1)
+        RS = (C_enc * T_enc).sum(axis=1)
         R_tight = tight(R, RS)
         X = (T_enc.T & R_tight).any(1)
         X = X | S
@@ -448,6 +450,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("RS (row slack?)", RS, verbosity=3)
             self.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
             self.log(f"X = {show_nz(X)}", verbosity=3)
+            self.log(f"choices = {show_nz(~X)}", verbosity=3)
         # TODO [peter] C missing from alg
 
         i = 0
@@ -487,20 +490,47 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 case _ if self.env["example2"]:
                     j = [3, 7, 0][i]
                 case Coverlift.INPUT:
-                    j = np.nanargmax(np.where(~X, A_enc, np.nan))
+                    # j = np.nanargmax(np.where(~X, A_enc, np.nan))
+                    j = np.argmax(~X)
                 case Coverlift.COM_MIN:
                     j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
                 case Coverlift.COM_MAX:
                     j = np.nanargmax(com - (np.where(~X, A_enc, np.nan)))
             assert not X[j]
 
-            assert not S[j], f"Already chosen {show(j)} in {show_nz(S)}"
-            S[j] = True
-            assert C_enc[j] == 0
-            C_enc[j] += 1
+            if self.env["verbosity"]:
+                self.log(f"Lift j = {show(j)}", verbosity=2)
+
             non_tight = (~R_tight) & T_enc[:, j]
-            KRS = k - RS[non_tight] if RS.any() else k
+            print(f'NON TIGHT = {show_nz(non_tight)}', )
+            # KRS = k - RS[non_tight] if RS.any() else k
+            KRS = k - RS[non_tight]
             a_j = np.min(KRS, initial=0)
+            RS = RS + a_j * T_enc.T[j]
+            N_tight = tight(~R_tight, RS)
+            R_tight |= N_tight
+            # 11 -> 0
+            # 10 -> 1
+            # 01 -> 0
+            # 00 -> 0
+            if self.env["verbosity"]:
+                self.log("a_j", a_j, verbosity=3)
+                self.log("RS (row slack?)", RS, verbosity=3)
+                self.log(f"N_tight = {show_nz(N_tight)}", verbosity=3)
+                self.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
+                self.log(f"X = {show_nz(X)}", verbosity=3)
+                # self.log("A", a_j * T_enc.T[j], verbosity=3)
+
+
+
+            # assert not S[j] and C_enc[j] == 0, f"Already chosen {show(j)} in {show_nz(S)}"
+
+            S[j] = True
+            C_enc[j] += 1
+
+            X |= T_enc[N_tight, :].any(0)
+            # X = T_enc[R_tight, :].any(0)  # slightly slower
+
 
             assert not self.env["example2"] or a_j == [2, 1, 1][i]
 
@@ -508,31 +538,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 f"{i}; {RS}"
             )
 
-            RS = RS + a_j * T_enc.T[j]
-
-            N_tight = tight(~R_tight, RS)
-
-            R_tight |= N_tight
-            # 11 -> 0
-            # 10 -> 1
-            # 01 -> 0
-            # 00 -> 0
-
-            X |= T_enc[N_tight, :].any(0)
-            # X = T_enc[R_tight, :].any(0)  # slightly slower
-
             if self.env["verbosity"]:
-                self.log(f"j = {show(j)}", verbosity=3)
-                self.log("S", S, verbosity=3)
-                self.log("C_enc", C_enc, verbosity=3)
-                self.log("a_j", a_j, verbosity=3)
-                self.log("A", a_j * T_enc.T[j], verbosity=3)
-                self.log("RS", RS, verbosity=3)
-                self.log("R_tight", R_tight, verbosity=3)
-                self.log("N_tight", N_tight, verbosity=3)
-                self.log("X", show_set(X.nonzero()), verbosity=3)
+                self.log(f"S = {show_nz(S)}", verbosity=3)
+                self.log("C_enc, k", C_enc, k, verbosity=3)
                 i += 1
+
+            if self.env["debug"]:
                 self.check_max_iterations(i)
+
             if R_tight.all():
                 break
 
@@ -775,7 +788,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 Xl = X.sum()
             X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc, A_enc, heuristic=self.env["coverlift"])
             if self.env["verbosity"]:
-                self.log("coverlift added ", X.sum() - Xl, verbosity=3)
+                self.log("coverlift added ", X.sum() - Xl, verbosity=2)
 
             show_cut()
 
