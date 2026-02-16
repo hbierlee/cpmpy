@@ -434,7 +434,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         def tight(R, RS):
             # TODO [peter] incorrect def in alg?
-            return R & (RS >= k)
+            return R & (RS == k)
 
         # RS = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
         # X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
