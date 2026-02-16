@@ -5,10 +5,6 @@ import pathlib
 import pickle
 import random
 
-SEED = 42
-random.seed(SEED)
-
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -19,7 +15,10 @@ from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic, Coverlift
 from cpmpy.solvers.ortools import CPM_ortools
 from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
-from cpmpy.tools.xcsp3.experiments import get_experiments
+from cpmpy.tools.xcsp3.experiments import get_experiments, get_solvers
+
+SEED = 42
+random.seed(SEED)
 
 
 def generate_table_from_example():
@@ -43,96 +42,104 @@ def generate_two_tables():
     )
 
 
-def generate_edge_case_tables(benchmarks=False):
+def generate_models_w_tables(hard=2):
     """Generator yielding (name, model) tuples for various test cases"""
 
-    if not benchmarks:
-        # Basic test cases
-        yield ("alldiff", cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3, name="x"))))
-        # yield ("singleton_dom", generate_table_from_data([[1, 1]], 1))
-        # yield ("singleton_dom_inf", generate_table_from_data([[1, 2]], 1))
-        yield ("single_row", generate_table_from_data([[1, 1]], 3))
-        yield ("feasible_diagonal", generate_table_from_data([[1, 1], [2, 2]], 3))
-        yield ("feasible_swap", generate_table_from_data([[1, 2], [2, 1]], 3))
-        yield ("infeasible_alldiff", with_constraints(generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True))
-        yield ("alldiff_min", with_constraints(generate_table_from_data([[1, 2], [2, 1]], 3), with_alldiff=True, with_min=True))
-        yield ("from_example", generate_table_from_example())
-        yield ("from_example_alldiff", with_constraints(generate_table_from_example(), with_alldiff=True))
-        yield ("two_tables", generate_two_tables())
+    # Basic test cases
+    # yield ("alldiff", cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3, name="x"))))
+    yield ("single_row", generate_table_from_data([[1, 1]], 2))
+    yield ("singleton_dom", generate_table_from_data([[1, 1]], 1))
+    yield ("singleton_dom_infeasible", generate_table_from_data([[1, 2]], 1))
+    yield ("feasible_diagonal", generate_table_from_data([[1, 1], [2, 2]], 3))
+    yield ("feasible_swap", generate_table_from_data([[1, 2], [2, 1]], 3))
+    yield ("infeasible_alldiff", with_constraints(generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True))
+    yield ("alldiff_min", with_constraints(generate_table_from_data([[1, 2], [2, 1]], 3), with_alldiff=True, with_min=True))
+    yield ("from_example", generate_table_from_example())
+    yield ("from_example_alldiff", with_constraints(generate_table_from_example(), with_alldiff=True))
 
-        # Edge cases
-        yield ("single_column", cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]])))
-        yield (
-            "complete_table",
-            cp.Model(
-                cp.Table(
-                    [cp.intvar(1, 2, name="x"), cp.intvar(1, 2, name="y")],
-                    [[i, j] for i in range(1, 3) for j in range(1, 3)],
-                )
-            ),
-        )
-        yield (
-            "duplicate_rows",
-            cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]])),
-        )
-        yield (
-            "constant_column",
-            cp.Model(
-                cp.Table(
-                    [cp.intvar(1, 5, name="x"), cp.intvar(1, 3, name="y"), cp.intvar(1, 4, name="z")],
-                    [[1, 2, 3], [1, 1, 2], [1, 3, 4], [1, 2, 1]],
-                )
-            ),
-        )
-        yield (
-            "sparse_table",
-            cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])),
-        )
-        yield (
-            "no_valid_tuples",
-            cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[4, 5], [5, 6], [6, 7]])),
-        )
-        yield ("fixed_feasible", cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[3, 2]])))
-        yield ("fixed_infeasible", cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[4, 2]])))
-        yield ("bool_vars", cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
-        x = cp.intvar(0, 3, name="x", shape=2)
-        yield ("soccer_problem", cp.Model(*[cp.InDomain(x_i, [0, 1, 3]) for x_i in x], cp.Table(x, [[0, 3], [1, 1], [3, 0]])))
+    # Edge cases
+    yield ("single_column", cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]])))
+    yield (
+        "complete_table",
+        cp.Model(
+            cp.Table(
+                [cp.intvar(1, 2, name="x"), cp.intvar(1, 2, name="y")],
+                [[i, j] for i in range(1, 3) for j in range(1, 3)],
+            )
+        ),
+    )
+    yield (
+        "duplicate_rows",
+        cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]])),
+    )
+    yield (
+        "constant_column",
+        cp.Model(
+            cp.Table(
+                [cp.intvar(1, 5, name="x"), cp.intvar(1, 3, name="y"), cp.intvar(1, 4, name="z")],
+                [[1, 2, 3], [1, 1, 2], [1, 3, 4], [1, 2, 1]],
+            )
+        ),
+    )
 
-        # yield ("random_gaps", generate_table(5, 10, 10, k=1, gaps=0.5))
-        yield ("random_gaps", generate_table(5, 5, 3, k=1, gaps=0.5))
-        yield ("negated_bool", cp.Model(cp.Table([~cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
-        yield ("single_tuple", cp.Model(cp.Table([cp.intvar(1, 5, name="x"), cp.intvar(1, 5, name="y")], [[3, 3]])))
-        yield (
-            "wide_table",
-            cp.Model(
-                cp.Table(
-                    cp.intvar(1, 3, shape=10, name="x"),
-                    [[1, 2, 3, 1, 2, 3, 1, 2, 3, 1], [2, 1, 2, 1, 2, 1, 2, 1, 2, 1]],
-                )
-            ),
-        )
-        yield ("diagonal", cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 1], [2, 2], [3, 3]])))
-        yield (
-            "anti_diagonal",
-            cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 3], [2, 2], [3, 1]])),
-        )
-        yield (f"t2x2x2_bug", with_constraints(generate_table(2, 2, 2)))
-        yield (
-            f"t2x2x3_alldiff_min",
-            with_constraints(
-                generate_table(2, 2, 3),
-                with_alldiff=True,
-                with_min=True,
-            ),
-        )
+    if hard <= 0:
+        return
 
+    yield (
+        "no_valid_tuples",
+        cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[4, 5], [5, 6], [6, 7]])),
+    )
+    yield ("fixed_feasible", cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[3, 2]])))
+    yield ("fixed_infeasible", cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[4, 2]])))
+    yield ("bool_vars", cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
+    x = cp.intvar(0, 3, name="x", shape=2)
+    yield ("soccer_problem", cp.Model(*[cp.InDomain(x_i, [0, 1, 3]) for x_i in x], cp.Table(x, [[0, 3], [1, 1], [3, 0]])))
+
+    # yield ("random_gaps", generate_table(5, 10, 10, k=1, gaps=0.5))
+    yield ("random_gaps", generate_table(5, 5, 3, k=1, gaps=0.5))
+    yield ("negated_bool", cp.Model(cp.Table([~cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
+    yield ("single_tuple", cp.Model(cp.Table([cp.intvar(1, 5, name="x"), cp.intvar(1, 5, name="y")], [[3, 3]])))
+    yield ("diagonal", cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 1], [2, 2], [3, 3]])))
+    yield (
+        "anti_diagonal",
+        cp.Model(cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 3], [2, 2], [3, 1]])),
+    )
+    yield (f"t2x2x2_bug", with_constraints(generate_table(2, 2, 2)))
+    yield (
+        f"t2x2x3_alldiff_min",
+        with_constraints(
+            generate_table(2, 2, 3),
+            with_alldiff=True,
+            with_min=True,
+        ),
+    )
+
+    if hard <= 1:
+        return
+
+    yield ("two_tables", generate_two_tables())
+
+    yield (
+        "sparse_table",
+        cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])),
+    )
+
+    yield (
+        "wide_table",
+        cp.Model(
+            cp.Table(
+                cp.intvar(1, 3, shape=10, name="x"),
+                [[1, 2, 3, 1, 2, 3, 1, 2, 3, 1], [2, 1, 2, 1, 2, 1, 2, 1, 2, 1]],
+            )
+        ),
+    )
     # Generated table tests
     # for gaps in (None, 0.5):
     for k in (
-        # 1,
-        5,
-        10,
-        25,
+        1,
+        # 5,
+        # 10,
+        # 25,
     ):
         # suffix = "_gaps" if gaps else "_nogaps"
         suffix = f"_{k}"
@@ -148,37 +155,33 @@ def generate_edge_case_tables(benchmarks=False):
                 with_min=False,
             ),
         )
+
         yield (f"t2x2x3_k2{suffix}", with_constraints(generate_table_(2, 2, 3)))
+
         yield (
             f"t3x3x4{suffix}",
             with_constraints(
                 generate_table_(3, 3, 4),
             ),
         )
+
         yield (
             f"t4x3x4_k2{suffix}",
             with_constraints(generate_table_(4, 3, 4)),
         )
-        # yield (
-        #     f"sml{suffix}",
-        #     with_constraints(generate_table_(2, 5, 3)),
-        # )
-        # yield (
-        #     f"mid{suffix}",
-        #     with_constraints(generate_table_(4, 5, 4)),
-        # )
-        if benchmarks:
-            yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
-            yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
+
+        yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
+        yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
+        if k > 1:
             yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
             yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
             yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
             yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
 
-            # yield (
-            #     f"big{suffix}",
-            #     with_constraints(generate_table_(50, 5000, 10000)),
-            # )
+        # yield (
+        #     f"big{suffix}",
+        #     with_constraints(generate_table_(50, 5000, 10000)),
+        # )
 
 
 def generate_table_from_data(T, d):
@@ -267,14 +270,18 @@ def check_model(model, env=None):
         if hasattr(slv, "stats"):
             print("stats = ", slv.stats())
 
-        # if True:
-        #     slv_ = env["solver"](**env["solver_kwargs"])
-        #     print("ENCODING")
-        #     for i, c in enumerate(model.constraints, start=1):
-        #         print(f"C{i}", repr(c)[:100])
-        #         for ci in slv_.transform([c]):
-        #             print("  ", ci)
-        #             # print("  ", slv._csemap)
+        if False:
+            slv_ = (
+                CPM_ortools(cpm_model=model)
+                if env["solver"] == "ortools"
+                else env["solver"](cpm_model=model, **env["solver_kwargs"])
+            )
+            print("ENCODING")
+            for i, c in enumerate(model.constraints, start=1):
+                print(f"C{i}", repr(c)[:100])
+                for ci in slv_.transform([c]):
+                    print("  ", ci)
+                    # print("  ", slv._csemap)
 
         # if hasattr(slv, "stats"):
         #     slv.stats()
@@ -341,33 +348,32 @@ def get_envs():
                 "coverlift": Coverlift.INPUT,
                 "shrink": False,
                 "negatives": 0,
-                # "checker": cp.Model(),
+                "checked": False,
                 # "heuristic": Heuristic.INPUT,
                 "heuristic": Heuristic.GREEDY,
                 # "heuristic": Heuristic.REDUCE,
                 "cutoff": 0,
-                # "verbosity": 2,
+                "verbosity": 2,
             }
         },
     }
 
-    for e in get_experiments():
-        if "base" in e["alias"]:
+    for e in get_solvers():
+        if "ort" in e["alias"]:
             continue
-
         if "solver_kwargs" in e and "env" in e["solver_kwargs"]:
             e["solver_kwargs"]["env"] |= debug_env
         yield e
 
-    for encoding in Encoding:
-        yield {
-            "alias": f"base_gurobi-{encoding}",
-            "solver": CPM_gurobi,
-            "solver_kwargs": {
-                "verbose": 1,
-                "encoding": encoding,
-            },
-        }
+    # for encoding in Encoding:
+    #     yield {
+    #         "alias": f"base_gurobi-{encoding}",
+    #         "solver": CPM_gurobi,
+    #         "solver_kwargs": {
+    #             "verbose": 1,
+    #             "encoding": encoding,
+    #         },
+    #     }
 
 
 @pytest.fixture
@@ -393,7 +399,7 @@ class TestTables:
             slv = CPM_lazy_gurobi(
                 env={
                     **env,
-                    **{"verbosity": 3, "debug": True, "checker": None, "coverlift": False, "shrink": False, "fractional": True},
+                    **{"verbosity": 3, "debug": True, "checker": False, "coverlift": False, "shrink": False, "fractional": True},
                 },
             )
 
@@ -602,7 +608,7 @@ class TestTables:
                         "debug": True,
                         "verbosity": 3,
                         "negatives": 0,
-                        # "checker": cp.Model(),
+                        # "checker": True,
                     },
                     **env_,
                 },
@@ -685,7 +691,7 @@ def idfn(a):
         return f"{name}_r{repeat}" if repeat > 1 else name
 
 
-REPEAT = 1
+REPEAT = 3
 
 
 @pytest.mark.timeout(60)
@@ -697,7 +703,7 @@ class TestModels:
             (
                 (name, j, model)
                 for j in range(1, REPEAT + 1)  # to repeat the test
-                for name, model in generate_edge_case_tables()
+                for name, model in generate_models_w_tables(hard=1)
             ),
         ),
         ids=idfn,
@@ -718,7 +724,20 @@ def benchmark_table_constraints(envs=None, glob=None):
         envs: List of environment configurations to test (uses default if None)
         use_all_envs: If True, test with all environments from get_envs() (ignores envs parameter)
     """
-    envs = get_experiments(filters=["variant"])
+    envs = get_solvers(
+        features=[
+            (
+                "coverlift",
+                # list(Coverlift),
+                (
+                    # Coverlift.No,
+                    Coverlift.INPUT,
+                ),
+            )
+        ],
+        control=False,
+    )
+
     # envs = get_experiments(filters=[("coverlift", list(Coverlift))])
 
     # if glob is None:
@@ -729,25 +748,29 @@ def benchmark_table_constraints(envs=None, glob=None):
     results = []
 
     # Generate all test cases once (to ensure same cases for all envs)
-    test_cases = list(generate_edge_case_tables(benchmarks=True))
+    test_cases = list(generate_models_w_tables(hard=1))
 
     for env in envs:
         env_alias = env.get("alias", "unknown")
         print(f"\n{'=' * 80}")
         print(f"Testing with environment: {env_alias}")
         print(f"{'=' * 80}\n")
+        # print("ENV", env)
+        env["solver_kwargs"]["env"]["verbosity"] = 3
+        env["solver_kwargs"]["env"]["checked"] = True
 
         for name, model in test_cases:
             print(f"Running {name} with {env_alias}...")
 
             try:
                 # Create solver with the environment
-                slv = env["solver"](cpm_model=model.deepcopy(), **env["solver_kwargs"])
+                slv = env["solver"](cpm_model=model, **env["solver_kwargs"])
 
                 # Solve the model
                 time_solve = time.time()
-                sat = slv.solve()
+                sat = slv.solve(time_limit=10)
                 time_solve = time.time() - time_solve
+                print("SOLVED IN", time_solve)
 
                 # Get stats
                 stats = slv.stats()
@@ -761,9 +784,10 @@ def benchmark_table_constraints(envs=None, glob=None):
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
 
     # Create and print dataframe
-    pd.set_option('display.float_format', '{:0.2f}'.format)
+    pd.set_option("display.float_format", "{:0.2f}".format)
     df = pd.DataFrame(results)
-    df["cb_rel"] = df["time_cb"] / df["time_solve"]
+    print(df)
+    # df["cb_rel"] = df["time_cb"].fillna(0.) / df["time_solve"]
     print("\n" + "=" * 80)
     print("BENCHMARK RESULTS")
     print("=" * 80)

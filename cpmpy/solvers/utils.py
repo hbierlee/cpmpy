@@ -21,7 +21,7 @@ import time
 import numpy as np
 
 from cpmpy.transformations.get_variables import get_variables_model
-from cpmpy.expressions.utils import is_boolexpr, is_int
+from cpmpy.expressions.utils import is_boolexpr, is_int, show_assignment
 from .gurobi import CPM_gurobi
 from .lazy_gurobi import CPM_lazy_gurobi
 from .ortools import CPM_ortools
@@ -339,6 +339,8 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
                     P += cp.any(x != a for x, a in zip(X, sol))
                 if time_limit is not None:
                     time_limit -= time.time() - dt
+                if time_limit is not None and time_limit < 0:
+                    break
         else:
             P.solveAll(display=store_sol, time_limit=time_limit)
     except SolutionLimitReached:
@@ -347,6 +349,4 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
     if verbosity >= 2:
         print("")
     return X, np.array(sols, dtype=int)
-    return np.reshape(sols, shape=())
-    sols.reshape((len(X)))
 

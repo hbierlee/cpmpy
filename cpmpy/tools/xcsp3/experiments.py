@@ -36,72 +36,82 @@ DEFAULTS = [
             "year": 2025,
             "track": track,
             "glob_instance": None,
-        } for track in ["CSP22to25", "COP22to25"]
+        }
+        for track in ["CSP22to25", "COP22to25"]
     ],
 ]
 
 
-def get_experiments(overrides={}, filters=[]):
-    return experiment(
-        [
+FEATURES = [
+    ("heuristic", (Heuristic.GREEDY,)),
+    (
+        "fractional",
+        (
+            False,
+            True,
+        ),
+    ),
+    (
+        "coverlift",
+        list(Coverlift),
+    ),
+    (
+        "shrink",
+        (
+            False,
+            # True,
+        ),
+    ),
+    (
+        "cutoff",
+        (
+            0,
+            100,
+            200,
+            500,
+        ),
+    ),
+    # ("negatives", (0,3)),
+]
+
+
+def get_solvers(features=None, overrides={}, filters=[], control=True):
+    return [
+        *([{"solver": "ortools", "alias": "ortools"}] if control else []),
+        *(
             [
-                {"solver": "ortools", "alias": f"ortools"},
-                *[
-                    {
-                        "solver": CPM_gurobi,
-                        "alias": f"base_gurobi-{encoding}",
-                        "solver_kwargs": {"encoding": encoding, "output_stats": True},
-                    }
-                    for encoding in Encoding
-                ],
-                *[
-                    {
-                        "alias": f"{solver}-{alias}",
-                        "solver": CPM_lazy_gurobi,
-                        "solver_kwargs": solver_kwargs | {"output_stats": True},
-                    }
-                    for solver in ["lazy_gurobi"]
-                    for alias, solver_kwargs in [
-                        (alias, {"env": env, "encoding": Encoding.BOOL})
-                        for alias, env in ablate(
-                            [
-                                ("heuristic", (Heuristic.GREEDY,)),
-                                (
-                                    "fractional",
-                                    (
-                                        False,
-                                        True,
-                                    ),
-                                ),
-                                (
-                                    "coverlift",
-                                    list(Coverlift),
-                                ),
-                                (
-                                    "shrink",
-                                    (
-                                        False,
-                                        # True,
-                                    ),
-                                ),
-                                (
-                                    "cutoff",
-                                    (
-                                        0,
-                                        100,
-                                        200,
-                                        500,
-                                    ),
-                                ),
-                                # ("negatives", (0,3)),
-                            ],
-                            add_none=True,
-                            add_all=True,
-                        )
-                    ]
-                ],
+                {
+                    "solver": CPM_gurobi,
+                    "alias": f"base_gurobi-{encoding}",
+                    "solver_kwargs": {"encoding": encoding, "output_stats": True},
+                }
+                for encoding in Encoding
+            ]
+            if control
+            else []
+        ),
+        *[
+            {
+                "alias": f"{solver}-{alias}",
+                "solver": CPM_lazy_gurobi,
+                "solver_kwargs": solver_kwargs | {"output_stats": True},
+            }
+            for solver in ["lazy_gurobi"]
+            for alias, solver_kwargs in [
+                (alias, {"env": env, "encoding": Encoding.BOOL})
+                for alias, env in ablate(
+                    FEATURES if features is None else features,
+                    add_none=True,
+                    # add_all=True,
+                )
             ]
         ],
+    ]
+
+
+def get_experiments(features=None, overrides={}, filters=[], control=True):
+    return experiment(
+        get_solvers(features=features, filters=filters, control=control, overrides=overrides),
         filters=filters,
         overrides=overrides,
     )
@@ -121,8 +131,7 @@ def experiment(experiments, overrides={}, filters=None):
     ]
 
 
-def ablate(feats, add_one=True, add_none=True, add_all=False, filters=None):
-    print(feats)
+def ablate(feats, add_one=True, add_none=False, add_all=False, filters=None):
     return [
         *([("none", {feat: feat_vals[0] for feat, feat_vals in feats})] if add_none else []),
         *(
