@@ -102,7 +102,7 @@ def get_solvers(features=None, overrides={}, filters=[], control=True):
                 for alias, env in ablate(
                     FEATURES if features is None else features,
                     add_none=True,
-                    # add_all=True,
+                    add_all=True,
                 )
             ]
         ],
@@ -125,7 +125,7 @@ def experiment(experiments, overrides={}, filters=None):
                 **dict(it for di in experiment_ for it in di.items()),
                 **overrides,
             }
-            for experiment_ in itertools.product(*DEFAULTS, *experiments)
+            for experiment_ in itertools.product(*DEFAULTS, experiments)
         ]
         if filters is None or all(any(v in experiment[k] for v in vs) for k, vs in filters)
     ]
