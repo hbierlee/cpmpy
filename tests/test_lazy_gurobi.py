@@ -54,8 +54,8 @@ def generate_models_w_tables(hard=2):
     yield ("feasible_swap", generate_table_from_data([[1, 2], [2, 1]], 3))
     yield ("infeasible_alldiff", with_constraints(generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True))
     yield ("alldiff_min", with_constraints(generate_table_from_data([[1, 2], [2, 1]], 3), with_alldiff=True, with_min=True))
-    yield ("from_example", generate_table_from_example())
-    yield ("from_example_alldiff", with_constraints(generate_table_from_example(), with_alldiff=True))
+    yield ("from_example.", generate_table_from_example())
+    yield ("from_example_alldiff.", with_constraints(generate_table_from_example(), with_alldiff=True))
 
     # Edge cases
     yield ("single_column", cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]])))
@@ -730,12 +730,14 @@ def benchmark_table_constraints(envs=None, glob=None):
                 "coverlift",
                 # list(Coverlift),
                 (
-                    # Coverlift.No,
+                    Coverlift.No,
                     Coverlift.INPUT,
                 ),
             )
         ],
         control=False,
+        add_all=False,
+        # add_none=False,
     )
 
     # envs = get_experiments(filters=[("coverlift", list(Coverlift))])
@@ -750,16 +752,21 @@ def benchmark_table_constraints(envs=None, glob=None):
     # Generate all test cases once (to ensure same cases for all envs)
     test_cases = list(generate_models_w_tables(hard=1))
 
+    checked = True
+    verbosity = 2
+
     for env in envs:
         env_alias = env.get("alias", "unknown")
         print(f"\n{'=' * 80}")
         print(f"Testing with environment: {env_alias}")
         print(f"{'=' * 80}\n")
         # print("ENV", env)
-        env["solver_kwargs"]["env"]["verbosity"] = 3
-        env["solver_kwargs"]["env"]["checked"] = True
+        env["solver_kwargs"]["env"]["verbosity"] = verbosity
+        env["solver_kwargs"]["env"]["checked"] = checked
 
         for name, model in test_cases:
+            # if "example." not in name:
+            #     continue
             print(f"Running {name} with {env_alias}...")
 
             try:
@@ -805,10 +812,16 @@ def benchmark_table_constraints(envs=None, glob=None):
         original_order = [name for name, _ in test_cases]
         df["name"] = pd.Categorical(df["name"], categories=original_order, ordered=True)
 
+        values = ["n_cuts"]
+        if checked:
+            values += ["avg_strength"]
+        else:
+            values += ["time_solve"]
+
         comparison = df.pivot_table(
             index="name",
             columns="env",
-            values=["n_cuts", "time_solve", "time_cb"],
+            values=values,
             aggfunc="first",
             sort=False,  # Don't sort, use categorical order
         )

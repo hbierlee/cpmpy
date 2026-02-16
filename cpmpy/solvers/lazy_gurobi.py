@@ -16,7 +16,7 @@ from cpmpy.solvers.gurobi import CPM_gurobi, Feature
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.transformations.linearize import only_positive_bv
 
-CHECKER_TIME_LIMIT = 3
+CHECKER_TIME_LIMIT = None
 
 # Using Gurobi's default tolerance values:
 # https://www.gurobi.com/documentation/current/refman/parameters.html#sec:Parameters
@@ -101,6 +101,13 @@ def terms(cpm_expr):
         return ws, xs, k
     else:
         raise TypeError
+
+
+def without(A, B):
+    if len(A) == 0 or len(B) == 0:
+        return A
+    mask = ~np.any(np.all(A[:, None] == B, axis=2), axis=1)
+    return A[mask]
 
 
 INDEX = 1
@@ -259,15 +266,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["model"] = cpm_model
 
         if self.env["checked"]:
-            _, self.env["solutions"] = cp.solvers.utils.solutions(
+            _, self.env["expected_solutions"] = cp.solvers.utils.solutions(
                 cpm_model,
                 X=sorted(self.user_vars, key=lambda x: x.name),
                 projected_solution_limit=None,
                 time_limit=CHECKER_TIME_LIMIT,
             )
-            self.env["remain"] = len(self.solutions_checker(time_limit=CHECKER_TIME_LIMIT))
+            self.env["remain"] = without(self.solutions_checker(), self.env["expected_solutions"])
             if self.env["verbosity"]:
-                self.log("SOLS", len(self.env["solutions"]))
+                self.log("SOLS", len(self.env["expected_solutions"]))
                 self.log("TO REMOVE", self.env["remain"])
 
     def log(self, *mess, verbosity=1, end="\n", indent=None):
@@ -967,6 +974,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
     __add__ = add  # avoid redirect in superclass
 
     def solutions_checker(self, time_limit=None):
+        time_limit = CHECKER_TIME_LIMIT if time_limit is None else time_limit
         return cp.solvers.utils.solutions(
             self.env["checker"],
             X=sorted(self.user_vars, key=lambda x: x.name),
@@ -1012,13 +1020,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             def show_assignments(As):
                 return "\n".join(repr(a) for a in As)
 
-            def without(A, B):
-                if len(A) == 0 or len(B) == 0:
-                    return A
-                mask = ~np.any(np.all(A[:, None] == B, axis=2), axis=1)
-                return A[mask]
-
-            expected_solutions = self.env["solutions"]
+            expected_solutions = self.env["expected_solutions"]
             remaining = without(actual_solutions, expected_solutions)
             assert len(np.unique(actual_solutions, axis=0)) == len(actual_solutions)
 
@@ -1046,19 +1048,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
             strength = (
                 len(self.env["cuts"][-2]["remain"]) - len(self.env["cuts"][-1]["remain"])
                 if len(self.env["cuts"]) >= 2
-                else self.env["remain"] - len(remaining)
+                else len(self.env["remain"]) - len(remaining)
             )
             self.env["cuts"][-1]["strength"] = strength
             if self.env["verbosity"]:
-                if not repeated:
-                    self.log(self.env["checker"], verbosity=4)
-                    self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
-                    self.log(expected_solutions, verbosity=3, indent=2)
-                    self.log(f"ACTUAL ({len(actual_solutions)})", verbosity=2)
-                    self.log(actual_solutions, verbosity=3, indent=2)
-                    self.log(f"TO REMOVE ({len(remaining)})", verbosity=2)
-                    self.log(remaining, verbosity=3)
-                    self.log(f"STRENGTH == {strength}", verbosity=2)
+                self.log(self.env["checker"], verbosity=4)
+                self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
+                self.log(expected_solutions, verbosity=3, indent=2)
+                self.log(f"ACTUAL ({len(actual_solutions)})", verbosity=2)
+                self.log(actual_solutions, verbosity=3, indent=2)
+                self.log(f"TO REMOVE ({len(remaining)})", verbosity=2)
+                self.log(remaining, verbosity=3)
+                self.log(f"STRENGTH == {strength}", verbosity=2)
 
             # assert repeated or strength
             assert strength
@@ -1114,9 +1115,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         try:
             if self.env["checked"]:
-                # slv = CPM_ortools(cpm_model=self.env["checker"])
                 for iteration in itertools.count():
-                    hassol = self.env["checker"].solve(solver="ortools", **kwargs)
+                    hassol = self.env["checker"].solve(**kwargs)
 
                     if not hassol:
                         break

@@ -75,7 +75,7 @@ FEATURES = [
 ]
 
 
-def get_solvers(features=None, overrides={}, filters=[], control=True):
+def get_solvers(features=None, overrides={}, filters=[], control=True, add_all=True, add_none=True):
     return [
         *([{"solver": "ortools", "alias": "ortools"}] if control else []),
         *(
@@ -101,8 +101,8 @@ def get_solvers(features=None, overrides={}, filters=[], control=True):
                 (alias, {"env": env, "encoding": Encoding.BOOL})
                 for alias, env in ablate(
                     FEATURES if features is None else features,
-                    add_none=True,
-                    add_all=True,
+                    add_none=add_none,
+                    add_all=add_all,
                 )
             ]
         ],
