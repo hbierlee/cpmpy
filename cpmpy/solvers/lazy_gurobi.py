@@ -424,7 +424,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         def tight(R, RS):
             # TODO [peter] incorrect def in alg?
-            return R & (RS == k)
+            return R & (RS <= k)
 
         # RS = np.fromiter((sum(C_enc[i] * T_enc_r[i] for i in S) for T_enc_r in T_enc), dtype=float)
         # X = union(cols(T_enc, r) for r in R_tight.nonzero()[0])
@@ -433,19 +433,21 @@ class CPM_lazy_gurobi(CPM_gurobi):
         RS = (C_enc[S] * T_enc[:, S]).sum(axis=1)
         R_tight = tight(R, RS)
         X = (T_enc.T & R_tight).any(1)
+        X = X | S
 
         if self.env["verbosity"]:
-            self.log("S", S, verbosity=3)
+            self.log(f"S = {show_nz(S)}", verbosity=3)
             self.log("C_enc, k", C_enc, k, verbosity=3)
-            self.log("RS", RS, verbosity=3)
-            self.log("R_tight", R_tight, verbosity=3)
-            self.log("X", X.nonzero(), verbosity=3)
+            self.log("RS (row slack?)", RS, verbosity=3)
+            self.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
+            self.log(f"X = {show_nz(X)}", verbosity=3)
         # TODO [peter] C missing from alg
 
         i = 0
 
-        # centre of mass
-        com = T_enc.sum(axis=0) / len(T_enc)
+        # centre of mass heuristic
+        if heuristic in (Coverlift.COM_MIN, Coverlift.COM_MAX):
+            com = T_enc.sum(axis=0) / len(T_enc)
 
         while not X.all():
             assert (
@@ -485,16 +487,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     j = np.nanargmax(com - (np.where(~X, A_enc, np.nan)))
             assert not X[j]
 
-            RT = (~R_tight) & T_enc[:, j]
-            if (~RT).all():
-                break
-            KRS = k - RS[RT]
-            a_j = np.min(KRS)
+            assert not S[j], f"Already chosen {show(j)} in {show_nz(S)}"
+            S[j] = True
+            assert C_enc[j] == 0
+            C_enc[j] += 1
+            non_tight = (~R_tight) & T_enc[:, j]
+            KRS = k - RS[non_tight] if RS.any() else k
+            a_j = np.min(KRS, initial=0)
 
             assert not self.env["example2"] or a_j == [2, 1, 1][i]
-
-            S[j] = True
-            C_enc[j] += a_j
 
             assert not self.env["example2"] or (RS == [[1.0, 2.0, 0.0, 1.0, 2.0], [1.0, 2.0, 2.0, 1.0, 2.0], RS][i]).all(), (
                 f"{i}; {RS}"
@@ -525,6 +526,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log("X", show_set(X.nonzero()), verbosity=3)
                 i += 1
                 self.check_max_iterations(i)
+            if R_tight.all():
+                break
 
         return S, C_enc, k
 
