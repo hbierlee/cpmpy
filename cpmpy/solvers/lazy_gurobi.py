@@ -505,8 +505,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             non_tight = (~R_tight) & T_enc[:, j]
             # print(f'NON TIGHT = {show_nz(non_tight)}', )
-            # KRS = k - RS[non_tight] if RS.any() else k
-            a_j = k - np.max(RS[non_tight], initial=0)
+
+            if non_tight.any():
+                a_j = np.max(k - RS[non_tight])
+            else:
+                a_j = k + 1  # infinite
+            # KRS = k - RS[non_tight] if RS[non_tight].any() else k
+            # a_j = np.min(KRS)
 
             RS = RS + a_j * T_enc.T[j]
             N_tight = tight(~R_tight, RS)
@@ -531,7 +536,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             X |= T_enc[N_tight, :].any(0)
             X[j] = True
             # X = T_enc[R_tight, :].any(0)  # slightly slower
-
 
             assert not self.env["example2"] or a_j == [2, 1, 1][i]
 
