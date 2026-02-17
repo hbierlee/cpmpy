@@ -659,7 +659,7 @@ def xcsp3_cpmpy(
         time_parse = time.time() - time_parse
         print_comment(f"took {time_parse:.4f} seconds to parse XCSP3 model")
         if metadata:
-            print_comment(f"[{metadata['name']}]")
+            print_comment(f"[{metadata['track']}/{metadata['name']}]")
 
         if time_limit and time_limit < wall_time(p):
             raise TimeoutError("Time's up after parse")

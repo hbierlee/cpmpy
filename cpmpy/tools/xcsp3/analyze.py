@@ -1130,72 +1130,91 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                                         if len(plot_data) > 0:
                                             fig, ax = plt.subplots(figsize=(12, 8))
 
-                                            # Get problem classes if available in index
-                                            if 'problem' in plot_data.index.names:
-                                                problems = plot_data.index.get_level_values('problem')
-                                                unique_problems = sorted(problems.unique())
+                                            problems = plot_data.index.get_level_values('problem')
+                                            unique_problems = sorted(problems.unique())
 
-                                                # Create color and marker maps
-                                                # colors = plt.cm.tab20(np.linspace(0, 1, len(unique_problems)))
-                                                # problem_colors = dict(zip(unique_problems, colors))
+                                            # Create color and marker maps
+                                            # colors = plt.cm.tab20(np.linspace(0, 1, len(unique_problems)))
+                                            # problem_colors = dict(zip(unique_problems, colors))
 
-                                                # Different marker shapes for visual distinction
-                                                problem_markers = dict(zip(unique_problems,
-                                                                         [marker_shapes[i % len(marker_shapes)]
-                                                                          for i in range(len(unique_problems))]))
+                                            # Different marker shapes for visual distinction
+                                            problem_markers = dict(zip(unique_problems,
+                                                                     [marker_shapes[i % len(marker_shapes)]
+                                                                      for i in range(len(unique_problems))]))
 
-                                                # Scatter plot colored and shaped by problem class
-                                                for problem in unique_problems:
-                                                    mask = problems == problem
-                                                    problem_data = plot_data[mask]
-                                                    n_instances = len(problem_data)
-                                                    ax.scatter(
-                                                            problem_data[metadata_col],
-                                                            problem_data[time_col],
-                                                             alpha=0.6,
-                                                             s=50,
-                                                             label=f"{problem} ({n_instances})",
-                                                             # color=problem_colors[problem],
-                                                             marker=problem_markers[problem]
-                                                             )
+                                            ALPHA_EASY = None
+
+                                            if ALPHA_EASY:
+                                                # Determine instances solved in under 10 seconds by all solvers
+                                                # Use the original (non-diff) time data from groups
+                                                if track is not None:
+                                                    groups_track = groups.xs(track, level='track')
+                                                else:
+                                                    groups_track = groups
+                                                # Get max time across all solvers for each instance
+                                                max_time_per_instance = groups_track.groupby(['problem', 'instance'])[time_col].max()
+                                                fast_instances = set(max_time_per_instance[max_time_per_instance < ALPHA_EASY].index)
                                             else:
-                                                # Fallback: single color if no problem info
-                                                ax.scatter(plot_data[metadata_col], plot_data[time_col],
-                                                         alpha=0.6, s=50, label='Data points')
+                                                fast_instances = None
 
-                                            # Fit line
-                                            if len(plot_data) > 1:
-                                                z = np.polyfit(plot_data[metadata_col], plot_data[time_col], 1)
-                                                p = np.poly1d(z)
-                                                x_line = np.linspace(plot_data[metadata_col].min(),
-                                                                   plot_data[metadata_col].max(), 100)
-                                                ax.plot(x_line, p(x_line), 'r-', linewidth=2,
-                                                      label=f'Fitted line (r={correlation.loc[metadata_col, time_col]:.3f})')
 
-                                            # Set axis scales and limits
-                                            ax.set_xscale('log')
+                                            # Scatter plot colored and shaped by problem class
+                                            for problem in unique_problems:
+                                                mask = problems == problem
+                                                problem_data = plot_data[mask]
+                                                n_instances = len(problem_data)
+                                                # Determine alpha for each point: 0.5 if solved under 10s by all solvers
+                                                alpha_values = np.array([
+                                                    0.8 if fast_instances is None or (problem, inst) not in fast_instances else 0.2
+                                                    for inst in problem_data.index.get_level_values('instance')
+                                                ])
+                                                ax.scatter(
+                                                        problem_data[metadata_col],
+                                                        problem_data[time_col],
+                                                         alpha=alpha_values,
+                                                         s=50,
+                                                         label=f"{problem} ({n_instances})",
+                                                         # color=problem_colors[problem],
+                                                         marker=problem_markers[problem]
+                                                         )
+                                        else:
+                                            # Fallback: single color if no problem info
+                                            ax.scatter(plot_data[metadata_col], plot_data[time_col],
+                                                     alpha=0.6, s=50, label='Data points')
 
-                                            # Set y-axis limits to -PAR..PAR with padding
-                                            PAR = 2 * time_limit
-                                            padding = 0.1  # 10% padding
-                                            ax.set_ylim(-PAR * (1 + padding), PAR * (1 + padding))
+                                        # Fit line
+                                        if len(plot_data) > 1:
+                                            z = np.polyfit(plot_data[metadata_col], plot_data[time_col], 1)
+                                            p = np.poly1d(z)
+                                            x_line = np.linspace(plot_data[metadata_col].min(),
+                                                               plot_data[metadata_col].max(), 100)
+                                            ax.plot(x_line, p(x_line), 'r-', linewidth=2,
+                                                  label=f'Fitted line (r={correlation.loc[metadata_col, time_col]:.3f})')
 
-                                            ax.set_xlabel(metadata_col, fontsize=12)
-                                            ax.set_ylabel(f'{time_col} differential', fontsize=12)
-                                            ax.set_title(f'{baseline} - {solver}: {metadata_col} vs {time_col} differential ({track})', fontsize=14)
+                                        # Set axis scales and limits
+                                        ax.set_xscale('log')
 
-                                            # Place legend outside plot area to avoid covering data
-                                            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left',
-                                                    borderaxespad=0., fontsize=9)
-                                            ax.grid(True, alpha=0.3)
+                                        # Set y-axis limits to -PAR..PAR with padding
+                                        PAR = 2 * time_limit
+                                        padding = 0.1  # 10% padding
+                                        ax.set_ylim(-PAR * (1 + padding), PAR * (1 + padding))
 
-                                            plt.tight_layout()
+                                        ax.set_xlabel(metadata_col, fontsize=12)
+                                        ax.set_ylabel(f'{time_col} differential', fontsize=12)
+                                        ax.set_title(f'{baseline} - {solver}: {metadata_col} vs {time_col} differential ({track})', fontsize=14)
 
-                                            # Save plot
-                                            if plot:
-                                                save_plot(fig, plot, f"correlation-{track}-{baseline}-{solver}-{metadata_col}-{time_col}")
+                                        # Place legend outside plot area to avoid covering data
+                                        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left',
+                                                borderaxespad=0., fontsize=9)
+                                        ax.grid(True, alpha=0.3)
 
-                                            plt.close(fig)
+                                        plt.tight_layout()
+
+                                        # Save plot
+                                        if plot:
+                                            save_plot(fig, plot, f"correlation-{track}-{baseline}-{solver}-{metadata_col}-{time_col}")
+
+                                        plt.close(fig)
 
 
     # Collect all scatter plots for show logic
@@ -1356,7 +1375,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     solver2_short = solver2.replace('gurobi-', '').replace('-', '')
                     save_plot(fig_scatter, plot, f"scatter-{track}-{solver1_short}-vs-{solver2_short}")
 
-    errors = df[df["status"] == ERR][["problem","instance","alias","status","time_total", "exception", "traceback"]]
+    errors = df[df["status"] == ERR][["track","problem","instance","alias","status","time_total", "exception", "traceback"]]
     if not errors.empty:
         print("== ERRORS ==")
         for idx, error in errors.iterrows():
@@ -1364,7 +1383,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             if pd.notna(error['exception']) and "object has no attribute" in str(error['exception']):
                 continue
 
-            print(f"\n[{error['problem']}-{error['instance']} - {error['alias']}]")
+            print(f"\n[{error['track']}/{error['problem']}-{error['instance']} - {error['alias']}]")
             print(f"Status: {error['status']} | Time: {error['time_total']:.2f}s")
             if pd.notna(error['exception']):
                 print(f"Exception: {error['exception']}")

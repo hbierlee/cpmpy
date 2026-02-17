@@ -14,8 +14,7 @@ from cpmpy.transformations.get_variables import get_variables_model
 from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic, Coverlift
 from cpmpy.solvers.ortools import CPM_ortools
-from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
-from cpmpy.tools.xcsp3.experiments import get_experiments, get_solvers
+from cpmpy.tools.xcsp3.experiments import get_solvers
 
 SEED = 42
 random.seed(SEED)
