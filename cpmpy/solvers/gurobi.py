@@ -67,7 +67,8 @@ from ..transformations.reification import only_implies, reify_rewrite, only_bv_r
 from ..transformations.safening import no_partial_functions, safen_objective
 from cpmpy.expressions.globalconstraints import Table
 from cpmpy.expressions.utils import dom_size
-
+import numpy as np
+import enum
 
 # save this to reset it (for unit tests)
 cpmpy_decompose = Table.decompose
@@ -84,7 +85,7 @@ class Encoding(Feature):
     XCSP3 = "xcsp3"
     GLEB = "gleb"
     BOOL = "bool"
-    # MDD = "mdd" # TODO removed for now so all available encodings are tested
+    MDD = "mdd"
 
 
 def trivial_decomposition(arr, tab):
@@ -193,6 +194,20 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], T_enc, cons
 
+    def encode_table_expr(self, X):
+        cons = []
+        for x in X:
+            x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
+                self.ivarmap, x, "direct", csemap=self._csemap
+            )
+            expr, k = x_enc.encode_term()
+
+            # Note: do not use self += [..] to avoid poluting user_vars (and transformation is not really necesary either)
+            cons += exactly_one_con
+            cons += [cp.sum(c * b for c, b in expr) - x == -k]
+
+        return [self.ivarmap[x.name] for x in X], cons
+
     def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, output_stats=False, **kwargs):
         """
         Constructor of the native solver object
@@ -268,10 +283,245 @@ class CPM_gurobi(SolverInterface):
                     return cons, []
 
                 Table.decompose = bool_decompose
-            # case Encoding.MDD:
-            #     pass
+            case Encoding.MDD:
+
+
+                class MDD:
+                    MDD_cache = {}
+
+                class TerminatingState(enum.Enum):
+                    SRC = 'src'
+                    SNK = 'snk'
+
+                class Lookup:
+                    def __init__(self, mdd_id):
+                        self.mdd_id = mdd_id
+
+                    def __eq__(self, other):
+                        if not isinstance(other, Lookup):
+                            return False
+                        else:
+                            return self.mdd_id == other.mdd_id
+
+                    __hash__ = object.__hash__
+
+                class MDD_node:
+                    def __init__(self, mdd_id, level, transition):
+                        self.mdd_id = mdd_id
+                        self.level = level
+                        self.transition = transition
+
+                    def __eq__(self, other):
+                        if not isinstance(other, MDD_node):
+                            return False
+
+                        if self.level != other.level:
+                            return False
+
+                        if self.transition.keys() != other.transition.keys():
+                            return False
+
+                        for key in self.transition:
+                            v1 = self.transition[key]
+                            v2 = other.transition[key]
+
+                            if isinstance(v1, MDD_node) and isinstance(v2, MDD_node):
+                                if v1 != v2:
+                                    return False
+                            if isinstance(v1, Lookup) and isinstance(v2, Lookup):
+                                if v1 != v2:
+                                    return False
+                            if isinstance(v1, TerminatingState) and isinstance(v2, TerminatingState):
+                                return True
+                            return False
+
+                        return True
+
+                    __hash__ = object.__hash__
+
+                def reduce_mdd(row, mdd, cache, level):
+
+                    if isinstance(mdd, TerminatingState):
+                        return mdd
+
+                    if isinstance(mdd, Lookup):
+                        mdd = cache.MDD_cache[mdd.mdd_id]
+
+                    B = {}
+
+                    for key in mdd.transition.keys():
+                        reduced_mdd = reduce_mdd(row, mdd.transition[key], cache, level + 1)
+                        if reduced_mdd != False:
+                            B[key] = reduced_mdd
+
+                    if len(B.keys()) == 0:
+                        return False
+
+                    G = MDD_node(mdd.mdd_id, level, B)
+                    for (G_key, G_elem) in cache.MDD_cache.items():
+                        if G_key != mdd.mdd_id:
+                            if G_elem == G:
+                                del cache.MDD_cache[G.mdd_id]
+                                return Lookup(G_elem.mdd_id)
+                    else:
+                        cache.MDD_cache[mdd.mdd_id] = G
+                        return Lookup(mdd.mdd_id)
+
+                def add_row_to_mdd(row, mdd, cache, level=0, diff_level=None):
+                    if isinstance(mdd, Lookup):
+                        mdd = cache.MDD_cache[mdd.mdd_id]
+
+                    if level == len(row):
+                        return TerminatingState.SNK
+
+                    value = row[level]
+
+                    if value not in mdd.transition:
+                        mdd.transition[value] = add_row_to_mdd(row, MDD_node(tuple(row[:(level + 1)]), level + 1, {}), cache, level + 1,
+                                                               diff_level)
+                        cache.MDD_cache[tuple(row[:level])] = mdd
+
+                        if level == diff_level:
+                            for key in mdd.transition:
+                                if key < value:
+                                    reduced_mdd = reduce_mdd(row, mdd.transition[key], cache, level + 1)
+                                    mdd.transition[key] = reduced_mdd
+
+                        return Lookup(tuple(row[:level]))
+
+                    else:
+                        mdd.transition[value] = add_row_to_mdd(row, mdd.transition[value], cache, level + 1, diff_level)
+                        cache.MDD_cache[tuple(row[:level])] = mdd
+                        return Lookup(tuple(row[:level]))
+
+                def find_different_level(row1, row2):
+                    mask = row1 < row2
+                    indices = np.where(mask)[0]
+
+                    return indices[0] if indices.size > 0 else -1
+
+                def construct_mdd(table):
+
+                    if table.size == 0:
+                        return
+
+                    mdd_cache = MDD()
+
+                    mdd = MDD_node(tuple(), 0, {})
+
+                    mdd = add_row_to_mdd(table[0], mdd, mdd_cache, 0, None)
+                    for i in range(1, table.shape[0]):
+                        row = table[i]
+                        prev_row = table[i - 1]
+
+                        diff_level = find_different_level(prev_row, row)
+
+                        mdd = add_row_to_mdd(row, mdd, mdd_cache, 0, diff_level)
+
+                    return mdd_cache.MDD_cache
+
+
+                class Flow:
+                    def __init__(self):
+                        self.flow_in = []
+                        self.flow_out = []
+
+                    def add_flow_in(self, value):
+                        self.flow_in.append(value)
+
+                    def add_flow_out(self, value):
+                        self.flow_out.append(value)
+
+                def get_correct_bv(column_number, X, X_enc):
+
+                    cumulative = 0
+
+                    for x, x_enc in zip(X, X_enc):
+                        d_size = dom_size(x)
+
+                        if column_number < cumulative + d_size:
+
+                            offset = column_number - cumulative
+
+                            return x_enc._xs[offset]
+
+                        cumulative += d_size
+                    return None
+
+
+                def mdd_to_flow(cache, X, X_enc):
+
+                    domains = [dom_size(x) for x in X]
+                    lb = [x.lb for x in X]
+
+                    no_columns = sum(domains)
+
+                    column_counter = {k : 0 for k in range(no_columns)}
+                    flow = {k: Flow() for k in cache.keys()}
+                    flow['snk'] = Flow()
+
+                    for key in cache.keys():
+
+                        for (k,v) in cache[key].transition.items():
+
+                            column = sum(domains[:cache[key].level]) + k - lb[cache[key].level]
+
+                            if column >= len(column_counter):
+                                continue
+
+                            column_counter[column] += 1
+                            flow[key].add_flow_out((column, column_counter[column]))
+                            if isinstance(v, Lookup):
+                                flow[v.mdd_id].add_flow_in((column, column_counter[column]))
+                            if isinstance(v, TerminatingState):
+                                flow['snk'].add_flow_in((column, column_counter[column]))
+
+
+                    cons = []
+                    substitution = {}
+                    for key in column_counter.keys():
+                        if column_counter[key] == 0:
+                            continue
+                        elif column_counter[key] == 1:
+                            substitution[(key, 1)] = get_correct_bv(key, X, X_enc)
+                        else:
+                            bvs = cp.boolvar(shape=column_counter[key])
+                            bv = get_correct_bv(key, X, X_enc)
+                            cons += [cp.sum(bvs) == bv]
+                            for n in range(1, column_counter[key] + 1):
+                                substitution[(key, n)] = bvs[n - 1]
+
+
+                    for key in flow.keys() - {tuple(), "snk"}:
+                        cons += [cp.sum([substitution[(c,m)] for (c,m) in flow[key].flow_in]) == cp.sum([substitution[(c, m)] for (c, m) in flow[key].flow_out])]
+
+                    cons += [cp.sum([substitution[(c,m)] for (c,m) in flow['snk'].flow_in]) == 1]
+                    cons += [cp.sum([substitution[(c,m)] for (c,m) in flow[tuple()].flow_out]) == 1]
+
+                    return cons
+
+
+                def mdd_decompose(self_):
+                    X, Tb = self_.args
+
+                    if len(Tb) < 2:
+                        return trivial_decomposition(X, Tb)
+
+                    Tb = np.array(Tb)
+                    sorted_T = Tb[np.lexsort(Tb.T[::-1])]
+
+                    mdd_cache = construct_mdd(sorted_T)
+
+                    X_enc, cons = self.encode_table_expr(X)
+                    flow_cons = mdd_to_flow(mdd_cache, X, X_enc)
+
+                    return cons + flow_cons, []
+                Table.decompose = mdd_decompose
+
+
+
             case _:
-                raise Exception(f"TODO: {encoding}")
+                    raise Exception(f"TODO: {encoding}")
 
 
         if verbose:
