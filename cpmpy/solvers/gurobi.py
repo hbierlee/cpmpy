@@ -87,6 +87,7 @@ class Encoding(Feature):
     BOOL = "bool"
     MDD = "mdd"
 
+NAMED = True
 
 def trivial_decomposition(arr, tab):
     if len(tab) == 0:
@@ -485,7 +486,7 @@ class CPM_gurobi(SolverInterface):
                         elif column_counter[key] == 1:
                             substitution[(key, 1)] = get_correct_bv(key, X, X_enc)
                         else:
-                            bvs = cp.boolvar(shape=column_counter[key])
+                            bvs = cp.boolvar(shape=column_counter[key], name=f"e_{key}" if NAMED else None)
                             bv = get_correct_bv(key, X, X_enc)
                             cons += [cp.sum(bvs) == bv]
                             for n in range(1, column_counter[key] + 1):
