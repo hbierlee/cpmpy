@@ -494,10 +494,13 @@ def xcsp3_objective_performance_profile(df):
 
 def check_inconsistent_instances(df):
     """
-    Check for instances that have both SAT and UNS results across different solvers/runs.
+    Check for instances that have both SAT and UNS results across different solvers/runs,
+    or where a solver found a "super-optimal" solution (better objective than another
+    solver's proven optimal).
     This indicates an inconsistency that should be investigated.
     """
     inconsistent = []
+    super_optimal = []
 
     for (problem, instance), group in df.groupby(['problem', 'instance']):
         statuses = set(group['status'].unique())
@@ -515,6 +518,36 @@ def check_inconsistent_instances(df):
                 'uns_solvers': uns_solvers
             })
 
+        # Check for super-optimal solutions
+        # Get solvers that reported OPTIMUM FOUND and their objective values
+        opt_results = group[group['status'] == OPT]
+        if len(opt_results) > 0:
+            opt_objectives = opt_results['obj'].dropna()
+            if len(opt_objectives) > 0:
+                # Get optimization method from instance metadata
+                method = group['method'].iloc[0]
+                is_minimize = method == 'minimize'
+
+                # Get the optimal objective value
+                # For minimize: take min (best), for maximize: take max (best)
+                opt_obj = opt_objectives.min() if is_minimize else opt_objectives.max()
+
+                # Check if any solver found a "better" objective (which would be invalid)
+                all_results = group[group['obj'].notna()]
+                for _, row in all_results.iterrows():
+                    is_super_optimal = (row['obj'] < opt_obj) if is_minimize else (row['obj'] > opt_obj)
+                    if is_super_optimal:
+                        super_optimal.append({
+                            'problem': problem,
+                            'instance': instance,
+                            'method': method,
+                            'solver': row['alias'],
+                            'solver_obj': row['obj'],
+                            'solver_status': row['status'],
+                            'opt_obj': opt_obj,
+                            'opt_solvers': opt_results['alias'].tolist()
+                        })
+
     if inconsistent:
         print("\n== INCONSISTENT INSTANCES (both SAT and UNS) ==")
         for item in inconsistent:
@@ -522,7 +555,16 @@ def check_inconsistent_instances(df):
             print(f"{item['problem']}-{item['instance']}: UNS from [{uns_info}]")
         print(f"\nTotal inconsistent instances: {len(inconsistent)}")
 
-    return inconsistent
+    if super_optimal:
+        print("\n== SUPER-OPTIMAL SOLUTIONS (better than proven optimal) ==")
+        for item in super_optimal:
+            opt_solvers_str = ', '.join(item['opt_solvers'])
+            cmp = '<' if item['method'] == 'minimize' else '>'
+            print(f"{item['problem']}-{item['instance']}: {item['solver']} ({item['solver_status']}) "
+                  f"found obj={item['solver_obj']} {cmp} optimal={item['opt_obj']} from [{opt_solvers_str}]")
+        print(f"\nTotal super-optimal instances: {len(super_optimal)}")
+
+    return inconsistent, super_optimal
 
 def reorder_cols(df, cols):
     return df[cols + [col for col in df.columns if col not in cols]]
@@ -1025,7 +1067,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
                 # Select available columns
                 available_metadata = [col for col in METADATA_COLS if col in diff_.columns and col != 'method']
-                available_metadata = ["rows"]
+                # available_metadata = ["rows"]
                 available_time = [col for col in time_cols if col in diff_.columns]
                 corr_cols = available_time + available_metadata
 
