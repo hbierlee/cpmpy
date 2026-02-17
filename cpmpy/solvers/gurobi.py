@@ -345,7 +345,7 @@ class CPM_gurobi(SolverInterface):
                     if isinstance(mdd, TerminatingState):
                         return mdd
 
-                    if isinstance(mdd, Lookup):
+                    while isinstance(mdd, Lookup):
                         mdd = cache.MDD_cache[mdd.mdd_id]
 
                     B = {}
@@ -362,14 +362,14 @@ class CPM_gurobi(SolverInterface):
                     for (G_key, G_elem) in cache.MDD_cache.items():
                         if G_key != mdd.mdd_id:
                             if G_elem == G:
-                                del cache.MDD_cache[G.mdd_id]
+                                cache.MDD_cache[G.mdd_id] = Lookup(G_elem.mdd_id)
                                 return Lookup(G_elem.mdd_id)
                     else:
                         cache.MDD_cache[mdd.mdd_id] = G
                         return Lookup(mdd.mdd_id)
 
                 def add_row_to_mdd(row, mdd, cache, level=0, diff_level=None):
-                    if isinstance(mdd, Lookup):
+                    while isinstance(mdd, Lookup):
                         mdd = cache.MDD_cache[mdd.mdd_id]
 
                     if level == len(row):
@@ -417,7 +417,8 @@ class CPM_gurobi(SolverInterface):
 
                         diff_level = find_different_level(prev_row, row)
 
-                        mdd = add_row_to_mdd(row, mdd, mdd_cache, 0, diff_level)
+                        if diff_level != -1:
+                            mdd = add_row_to_mdd(row, mdd, mdd_cache, 0, diff_level)
 
                     return mdd_cache.MDD_cache
 
@@ -462,10 +463,12 @@ class CPM_gurobi(SolverInterface):
                     flow['snk'] = Flow()
 
                     for key in cache.keys():
+                        val = cache[key]
+                        while isinstance(val, Lookup):
+                            val = cache[val.mdd_id]
 
-                        for (k,v) in cache[key].transition.items():
-
-                            column = sum(domains[:cache[key].level]) + k - lb[cache[key].level]
+                        for (k,v) in val.transition.items():
+                            column = sum(domains[:val.level]) + k - lb[val.level]
 
                             if column >= len(column_counter):
                                 continue
