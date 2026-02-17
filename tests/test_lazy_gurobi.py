@@ -54,8 +54,8 @@ def generate_models_w_tables(hard=2):
     yield ("feasible_swap", generate_table_from_data([[1, 2], [2, 1]], 3))
     yield ("infeasible_alldiff", with_constraints(generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True))
     yield ("alldiff_min", with_constraints(generate_table_from_data([[1, 2], [2, 1]], 3), with_alldiff=True, with_min=True))
-    yield ("from_example.", generate_table_from_example())
-    yield ("from_example_alldiff.", with_constraints(generate_table_from_example(), with_alldiff=True))
+    yield ("example.", generate_table_from_example())
+    yield ("example_alldiff.", with_constraints(generate_table_from_example(), with_alldiff=True))
 
     # Edge cases
     yield ("single_column", cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]])))
@@ -114,10 +114,10 @@ def generate_models_w_tables(hard=2):
         ),
     )
 
+    yield ("two_tables", generate_two_tables())
+
     if hard <= 1:
         return
-
-    yield ("two_tables", generate_two_tables())
 
     yield (
         "sparse_table",
@@ -142,7 +142,7 @@ def generate_models_w_tables(hard=2):
         # 25,
     ):
         # suffix = "_gaps" if gaps else "_nogaps"
-        suffix = f"_{k}"
+        suffix = f"_k{k}"
 
         def generate_table_(*args, **kwargs):
             return generate_table(*args, **kwargs, k=k)
@@ -170,13 +170,15 @@ def generate_models_w_tables(hard=2):
             with_constraints(generate_table_(4, 3, 4)),
         )
 
+        if hard <= 2:
+            continue
+
         yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
         yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
-        if k > 1:
-            yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
-            yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
-            yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
-            yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
+        yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
+        yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
+        yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
+        yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
 
         # yield (
         #     f"big{suffix}",
@@ -270,7 +272,7 @@ def check_model(model, env=None):
         if hasattr(slv, "stats"):
             print("stats = ", slv.stats())
 
-        if False:
+        if True:
             slv_ = (
                 CPM_ortools(cpm_model=model)
                 if env["solver"] == "ortools"
@@ -338,25 +340,26 @@ def get_envs():
         "seed": 42,
     }
 
-    yield {
-        "alias": "dev",
-        "solver": CPM_lazy_gurobi,
-        "solver_kwargs": {
-            "env": {
-                **debug_env,
-                "fractional": False,
-                "coverlift": Coverlift.INPUT,
-                "shrink": False,
-                "negatives": 0,
-                "checked": False,
-                # "heuristic": Heuristic.INPUT,
-                "heuristic": Heuristic.GREEDY,
-                # "heuristic": Heuristic.REDUCE,
-                "cutoff": 0,
-                "verbosity": 3,
-            }
-        },
-    }
+    if False:
+        yield {
+            "alias": "dev",
+            "solver": CPM_lazy_gurobi,
+            "solver_kwargs": {
+                "env": {
+                    **debug_env,
+                    "fractional": False,
+                    "coverlift": Coverlift.INPUT,
+                    "shrink": False,
+                    "negatives": 0,
+                    "checked": False,
+                    # "heuristic": Heuristic.INPUT,
+                    "heuristic": Heuristic.GREEDY,
+                    # "heuristic": Heuristic.REDUCE,
+                    "cutoff": 0,
+                    "verbosity": 3,
+                }
+            },
+        }
 
     for e in get_solvers():
         if "ort" in e["alias"]:
@@ -364,16 +367,6 @@ def get_envs():
         if "solver_kwargs" in e and "env" in e["solver_kwargs"]:
             e["solver_kwargs"]["env"] |= debug_env
         yield e
-
-    for encoding in Encoding:
-        yield {
-            "alias": f"base_gurobi-{encoding}",
-            "solver": CPM_gurobi,
-            "solver_kwargs": {
-                "verbose": 0,
-                "encoding": encoding,
-            },
-        }
 
 
 @pytest.fixture
@@ -703,7 +696,7 @@ class TestModels:
             (
                 (name, j, model)
                 for j in range(1, REPEAT + 1)  # to repeat the test
-                for name, model in generate_models_w_tables(hard=1)
+                for name, model in generate_models_w_tables(hard=2)
             ),
         ),
         ids=idfn,
@@ -730,31 +723,44 @@ def benchmark_table_constraints(envs=None, glob=None):
                 "coverlift",
                 # list(Coverlift),
                 (
-                    Coverlift.No,
+                    # Coverlift.No,
                     Coverlift.INPUT,
                 ),
-            )
+            ),
+            (
+                "variant",
+                ("a", "b"),
+            ),
         ],
-        control=False,
+        control=True,
         add_all=False,
         add_none=True,
+        filters=[("alias", ("bool", "mdd"))],
     )
 
-    # envs = get_experiments(filters=[("coverlift", list(Coverlift))])
+    import pprint
 
-    # if glob is None:
-    #     envs = [next(exps)]  # Use default (dev) environment
-    # else:
-    #     envs = [e for e in get_envs() if glob in e["alias"]]
+    pprint.pprint(envs)
+    # envs = get_experiments(filters=[("coverlift", list(Coverlift))])
 
     results = []
 
-    # Generate all test cases once (to ensure same cases for all envs)
-    test_cases = list(generate_models_w_tables(hard=1))
+    checked = False
+    verbosity = 1
+    max_iterations = 100
+    hard = 3
 
-    checked = True
-    verbosity = 3
-    max_iterations = 10
+    if hard > 1:
+        checked = False
+
+    # Generate all test cases once (to ensure same cases for all envs)
+    test_cases = list(generate_models_w_tables(hard=hard))
+
+    # glob = "mdd"
+    # if glob is not None:
+    #     envs = [e for e in get_envs() if glob in e["alias"]]
+    #     if any(g not in name for g in glob):
+    #         continue
 
     for env in envs:
         env_alias = env.get("alias", "unknown")
@@ -762,8 +768,8 @@ def benchmark_table_constraints(envs=None, glob=None):
         print(f"Testing with environment: {env_alias}")
         print(f"{'=' * 80}\n")
         # print("ENV", env)
-        env["solver_kwargs"]["env"]["verbosity"] = verbosity
-        env["solver_kwargs"]["env"]["checked"] = checked
+        # env["solver_kwargs"]["env"]["verbosity"] = verbosity
+        # env["solver_kwargs"]["env"]["checked"] = checked
         # env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
         # env["solver_kwargs"]["env"]["debug"] = True
 
@@ -818,12 +824,12 @@ def benchmark_table_constraints(envs=None, glob=None):
         original_order = [name for name, _ in test_cases]
         df["name"] = pd.Categorical(df["name"], categories=original_order, ordered=True)
 
-        values = ["n_cuts"] + (["avg_strength"] if checked else ["time_solve"])
+        values = ["constraints", "n_cuts"] + (["avg_strength"] if checked else ["time_solve"])
 
         comparison = df.pivot_table(
             index="name",
             columns="env",
-            values=values,
+            values=[v for v in values if v in df.columns],
             aggfunc="first",
             sort=False,  # Don't sort, use categorical order
         )

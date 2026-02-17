@@ -75,45 +75,58 @@ FEATURES = [
 ]
 
 
-def get_solvers(features=None, overrides={}, filters=[], control=True, add_all=True, add_none=True):
+def glob_filter(experiments, filters):
     return [
-        *([{"solver": "ortools", "alias": "ortools"}] if control else []),
-        *(
-            [
-                {
-                    "solver": CPM_gurobi,
-                    "alias": f"base_gurobi-{encoding}",
-                    "solver_kwargs": {"encoding": encoding, "output_stats": True},
-                }
-                for encoding in Encoding
-            ]
-            if control
-            else []
-        ),
-        *[
-            {
-                "alias": f"{solver}-{alias}",
-                "solver": CPM_lazy_gurobi,
-                "solver_kwargs": solver_kwargs | {"output_stats": True},
-            }
-            for solver in ["lazy_gurobi"]
-            for alias, solver_kwargs in [
-                (alias, {"env": env, "encoding": Encoding.BOOL})
-                for alias, env in ablate(
-                    FEATURES if features is None else features,
-                    add_none=add_none,
-                    add_all=add_all,
-                )
-            ]
-        ],
+        experiment
+        for experiment in experiments
+        if filters is None or all(any(v in experiment[k] for v in vs) for k, vs in filters)
     ]
 
 
+def get_solvers(features=None, overrides={}, filters=None, control=True, add_all=True, add_none=True):
+    return glob_filter(
+        [
+            *([{"solver": "ortools", "alias": "ortools"}] if control else []),
+            *(
+                [
+                    {
+                        "solver": CPM_gurobi,
+                        "alias": f"base_gurobi-{encoding}",
+                        "solver_kwargs": {"encoding": encoding, "output_stats": True},
+                    }
+                    for encoding in Encoding
+                ]
+                if control
+                else []
+            ),
+            *[
+                {
+                    "alias": f"{solver}-{alias}",
+                    "solver": CPM_lazy_gurobi,
+                    "solver_kwargs": solver_kwargs | {"output_stats": True},
+                }
+                for solver in ["lazy_gurobi"]
+                for alias, solver_kwargs in [
+                    (alias, {"env": env, "encoding": Encoding.BOOL})
+                    for alias, env in ablate(
+                        FEATURES if features is None else features,
+                        add_none=add_none,
+                        add_all=add_all,
+                    )
+                ]
+            ],
+        ],
+        filters,
+    )
+
+
 def get_experiments(features=None, overrides={}, filters=[], control=True):
-    return experiment(
-        get_solvers(features=features, filters=filters, control=control, overrides=overrides),
-        filters=filters,
-        overrides=overrides,
+    return glob_filter(
+        experiment(
+            get_solvers(features=features, control=control, overrides=overrides),
+            overrides=overrides,
+        ),
+        filters,
     )
 
 
