@@ -1,19 +1,18 @@
+import cpmpy as cp
+import numpy as np
 import pandas as pd
 import pathlib
-from cpmpy.tools.xcsp3 import _parse_xcsp3, _load_xcsp3, read_xcsp3
 import sys
-import numpy as np
-import cpmpy as cp
+import time
+
+from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.transformations.get_variables import get_variables
 from cpmpy.tools.xcsp3.benchmark import xcsp3_benchmark, get_table_metadata_
 from cpmpy.tools.xcsp3.experiments import experiment, ablate
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import ExitStatus, TIME_BUFFER
-from cpmpy.solvers.gurobi import CPM_gurobi
+from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
 from cpmpy.expressions.variables import _BoolVarImpl, _IntVarImpl
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi
-import test_lazy_gurobi
-import pandas as pd
-import time
 
 TIMEOUT = 5
 
@@ -129,18 +128,17 @@ class TestBenchmark:
                 {
                     **experiment(
                         [
-                            [
-                                {
-                                    # "alias": CPM_base_solver.__bases__,
-                                    # "glob_instance": "AlteredStates-02_c25.xml",
-                                    "glob_instance": "Fortress1-08_c25.xml",
-                                    "verbose": True,
-                                    "track": "COP25",
-                                    "time_limit": TIMEOUT,
-                                    "check_time_limit": 3,
-                                    "output_dir": "/tmp/test_benchmark_results",
-                                }
-                            ]
+                            {
+                                # "alias": CPM_base_solver.__bases__,
+                                # "glob_instance": "AlteredStates-02_c25.xml",
+                                "glob_instance": "Fortress1-08_c25.xml",
+                                "verbose": True,
+                                "track": "COP25",
+                                "time_limit": TIMEOUT,
+                                "check_time_limit": 3,
+                                "checker_path": "jbang  --main org.xcsp.parser.callbacks.SolutionChecker org.xcsp:xcsp3-tools:2.5",
+                                "solver_kwargs": {"encoding": Encoding.GLEB},
+                            }
                         ]
                     )[0],
                     **exp,
@@ -182,7 +180,10 @@ class TestBenchmark:
         ],
         ids=idfn,
     )
-    def test_benchmark(self, idx, experiment, expected_status):
+    def test_benchmark(self, idx, experiment, expected_status, tmp_path):
+        experiment["output_dir"] = "test_benchmark" / tmp_path
+        print("e", experiment["output_dir"])
+
         if isinstance(expected_status, ExitStatus):
             expected_status = (expected_status,)
 
@@ -198,7 +199,10 @@ class TestBenchmark:
         print(df)
         status = ExitStatus(df["status"])
         assert status in expected_status, f"Unexpected status for {experiment['solver']}\n\n{df['exception']}"
-        assert dt < experiment["time_limit"] + experiment["check_time_limit"] + TIME_BUFFER
+        assert (
+            dt
+            < experiment["time_limit"] + experiment["check_time_limit"] + (2 if experiment["checker_path"] else 0) + TIME_BUFFER
+        )
 
         feasible = status in (ExitStatus.unsat, ExitStatus.optimal, ExitStatus.sat)
         print(df)
@@ -207,6 +211,8 @@ class TestBenchmark:
         if feasible:
             assert not np.isnan(df["time_solve"])
             assert not np.isnan(df["time_post"])
+
+        assert status is not ExitStatus.error or df["exception"]
 
     def test_ablate(self):
         assert ablate([("a", (False, True)), ("b", (0, 5, 2))], add_none=True, add_all=True) == [

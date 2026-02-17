@@ -335,6 +335,9 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, dict, int, int, int,
         else:
             result['checker_result'] = None
 
+        if not checker_output.split("\n")[-2].startswith("OK"):
+            result["status"] = "ERROR"
+
     # Use a lock file to prevent concurrent writes
     lock_file = output_file.with_suffix(".lock")
     lock = FileLock(lock_file)
@@ -366,19 +369,20 @@ def execute_instance(args: Tuple[str, dict, str, str, dict, dict, int, int, int,
 def run_solution_checker(JAR, instance_location, out_file, verbose, cpm_time):
 
     start = time.time()
-    command = ["java", "-jar", JAR, "'" + str(instance_location) + "'" + " " + str(out_file)]
-    command = " ".join(command)
+    command = f"{JAR} '{instance_location}' {out_file}"
     test_res_str = subprocess.run(command, capture_output=True, text=True, shell=True)
     checker_time = time.time() - start
 
     if verbose:
+        print(f"c {command}")
         for line in test_res_str.stdout.split("\n"):
             print("c " + line)
         print(f"c cpmpy time: {cpm_time}")
         print(f"c validation time: {checker_time}")
         print(f"c elapsed time: {cpm_time + checker_time}")
+    assert test_res_str.returncode == 0, test_res_str.stderr
     
-    return test_res_str.stdout.split("\n")[-2], checker_time
+    return test_res_str.stdout, checker_time
 
 
 def get_table_metadata_(table):
@@ -561,6 +565,7 @@ def xcsp3_benchmark(
                 pass
             except Exception as e:
                 print(f"Job {i}: {dataset[i][1]['name']}, ProcessPoolExecutor caught: {e}")
+                traceback.print_exc()
 
         # raise()
         # TODO [thomas] ?
@@ -645,7 +650,7 @@ if __name__ == "__main__":
     parser.add_argument('--no-timestamp', action='store_true', help='Add timestamp to file names')
     parser.add_argument('--verbose', action='store_true', help='Show solver output')
     parser.add_argument('--intermediate', action='store_true', help='Report on intermediate solutions')
-    parser.add_argument('--checker-path', type=str, help='Path to the XCSP3 solution checker JAR file')
+    parser.add_argument('--checker-path', type=str, default="jbang  --main org.xcsp.parser.callbacks.SolutionChecker org.xcsp:xcsp3-tools:2.5", help='Path to the XCSP3 solution checker JAR file')
     parser.add_argument('--profile', type=pathlib.Path, help='Profile')
     parser.add_argument('--analyze', action='store_true', help='Analyze results')
     parser.add_argument('--dry', action='store_true', help='Dry run')

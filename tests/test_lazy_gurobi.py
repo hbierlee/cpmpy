@@ -177,6 +177,8 @@ def generate_models_w_tables(hard=2):
         yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
         yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
         yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
+        if hard <= 3:
+            continue
         yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
         yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
 

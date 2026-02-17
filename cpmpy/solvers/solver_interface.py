@@ -102,8 +102,11 @@ class SolverInterface(object):
             else:
                 dt = time.time()
                 # Add timeout here, since CPMpy does not support SIGINTs
-                    # print(f"c {i}/{len(cpm_model.constraints)}: {str(c)[:100]}")
                 for i, c in enumerate(cpm_model.constraints, start=1):
+                    # rep = str(c)
+                    # if len(rep) > 100:
+                    #     rep = rep[:100] + ".."
+                    # print(f"c {i}/{len(cpm_model.constraints)}: {rep}")
                     if self.time_limit is None or time.time() - dt < self.time_limit:
                         self.add(c)
                     else:
