@@ -288,7 +288,8 @@ class CPM_gurobi(SolverInterface):
 
 
                 class MDD:
-                    MDD_cache = {}
+                    def __init__(self):
+                        self.MDD_cache = {}
 
                 class TerminatingState(enum.Enum):
                     SRC = 'src'
@@ -470,7 +471,7 @@ class CPM_gurobi(SolverInterface):
                         for (k,v) in val.transition.items():
                             column = sum(domains[:val.level]) + k - lb[val.level]
 
-                            if column >= len(column_counter):
+                            if column < 0 or column >= len(column_counter):
                                 continue
 
                             column_counter[column] += 1
