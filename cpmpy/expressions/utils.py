@@ -245,5 +245,5 @@ def is_star(arg):
 def dom_size(x):
     return x.ub - x.lb + 1
 
-def show_assignment(X, show_id=True):
+def show_assignment(X, show_id=False):
     return "\n".join(f"{x}{f' [{id(x)}]' if show_id else ''} in {'B' if isinstance(x, cp.expressions.variables._BoolVarImpl) else f'{x.lb}..{x.ub}'} = {x.value()}" for x in X)

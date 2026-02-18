@@ -498,11 +498,12 @@ def check_inconsistent_instances(df):
     or where a solver found a "super-optimal" solution (better objective than another
     solver's proven optimal).
     This indicates an inconsistency that should be investigated.
+    Sets status to ERROR for all rows of inconsistent instances.
     """
     inconsistent = []
     super_optimal = []
 
-    for (problem, instance), group in df.groupby(['problem', 'instance']):
+    for (track, problem, instance), group in df.groupby(['track', 'problem', 'instance']):
         statuses = set(group['status'].unique())
 
         # Check if both SAT and UNS appear
@@ -512,11 +513,16 @@ def check_inconsistent_instances(df):
             uns_solvers = [(row['alias'], row['time_total']) for _, row in uns_results.iterrows()]
 
             inconsistent.append({
+                'track': track,
                 'problem': problem,
                 'instance': instance,
                 'statuses': statuses,
                 'uns_solvers': uns_solvers
             })
+
+            # Set status to ERROR for all rows of this instance
+            mask = (df['track'] == track) & (df['problem'] == problem) & (df['instance'] == instance)
+            df.loc[mask, 'status'] = ERR
 
         # Check for super-optimal solutions
         # Get solvers that reported OPTIMUM FOUND and their objective values
@@ -534,10 +540,11 @@ def check_inconsistent_instances(df):
 
                 # Check if any solver found a "better" objective (which would be invalid)
                 all_results = group[group['obj'].notna()]
-                for _, row in all_results.iterrows():
+                for idx, row in all_results.iterrows():
                     is_super_optimal = (row['obj'] < opt_obj) if is_minimize else (row['obj'] > opt_obj)
                     if is_super_optimal:
                         super_optimal.append({
+                            'track': track,
                             'problem': problem,
                             'instance': instance,
                             'method': method,
@@ -548,11 +555,15 @@ def check_inconsistent_instances(df):
                             'opt_solvers': opt_results['alias'].tolist()
                         })
 
+                        # Set status to ERROR for all rows of this instance
+                        mask = (df['track'] == track) & (df['problem'] == problem) & (df['instance'] == instance)
+                        df.loc[mask, 'status'] = ERR
+
     if inconsistent:
         print("\n== INCONSISTENT INSTANCES (both SAT and UNS) ==")
         for item in inconsistent:
             uns_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in item['uns_solvers']])
-            print(f"{item['problem']}-{item['instance']}: UNS from [{uns_info}]")
+            print(f"{item['track']}/{item['problem']}-{item['instance']}: UNS from [{uns_info}]")
         print(f"\nTotal inconsistent instances: {len(inconsistent)}")
 
     if super_optimal:
@@ -560,7 +571,7 @@ def check_inconsistent_instances(df):
         for item in super_optimal:
             opt_solvers_str = ', '.join(item['opt_solvers'])
             cmp = '<' if item['method'] == 'minimize' else '>'
-            print(f"{item['problem']}-{item['instance']}: {item['solver']} ({item['solver_status']}) "
+            print(f"{item['track']}/{item['problem']}-{item['instance']}: {item['solver']} ({item['solver_status']}) "
                   f"found obj={item['solver_obj']} {cmp} optimal={item['opt_obj']} from [{opt_solvers_str}]")
         print(f"\nTotal super-optimal instances: {len(super_optimal)}")
 
@@ -741,6 +752,7 @@ def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=
     # Filter by alias
     if glob_alias:
         df = df[df['alias'].map(lambda g: any(g_ in g for g_ in glob_alias))].copy()
+    df = df[~df['alias'].str.contains("mdd", na=False)]
 
     # Filter by instance
     if glob_instance:
@@ -1397,23 +1409,33 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
     errors = df[df["status"] == ERR]
     # [["track","problem","instance","alias","status","time_total", "exception", "traceback", "checker_result"]]
-    if not errors.empty:
-        print("== ERRORS ==")
-        for idx, error in errors.iterrows():
+    print("== ERRORS ==")
+    for idx, row in df.iterrows():
+        if row["status"] == ERR:
             # Skip errors containing the range object error
-            if pd.notna(error['exception']) and "object has no attribute" in str(error['exception']):
+            if pd.notna(row['exception']) and "object has no attribute" in str(row['exception']):
                 continue
 
-            print(f"\n[{error['track']}/{error['problem']}-{error['instance']} - {error['alias']}]")
-            print(f"Status: {error['status']} | Time: {error['time_total']:.2f}s")
-            if pd.notna(error['exception']):
-                print(f"Exception: {error['exception']}")
-            if pd.notna(error['traceback']):
-                print(f"Traceback:\n{error['traceback']}")
+            print(f"\n[{row['track']}/{row['problem']}-{row['instance']} - {row['alias']}]")
+            print(f"Status: {row['status']} | Time: {row['time_total']:.2f}s")
+            if pd.notna(row['exception']):
+                print(f"Exception: {row['exception']}")
+            if pd.notna(row['traceback']):
+                print(f"Traceback:\n{row['traceback']}")
 
-    for idx, row in df.iterrows():
-        if pd.notna(row['checker_result']) and not row['checker_result'].split("\n")[-2].startswith("OK"):
+            print(f"Solution: {row['solution']}")
             print(f"Exception: {row['checker_result']}")
+        elif row['status'] == MEM:
+            assert pd.isna(row["exception"]) or "Out of memory" in row['exception'] or "MemoryError" in row['exception'] or "Unable to allocate" in row['exception']
+            # assert pd.isna(row["traceback"]) or "Out of memory" in row['traceback'] or "MemoryError" in row['traceback'] or "Unable to allocate" in row['traceback']
+        else:
+            # assert pd.isna(row['exception']), row
+            # assert pd.isna(row['traceback']), row
+            assert pd.isna(row['checker_result']) or row['checker_result'].split("\n")[-2].startswith("OK"), row
+
+    # for idx, row in df.iterrows():
+    #     if pd.notna(row['checker_result']) and not row['checker_result'].split("\n")[-2].startswith("OK"):
+    #         print(f"Exception: {row['checker_result']}")
 
     # Close figures we don't want to show before calling plt.show()
     if show is not None:

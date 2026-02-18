@@ -239,7 +239,11 @@ class CPM_gurobi(SolverInterface):
                     if len(tab) < 2:
                         return trivial_decomposition(arr, tab)
 
-                    row_selected = cp.boolvar(shape=len(tab))
+                    if NAMED:
+                        row_selected = cp.boolvar(shape=len(tab), name=f"_BV{_BoolVarImpl.counter}_r")
+                        _BoolVarImpl.counter += 1
+                    else:
+                        row_selected = cp.boolvar(shape=len(tab))
 
                     cons = []
                     for i, row in enumerate(tab):
@@ -257,7 +261,12 @@ class CPM_gurobi(SolverInterface):
                         return trivial_decomposition(arr, tab)
 
                     cons = []
-                    row_selected = cp.boolvar(shape=len(tab))
+                    if NAMED:
+                        row_selected = cp.boolvar(shape=len(tab), name=f"_BV{_BoolVarImpl.counter}_r")
+                        _BoolVarImpl.counter += 1
+                    else:
+                        row_selected = cp.boolvar(shape=len(tab))
+
                     nptab = np.array(tab)
 
                     cons += [x == cp.sum(row_selected * nptab[:, i]) for i, x in enumerate(arr)]

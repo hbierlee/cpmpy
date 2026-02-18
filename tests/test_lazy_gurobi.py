@@ -11,6 +11,7 @@ import pytest
 import sys
 
 import cpmpy as cp
+from cpmpy.expressions.utils import argvals
 from cpmpy.transformations.get_variables import get_variables_model, get_variables
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.expressions.utils import show_assignment, dom_size
@@ -259,10 +260,10 @@ def assert_integer_solution(A_enc):
         )
 
 
-def check_model(model, env=None, checked=True):
+def check_model(model, env=None, checked=False, allsols=False):
     print("== Model ==")
-    # print(model)
-    # print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
+    print(model)
+    print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
 
     try:
         if True:
@@ -289,7 +290,21 @@ def check_model(model, env=None, checked=True):
         )
 
         print("solver", slv)
-        actual_sat = slv.solve()
+        if allsols:
+            sols = []
+            xs = tuple(sorted(slv.user_vars, key=lambda x: x.name))
+
+            def display():
+                sol = tuple(argvals(xs))
+                sols.append(sol)
+                print("checking", sol)
+                for c in model.constraints:
+                    assert c.value(), f"Constraint {c} failed for assignment\n\n{show_assignment(get_variables(c))}"
+
+            slv.solveAll(display=display, solution_limit=1000)
+            actual_sat = bool(sols)
+        else:
+            actual_sat = slv.solve()
         print("actual feasible", actual_sat)
 
         if hasattr(slv, "stats"):
@@ -337,6 +352,7 @@ def with_constraints(model, with_alldiff=False, with_min=True):
     X = cp.transformations.get_variables.get_variables_model(model)
     if with_alldiff:
         model += cp.AllDifferent(X)
+    with_min = False
     if with_min:
         model.minimize(sum(X))
     return model
@@ -396,15 +412,18 @@ def load_model(path):
 @pytest.mark.timeout(60)
 class TestTables:
     def test_repro_explain(self, env):
-        path = pathlib.Path("/tmp/failed_cut.pkl")
+        path = pathlib.Path("fail.pkl")
         if path.exists():
             with open(path, "rb") as f:
-                X_enc, A_enc, T_enc, parts, frm = pickle.load(f)
+                X_enc, A_enc, T_enc, parts, frm, env = pickle.load(f)
+            print("E", env)
             slv = CPM_lazy_gurobi(
-                env={
-                    **env,
-                    **{"verbosity": 3, "debug": True, "checker": False, "coverlift": False, "shrink": False, "fractional": True},
-                },
+                env=env
+                | {"verbosity": 3, "debug": True, "checked": False},
+                # env={
+                #     **env,
+                #     **{"verbosity": 3, "debug": True, "checker": False, "coverlift": False, "shrink": False, "fractional": True},
+                # },
             )
 
             COLS = None
@@ -422,7 +441,8 @@ class TestTables:
             if explanation is None:
                 print("Infeasible")
             else:
-                slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
+                expr = slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
+                slv.check_explanation(expr, X_enc, A_enc, T_enc, frm)
 
     @pytest.mark.skip()
     def test_coverlift(self, env):
