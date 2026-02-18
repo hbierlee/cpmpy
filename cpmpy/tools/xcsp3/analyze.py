@@ -523,6 +523,11 @@ def check_inconsistent_instances(df):
             # Set status to ERROR only for the UNS rows of this instance
             mask = (df['track'] == track) & (df['problem'] == problem) & (df['instance'] == instance) & (df['status'] == UNS)
             df.loc[mask, 'status'] = ERR
+            uns_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in uns_solvers])
+            err_msg = f"Inconsistent: UNS but other solvers found SAT. UNS from [{uns_info}]"
+            for idx in df.index[mask]:
+                existing = df.loc[idx, 'traceback']
+                df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else str(existing) + '\n') + err_msg
 
         # Check for super-optimal solutions
         # Get solvers that reported OPTIMUM FOUND and their objective values
@@ -557,22 +562,11 @@ def check_inconsistent_instances(df):
 
                         # Set status to ERROR only for the row with the super-optimal solution
                         df.loc[idx, 'status'] = ERR
-
-    if inconsistent:
-        print("\n== INCONSISTENT INSTANCES (both SAT and UNS) ==")
-        for item in inconsistent:
-            uns_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in item['uns_solvers']])
-            print(f"{item['track']}/{item['problem']}-{item['instance']}: UNS from [{uns_info}]")
-        print(f"\nTotal inconsistent instances: {len(inconsistent)}")
-
-    if super_optimal:
-        print("\n== SUPER-OPTIMAL SOLUTIONS (better than proven optimal) ==")
-        for item in super_optimal:
-            opt_solvers_str = ', '.join(item['opt_solvers'])
-            cmp = '<' if item['method'] == 'minimize' else '>'
-            print(f"{item['track']}/{item['problem']}-{item['instance']}: {item['solver']} ({item['solver_status']}) "
-                  f"found obj={item['solver_obj']} {cmp} optimal={item['opt_obj']} from [{opt_solvers_str}]")
-        print(f"\nTotal super-optimal instances: {len(super_optimal)}")
+                        opt_solvers_str = ', '.join(opt_results['alias'].tolist())
+                        cmp = '<' if is_minimize else '>'
+                        err_msg = f"Super-optimal: found obj={row['obj']} {cmp} optimal={opt_obj} from [{opt_solvers_str}]"
+                        existing = df.loc[idx, 'traceback']
+                        df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
 
     return inconsistent, super_optimal
 
@@ -681,7 +675,7 @@ def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=
     dfs = []
     for i, file in csv_files:
         print(f"Reading {file}")
-        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False)
+        df = pd.read_csv(file, names=FIELDNAMES, skiprows=1, index_col=False, dtype={'traceback': str, 'exception': str})
         df["run"] = chr(65 + i) if True else str(file.parent)
         dfs.append(df)
 
@@ -760,11 +754,11 @@ def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=
         instance_match = df['instance'].map(lambda g: any(g_ in g for g_ in glob_instance))
         df = df[track_match | problem_match | instance_match].copy()
 
-    # Rename tracks for cleaner display
-    df['track'] = df['track'].replace({
-        'COP22to25': 'COP',
-        'CSP22to25': 'CSP'
-    })
+    # # Rename tracks for cleaner display
+    # df['track'] = df['track'].replace({
+    #     'COP22to25': 'COP',
+    #     'CSP22to25': 'CSP'
+    # })
 
     # Set solved status based on track type
     df["unknown"] = df["status"] == UNK
@@ -1405,6 +1399,17 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     solver1_short = baseline_solver.replace('gurobi-', '').replace('-', '')
                     solver2_short = solver2.replace('gurobi-', '').replace('-', '')
                     save_plot(fig_scatter, plot, f"scatter-{track}-{solver1_short}-vs-{solver2_short}")
+
+    # Set status to ERR for rows that don't pass the checker
+    def checker_failed(checker_result):
+        if pd.isna(checker_result):
+            return False
+        lines = checker_result.split("\n")
+        assert len(lines) >= 2, f"Unexpected checker_result format: {checker_result}"
+        return not lines[-2].startswith("OK")
+
+    checker_fail_mask = df['checker_result'].apply(checker_failed)
+    df.loc[checker_fail_mask, 'status'] = ERR
 
     errors = df[df["status"] == ERR]
     # [["track","problem","instance","alias","status","time_total", "exception", "traceback", "checker_result"]]

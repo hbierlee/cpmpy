@@ -5,6 +5,7 @@ import pathlib
 import pickle
 import random
 
+import pprint
 import numpy as np
 import pandas as pd
 import pytest
@@ -260,13 +261,16 @@ def assert_integer_solution(A_enc):
         )
 
 
-def check_model(model, env=None, checked=False, allsols=False):
+def check_model(model, env=None, checked=True, allsols=False):
     print("== Model ==")
     print(model)
     print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
 
+    print("== ENV == ")
+    pprint.pprint(env)
+
     try:
-        if True:
+        if False:
             slv_ = CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](**env["solver_kwargs"])
             print("ENCODING")
             for i, c in enumerate(model.constraints, start=1):
@@ -277,9 +281,8 @@ def check_model(model, env=None, checked=False, allsols=False):
                     # print("  ", slv._csemap)
             print("ENCODED")
 
-        #return
-
         if checked:
+            print("solving model to get expected feasibility")
             expected_sat = model.deepcopy().solve()
             print("expected feasible = ", expected_sat)
         else:
@@ -289,7 +292,7 @@ def check_model(model, env=None, checked=False, allsols=False):
             CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](cpm_model=model, **env["solver_kwargs"])
         )
 
-        print("solver", slv)
+        print("solving for actual feasibility", slv)
         if allsols:
             sols = []
             xs = tuple(sorted(slv.user_vars, key=lambda x: x.name))
@@ -303,6 +306,7 @@ def check_model(model, env=None, checked=False, allsols=False):
 
             slv.solveAll(display=display, solution_limit=1000)
             actual_sat = bool(sols)
+            assert len(sols) < 1000, "increase sol limit"
         else:
             actual_sat = slv.solve()
         print("actual feasible", actual_sat)
@@ -418,8 +422,7 @@ class TestTables:
                 X_enc, A_enc, T_enc, parts, frm, env = pickle.load(f)
             print("E", env)
             slv = CPM_lazy_gurobi(
-                env=env
-                | {"verbosity": 3, "debug": True, "checked": False},
+                env=env | {"verbosity": 3, "debug": True, "checked": False},
                 # env={
                 #     **env,
                 #     **{"verbosity": 3, "debug": True, "checker": False, "coverlift": False, "shrink": False, "fractional": True},
@@ -715,7 +718,7 @@ def idfn(a):
         return f"{name}_r{repeat}" if repeat > 1 else name
 
 
-REPEAT = 1
+REPEAT = 3
 
 
 @pytest.mark.timeout(60)
@@ -733,10 +736,6 @@ class TestModels:
         ids=idfn,
     )
     def test_models(self, case, env):
-        import pprint
-
-        pprint.pprint(env)
-        print("env", env)
         _, _, model = case
         if isinstance(model, str):
             sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
@@ -757,19 +756,22 @@ def benchmark_table_constraints(envs=None, glob=None):
                 "coverlift",
                 # list(Coverlift),
                 (
-                    # Coverlift.No,
+                    Coverlift.No,
                     Coverlift.INPUT,
+                    Coverlift.COM_MIN,
+                    Coverlift.COM_MAX,
                 ),
             ),
-            (
-                "variant",
-                ("a", "b"),
-            ),
+            # (
+            #     "variant",
+            #     ("a", "b"),
+            # ),
         ],
-        control=True,
         add_all=False,
         add_none=True,
-        filters=[("alias", ("bool", "mdd"))],
+        # filters=[("alias", ("bool", "mdd"))],
+        # filters=[("alias", ("none", "coverlift_input",))],
+        filters=[("alias", ("lazy",))],
     )
 
     import pprint
@@ -779,10 +781,12 @@ def benchmark_table_constraints(envs=None, glob=None):
 
     results = []
 
-    checked = False
+    checked = True
     verbosity = 1
-    max_iterations = 100
-    hard = 3
+    # max_iterations = 1000
+    max_iterations = 5000
+    time_limit = 20
+    hard = 4
 
     if hard > 1:
         checked = False
@@ -802,10 +806,10 @@ def benchmark_table_constraints(envs=None, glob=None):
         print(f"Testing with environment: {env_alias}")
         print(f"{'=' * 80}\n")
         # print("ENV", env)
-        # env["solver_kwargs"]["env"]["verbosity"] = verbosity
-        # env["solver_kwargs"]["env"]["checked"] = checked
-        # env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
-        # env["solver_kwargs"]["env"]["debug"] = True
+        env["solver_kwargs"]["env"]["verbosity"] = verbosity
+        env["solver_kwargs"]["env"]["checked"] = checked
+        env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
+        env["solver_kwargs"]["env"]["debug"] = True
 
         GLOB = tuple()
         # GLOB = ("example_alldiff",)
@@ -817,7 +821,7 @@ def benchmark_table_constraints(envs=None, glob=None):
 
             try:
                 # Create solver with the environment
-                slv = env["solver"](cpm_model=model, **env["solver_kwargs"])
+                slv = env["solver"](cpm_model=model, **env["solver_kwargs"], time_limit=time_limit)
 
                 # Solve the model
                 time_solve = time.time()
@@ -834,6 +838,7 @@ def benchmark_table_constraints(envs=None, glob=None):
 
             except Exception as e:
                 print(f"  ERROR: {e}")
+                # raise e
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
 
     # Create and print dataframe
@@ -858,7 +863,10 @@ def benchmark_table_constraints(envs=None, glob=None):
         original_order = [name for name, _ in test_cases]
         df["name"] = pd.Categorical(df["name"], categories=original_order, ordered=True)
 
-        values = ["constraints", "n_cuts"] + (["avg_strength"] if checked else ["time_solve"])
+        values = [
+            # "constraints",
+            "n_cuts",
+        ] + (["avg_strength"] if checked else ["time_solve"])
 
         comparison = df.pivot_table(
             index="name",

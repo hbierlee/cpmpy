@@ -1137,10 +1137,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("Solving.. ")
 
         try:
+            dt = time.time()
             if self.env["checked"]:
                 for iteration in itertools.count():
                     # hassol = self.env["checker"].solve(**kwargs)
                     hassol = len(self.env["remain"]) > 0
+
+                    if time_limit is not None and time.time() - dt > time_limit:
+                        raise TimeoutError
 
                     if not hassol:
                         break
