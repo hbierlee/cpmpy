@@ -48,9 +48,6 @@ def generate_two_tables():
 def generate_models_w_tables(hard=2):
     """Generator yielding (name, model) tuples for various test cases"""
 
-    #yield ("bug_a", "BeerJugs-dec-05_c23.xml")
-    #yield ("bug_b", "DC-skinny-xor0-d0-t0-r18-v64-z0_c22.xml")  # other exception only occurs if full model runs?
-    #yield ("bug_b_minimized", generate_table_from_data([[0, 0], [1, 1]], lb=0, ub=1))  # Weirdly doesn't repro bug b
 
     # Basic test cases
     # yield ("alldiff", cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3, name="x"))))

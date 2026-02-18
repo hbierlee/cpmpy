@@ -83,22 +83,18 @@ def glob_filter(experiments, filters):
     ]
 
 
-def get_solvers(features=None, overrides={}, filters=None, control=True, add_all=True, add_none=True):
+def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_none=True):
     return glob_filter(
         [
-            *([{"solver": "ortools", "alias": "ortools"}] if control else []),
-            *(
-                [
-                    {
-                        "solver": CPM_gurobi,
-                        "alias": f"base_gurobi-{encoding}",
-                        "solver_kwargs": {"encoding": encoding, "output_stats": True},
-                    }
-                    for encoding in Encoding
-                ]
-                if control
-                else []
-            ),
+            *[{"solver": "ortools", "alias": "ortools"}],
+            *[
+                {
+                    "solver": CPM_gurobi,
+                    "alias": f"base_gurobi-{encoding}",
+                    "solver_kwargs": {"encoding": encoding, "output_stats": True},
+                }
+                for encoding in Encoding
+            ],
             *[
                 {
                     "alias": f"{solver}-{alias}",
@@ -120,10 +116,10 @@ def get_solvers(features=None, overrides={}, filters=None, control=True, add_all
     )
 
 
-def get_experiments(features=None, overrides={}, filters=[], control=True):
+def get_experiments(features=None, overrides={}, filters=[]):
     return glob_filter(
         experiment(
-            get_solvers(features=features, control=control, overrides=overrides),
+            get_solvers(features=features, overrides=overrides),
             overrides=overrides,
         ),
         filters,
