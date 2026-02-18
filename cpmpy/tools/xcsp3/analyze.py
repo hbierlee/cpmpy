@@ -570,6 +570,42 @@ def reorder_cols(df, cols):
     return df[cols + [col for col in df.columns if col not in cols]]
 
 
+def match_solver(search_str, aliases, strict=False):
+    """
+    Find a solver alias matching the given search string (substring match).
+
+    Parameters
+    ----------
+    search_str : str
+        The substring to search for in solver aliases
+    aliases : list or array-like
+        Available solver aliases to search through
+    strict : bool, default=False
+        If True, raise ValueError on no match or multiple matches.
+        If False, return None on no match or multiple matches.
+
+    Returns
+    -------
+    str or None
+        The matching alias, or None if no unique match found (when strict=False)
+
+    Raises
+    ------
+    ValueError
+        If strict=True and no match or multiple matches found
+    """
+    matches = [alias for alias in aliases if search_str in alias]
+    if len(matches) == 0:
+        if strict:
+            raise ValueError(f"No solver alias found containing '{search_str}'. Available aliases: {list(aliases)}")
+        return None
+    if len(matches) > 1:
+        if strict:
+            raise ValueError(f"Multiple solver aliases match '{search_str}': {matches}. Please use a more specific string.")
+        return None
+    return matches[0]
+
+
 def save_plot(fig, path, name):
     """
     Save a matplotlib figure to both PNG and SVG formats.
@@ -1005,19 +1041,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             # Show diff for all consecutive rows
             diff_cols = [c for c in groups.columns if c in ["t_post_p2", "t_solv_p2", "unk", "mem", "post", "solv"]]
             # Use first compare argument as baseline
-            baseline_str = compare[0]
-
-            # Check if baseline exists in this grouping
             aliases = groups.index.get_level_values('alias').unique()
-
-            # Find all aliases containing the baseline string
-            matching_baselines = [alias for alias in aliases if baseline_str in alias]
-            if len(matching_baselines) == 0:
-                raise ValueError(f"No solver alias found containing '{baseline_str}'. Available aliases: {aliases}")
-            if len(matching_baselines) > 1:
-                raise ValueError(f"Multiple solver aliases match '{baseline_str}': {matching_baselines}. Please use a more specific string.")
-
-            baseline = matching_baselines[0]
+            baseline = match_solver(compare[0], aliases)
+            if baseline is None:
+                continue
             print(f"Using baseline: {baseline}")
 
             # Get baseline data
@@ -1322,13 +1349,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         aliases = sorted(groups["alias"].unique())
         if compare is not None:
             # Find baseline solver
-            baseline_str = compare[0]
-            matches_baseline = [alias for alias in aliases if baseline_str in alias]
-            if len(matches_baseline) == 0:
-                raise ValueError(f"No solver alias found containing '{baseline_str}'. Available aliases: {aliases}")
-            if len(matches_baseline) > 1:
-                raise ValueError(f"Multiple solver aliases match '{baseline_str}': {matches_baseline}. Please use a more specific string.")
-            baseline_solver = matches_baseline[0]
+            baseline_solver = match_solver(compare[0], aliases)
+            if baseline_solver is None:
+                continue
 
             # Determine which solvers to compare against baseline
             if len(compare) == 1:
@@ -1336,13 +1359,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 compare_solvers = [alias for alias in aliases if alias != baseline_solver]
             elif len(compare) == 2:
                 # Compare specific solver against baseline
-                solver_str2 = compare[1]
-                matches2 = [alias for alias in aliases if solver_str2 in alias]
-                if len(matches2) == 0:
-                    raise ValueError(f"No solver alias found containing '{solver_str2}'. Available aliases: {aliases}")
-                if len(matches2) > 1:
-                    raise ValueError(f"Multiple solver aliases match '{solver_str2}': {matches2}. Please use a more specific string.")
-                compare_solvers = [matches2[0]]
+                solver2 = match_solver(compare[1], aliases)
+                if solver2 is None:
+                    continue
+                compare_solvers = [solver2]
             else:
                 raise ValueError(f"--compare takes 1 or 2 arguments, got {len(compare)}")
 
@@ -1375,7 +1395,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     solver2_short = solver2.replace('gurobi-', '').replace('-', '')
                     save_plot(fig_scatter, plot, f"scatter-{track}-{solver1_short}-vs-{solver2_short}")
 
-    errors = df[df["status"] == ERR][["track","problem","instance","alias","status","time_total", "exception", "traceback"]]
+    errors = df[df["status"] == ERR]
+    # [["track","problem","instance","alias","status","time_total", "exception", "traceback", "checker_result"]]
     if not errors.empty:
         print("== ERRORS ==")
         for idx, error in errors.iterrows():
@@ -1389,6 +1410,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 print(f"Exception: {error['exception']}")
             if pd.notna(error['traceback']):
                 print(f"Traceback:\n{error['traceback']}")
+
+    for idx, row in df.iterrows():
+        if pd.notna(row['checker_result']) and not row['checker_result'].split("\n")[-2].startswith("OK"):
+            print(f"Exception: {row['checker_result']}")
 
     # Close figures we don't want to show before calling plt.show()
     if show is not None:
