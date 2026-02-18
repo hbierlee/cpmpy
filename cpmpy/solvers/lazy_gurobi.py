@@ -261,14 +261,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.native_model.Params.OutputFlag = 1
             self.native_model.write("/tmp/gurobi.lp")
 
-        if self.env["debug"] and cpm_model is not None:
+        if self.env["checked"] and cpm_model is not None:
+            self.log("CHECKED: solve model to determine expected feasibility")
+            self.env["user_vars"] = tuple(sorted(self.user_vars, key=lambda x: x.name))
             self.env["feasible"] = cpm_model.solve()
             self.env["model"] = cpm_model
-
-        if self.env["checked"]:
             _, self.env["expected_solutions"] = cp.solvers.utils.solutions(
                 cpm_model,
-                X=sorted(self.user_vars, key=lambda x: x.name),
+                X=self.env["user_vars"],
                 projected_solution_limit=None,
                 time_limit=CHECKER_TIME_LIMIT,
             )
@@ -507,11 +507,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # print(f'NON TIGHT = {show_nz(non_tight)}', )
 
             if non_tight.any():
-                a_j = np.max(k - RS[non_tight])
+                a_j = np.min(k - RS[non_tight])
             else:
                 a_j = k + 1  # infinite
-            # KRS = k - RS[non_tight] if RS[non_tight].any() else k
-            # a_j = np.min(KRS)
 
             RS = RS + a_j * T_enc.T[j]
             N_tight = tight(~R_tight, RS)
@@ -555,6 +553,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 break
 
         return S, C_enc, k
+
+    def show_cut(self, X, C_enc, k):
+        if self.env["verbosity"]:
+            self.log(
+                f"X == {X}",
+                verbosity=2,
+            )
+            self.log(
+                f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
+                indent=2,
+                verbosity=2,
+            )
 
     def explain(self, A_enc, T_enc, parts, frm=None):
         """The `explain_frac2` alg."""
@@ -764,15 +774,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["cuts"][-1]["cut"] = X.copy()
             assert C_enc[X].all()
 
-        def show_cut():
-            if self.env["verbosity"]:
-                self.log(
-                    f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
-                    indent=2,
-                    verbosity=2,
-                )
-
-        show_cut()
+        self.show_cut(X, C_enc, k)
 
         if self.env["shrink"]:
             X_shrunk, shrunk = self.shrink(X, T_enc)
@@ -786,7 +788,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     "cut": X_shrunk,
                 }
             self.env["cuts"][-1]["shrunk"] = shrunk
-            show_cut()
+            self.show_cut(X, C_enc, k)
 
         if self.env["coverlift"]:
             if self.env["verbosity"]:
@@ -795,7 +797,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if self.env["verbosity"]:
                 self.log("coverlift added ", X.sum() - Xl, verbosity=2)
 
-            show_cut()
+            self.show_cut(X, C_enc, k)
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -883,13 +885,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
         return solution_callback
 
     def explanation_to_expr(self, explanation, A_enc, X_enc, T_enc, frm):
+
         if is_true_cst(explanation):
             expr = explanation
         else:
             (X, C_enc, k) = explanation
             expr = cp.sum(C_enc[X] * X_enc[X]) <= k
             if self.env["verbosity"]:
-                self.log(f"cons == +{X.sum()} * x's <= {k}", indent=2, verbosity=2)
+                self.show_cut(X, C_enc, k)
                 self.log(f"  == {expr}", indent=2, verbosity=2)
 
         if isinstance(expr, (bool, np.bool_)):
@@ -920,15 +923,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     A_enc = A_enc > 0.5
                     assert A_enc.dtype == bool
                     is_integer = True
-            if self.env["verbosity"]:
-                self.log("A_enc", show_table(A_enc), verbosity=2)
 
             # TODO figure out when can be skipped
             if is_integer and (T_enc == A_enc).all(1).any():
                 if self.env["verbosity"]:
                     self.log(
                         f"table {i}/{len(self.tables)} feasible: ({show_nz((T_enc == A_enc).all(1))})",
-                        verbosity=2,
+                        verbosity=3,
                     )
                     self.log(
                         f"by {A_enc}\n\n{np.astype(T_enc, int)}",
@@ -939,11 +940,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
             elif self.env["verbosity"]:
                 self.log(
                     f"table {i}/{len(self.tables)} INfeasible",
-                    verbosity=3,
+                    verbosity=2,
                 )
                 self.log(
-                    f"by {A_enc}\n\n{np.astype(T_enc, int)}",
-                    verbosity=3,
+                    f"by {show_table(A_enc)}\n\n{np.astype(A_enc, int)}",
+                    verbosity=2,
                     indent=2,
                 )
 
@@ -980,8 +981,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
             except Infeasible:
                 raise Infeasible
             except Exception as e:
-                with open("/tmp/failed_cut.pkl", "wb") as f:
-                    pickle.dump((X_enc, A_enc, T_enc, parts, frm), f)
+                failure = (X_enc, A_enc, T_enc, parts, frm, self.env)
+                path = f"/tmp/failed_cut.pkl"
+                with open(path, "wb") as f:
+                    print("Saved failed cut/env under ", path)
+                    pickle.dump(failure, f)
                 raise e
 
     def add(self, cons):
@@ -995,7 +999,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         time_limit = CHECKER_TIME_LIMIT if time_limit is None else time_limit
         return cp.solvers.utils.solutions(
             self.env["checker"],
-            X=sorted(self.user_vars, key=lambda x: x.name),
+            X=self.env["user_vars"],
             projected_solution_limit=None,
             time_limit=time_limit,
         )[1]
@@ -1013,7 +1017,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             lhs = sum(w * x.value() for w, x in zip(ws, xs))
             return bool(is_le(lhs, k))  # np -> python bool
 
-        case = f"The explanation\n\n{expr}\n== {value(expr)}\n\n from assignment {frm} {show_assignment(X_enc)} for table:\n\n {A_enc}\n{show_table(T_enc)}\n\n  "
+        case = f"The explanation\n\n{expr}\n== {value(expr)}\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
 
         if not is_true_cst(expr):
             assert value(expr) is False, f"Did not cut off assignment:\n\n{case}"
@@ -1069,6 +1073,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 else len(self.env["remain"]) - len(remaining)
             )
             self.env["cuts"][-1]["strength"] = strength
+            self.env["remain"] = remaining
             if self.env["verbosity"]:
                 self.log(self.env["checker"], verbosity=4)
                 self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
@@ -1132,13 +1137,27 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("Solving.. ")
 
         try:
+            dt = time.time()
             if self.env["checked"]:
                 for iteration in itertools.count():
-                    hassol = self.env["checker"].solve(**kwargs)
+                    # hassol = self.env["checker"].solve(**kwargs)
+                    hassol = len(self.env["remain"]) > 0
+
+                    if time_limit is not None and time.time() - dt > time_limit:
+                        raise TimeoutError
 
                     if not hassol:
                         break
+
+                    print("solve", self.env["remain"], self.env["remain"][0])
+                    for x, v in zip(self.env["user_vars"], self.env["remain"][0]):
+                        x._value = v
+
                     all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
+                    print(self._csemap)
+                    for expr, lit in self._csemap.items():
+                        lit._value = expr.value()
+                        print(expr, expr.value(), lit, lit.value())
                     x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
 
                     self.check_max_iterations(iteration)

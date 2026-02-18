@@ -5,12 +5,14 @@ import pathlib
 import pickle
 import random
 
+import pprint
 import numpy as np
 import pandas as pd
 import pytest
 import sys
 
 import cpmpy as cp
+from cpmpy.expressions.utils import argvals
 from cpmpy.transformations.get_variables import get_variables_model, get_variables
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.expressions.utils import show_assignment, dom_size
@@ -46,9 +48,6 @@ def generate_two_tables():
 def generate_models_w_tables(hard=2):
     """Generator yielding (name, model) tuples for various test cases"""
 
-    #yield ("bug_a", "BeerJugs-dec-05_c23.xml")
-    #yield ("bug_b", "DC-skinny-xor0-d0-t0-r18-v64-z0_c22.xml")  # other exception only occurs if full model runs?
-    #yield ("bug_b_minimized", generate_table_from_data([[0, 0], [1, 1]], lb=0, ub=1))  # Weirdly doesn't repro bug b
 
     yield ("bug_unsat", "Ortholatin-05_c22.xml")
     
@@ -263,13 +262,16 @@ def assert_integer_solution(A_enc):
         )
 
 
-def check_model(model, env=None, checked=True):
+def check_model(model, env=None, checked=True, allsols=False):
     print("== Model ==")
-    # print(model)
-    # print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
+    print(model)
+    print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
+
+    print("== ENV == ")
+    pprint.pprint(env)
 
     try:
-        if True:
+        if False:
             slv_ = CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](**env["solver_kwargs"])
             print("ENCODING")
             for i, c in enumerate(model.constraints, start=1):
@@ -280,9 +282,8 @@ def check_model(model, env=None, checked=True):
                     # print("  ", slv._csemap)
             print("ENCODED")
 
-        #return
-
         if checked:
+            print("solving model to get expected feasibility")
             expected_sat = model.deepcopy().solve()
             print("expected feasible = ", expected_sat)
         else:
@@ -292,8 +293,23 @@ def check_model(model, env=None, checked=True):
             CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](cpm_model=model, **env["solver_kwargs"])
         )
 
-        print("solver", slv)
-        actual_sat = slv.solve()
+        print("solving for actual feasibility", slv)
+        if allsols:
+            sols = []
+            xs = tuple(sorted(slv.user_vars, key=lambda x: x.name))
+
+            def display():
+                sol = tuple(argvals(xs))
+                sols.append(sol)
+                print("checking", sol)
+                for c in model.constraints:
+                    assert c.value(), f"Constraint {c} failed for assignment\n\n{show_assignment(get_variables(c))}"
+
+            slv.solveAll(display=display, solution_limit=1000)
+            actual_sat = bool(sols)
+            assert len(sols) < 1000, "increase sol limit"
+        else:
+            actual_sat = slv.solve()
         print("actual feasible", actual_sat)
 
         if hasattr(slv, "stats"):
@@ -341,6 +357,7 @@ def with_constraints(model, with_alldiff=False, with_min=True):
     X = cp.transformations.get_variables.get_variables_model(model)
     if with_alldiff:
         model += cp.AllDifferent(X)
+    with_min = False
     if with_min:
         model.minimize(sum(X))
     return model
@@ -400,15 +417,17 @@ def load_model(path):
 @pytest.mark.timeout(60)
 class TestTables:
     def test_repro_explain(self, env):
-        path = pathlib.Path("/tmp/failed_cut.pkl")
+        path = pathlib.Path("fail.pkl")
         if path.exists():
             with open(path, "rb") as f:
-                X_enc, A_enc, T_enc, parts, frm = pickle.load(f)
+                X_enc, A_enc, T_enc, parts, frm, env = pickle.load(f)
+            print("E", env)
             slv = CPM_lazy_gurobi(
-                env={
-                    **env,
-                    **{"verbosity": 3, "debug": True, "checker": False, "coverlift": False, "shrink": False, "fractional": True},
-                },
+                env=env | {"verbosity": 3, "debug": True, "checked": False},
+                # env={
+                #     **env,
+                #     **{"verbosity": 3, "debug": True, "checker": False, "coverlift": False, "shrink": False, "fractional": True},
+                # },
             )
 
             COLS = None
@@ -426,7 +445,8 @@ class TestTables:
             if explanation is None:
                 print("Infeasible")
             else:
-                slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
+                expr = slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
+                slv.check_explanation(expr, X_enc, A_enc, T_enc, frm)
 
     @pytest.mark.skip()
     def test_coverlift(self, env):
@@ -699,7 +719,7 @@ def idfn(a):
         return f"{name}_r{repeat}" if repeat > 1 else name
 
 
-REPEAT = 1
+REPEAT = 3
 
 
 @pytest.mark.timeout(60)
@@ -717,10 +737,6 @@ class TestModels:
         ids=idfn,
     )
     def test_models(self, case, env):
-        import pprint
-
-        pprint.pprint(env)
-        print("env", env)
         _, _, model = case
         if isinstance(model, str):
             sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
@@ -741,19 +757,22 @@ def benchmark_table_constraints(envs=None, glob=None):
                 "coverlift",
                 # list(Coverlift),
                 (
-                    # Coverlift.No,
+                    Coverlift.No,
                     Coverlift.INPUT,
+                    Coverlift.COM_MIN,
+                    Coverlift.COM_MAX,
                 ),
             ),
-            (
-                "variant",
-                ("a", "b"),
-            ),
+            # (
+            #     "variant",
+            #     ("a", "b"),
+            # ),
         ],
-        control=True,
         add_all=False,
         add_none=True,
-        filters=[("alias", ("bool", "mdd"))],
+        # filters=[("alias", ("bool", "mdd"))],
+        # filters=[("alias", ("none", "coverlift_input",))],
+        filters=[("alias", ("lazy",))],
     )
 
     import pprint
@@ -763,10 +782,12 @@ def benchmark_table_constraints(envs=None, glob=None):
 
     results = []
 
-    checked = False
+    checked = True
     verbosity = 1
-    max_iterations = 100
-    hard = 3
+    # max_iterations = 1000
+    max_iterations = 5000
+    time_limit = 20
+    hard = 4
 
     if hard > 1:
         checked = False
@@ -786,10 +807,10 @@ def benchmark_table_constraints(envs=None, glob=None):
         print(f"Testing with environment: {env_alias}")
         print(f"{'=' * 80}\n")
         # print("ENV", env)
-        # env["solver_kwargs"]["env"]["verbosity"] = verbosity
-        # env["solver_kwargs"]["env"]["checked"] = checked
-        # env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
-        # env["solver_kwargs"]["env"]["debug"] = True
+        env["solver_kwargs"]["env"]["verbosity"] = verbosity
+        env["solver_kwargs"]["env"]["checked"] = checked
+        env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
+        env["solver_kwargs"]["env"]["debug"] = True
 
         GLOB = tuple()
         # GLOB = ("example_alldiff",)
@@ -801,7 +822,7 @@ def benchmark_table_constraints(envs=None, glob=None):
 
             try:
                 # Create solver with the environment
-                slv = env["solver"](cpm_model=model, **env["solver_kwargs"])
+                slv = env["solver"](cpm_model=model, **env["solver_kwargs"], time_limit=time_limit)
 
                 # Solve the model
                 time_solve = time.time()
@@ -818,6 +839,7 @@ def benchmark_table_constraints(envs=None, glob=None):
 
             except Exception as e:
                 print(f"  ERROR: {e}")
+                # raise e
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
 
     # Create and print dataframe
@@ -842,7 +864,10 @@ def benchmark_table_constraints(envs=None, glob=None):
         original_order = [name for name, _ in test_cases]
         df["name"] = pd.Categorical(df["name"], categories=original_order, ordered=True)
 
-        values = ["constraints", "n_cuts"] + (["avg_strength"] if checked else ["time_solve"])
+        values = [
+            # "constraints",
+            "n_cuts",
+        ] + (["avg_strength"] if checked else ["time_solve"])
 
         comparison = df.pivot_table(
             index="name",
