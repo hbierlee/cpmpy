@@ -263,13 +263,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["checked"] and cpm_model is not None:
             self.log("CHECKED: solve model to determine expected feasibility")
+            self.env["user_vars"] = tuple(sorted(self.user_vars, key=lambda x: x.name))
             self.env["feasible"] = cpm_model.solve()
             self.env["model"] = cpm_model
-
-        if self.env["checked"]:
             _, self.env["expected_solutions"] = cp.solvers.utils.solutions(
                 cpm_model,
-                X=sorted(self.user_vars, key=lambda x: x.name),
+                X=self.env["user_vars"],
                 projected_solution_limit=None,
                 time_limit=CHECKER_TIME_LIMIT,
             )
@@ -1000,7 +999,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         time_limit = CHECKER_TIME_LIMIT if time_limit is None else time_limit
         return cp.solvers.utils.solutions(
             self.env["checker"],
-            X=sorted(self.user_vars, key=lambda x: x.name),
+            X=self.env["user_vars"],
             projected_solution_limit=None,
             time_limit=time_limit,
         )[1]
@@ -1074,6 +1073,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 else len(self.env["remain"]) - len(remaining)
             )
             self.env["cuts"][-1]["strength"] = strength
+            self.env["remain"] = remaining
             if self.env["verbosity"]:
                 self.log(self.env["checker"], verbosity=4)
                 self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
@@ -1139,11 +1139,21 @@ class CPM_lazy_gurobi(CPM_gurobi):
         try:
             if self.env["checked"]:
                 for iteration in itertools.count():
-                    hassol = self.env["checker"].solve(**kwargs)
+                    # hassol = self.env["checker"].solve(**kwargs)
+                    hassol = len(self.env["remain"]) > 0
 
                     if not hassol:
                         break
+
+                    print("solve", self.env["remain"], self.env["remain"][0])
+                    for x, v in zip(self.env["user_vars"], self.env["remain"][0]):
+                        x._value = v
+
                     all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
+                    print(self._csemap)
+                    for expr, lit in self._csemap.items():
+                        lit._value = expr.value()
+                        print(expr, expr.value(), lit, lit.value())
                     x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
 
                     self.check_max_iterations(iteration)

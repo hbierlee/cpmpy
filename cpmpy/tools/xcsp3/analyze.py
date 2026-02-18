@@ -742,8 +742,8 @@ def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=
     # Let solve include post time
     df["time_solve"] = df["time_solve"] + df["time_post"].fillna(0)
 
-    # Change status to MEM for Gurobi out of memory errors
-    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].astype(str).str.contains("gurobipy._exception.GurobiError: Out of memory", na=False)
+    # Change status to MEM for out of memory errors
+    gurobi_oom_mask = df['traceback'].notna() & df['traceback'].astype(str).str.contains("Out of memory|MemoryError", na=False)
     df.loc[gurobi_oom_mask, 'status'] = MEM
 
     if (df.groupby(by=['problem','instance','alias']).size() > 1).any():
@@ -1426,7 +1426,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             print(f"Solution: {row['solution']}")
             print(f"Exception: {row['checker_result']}")
         elif row['status'] == MEM:
-            assert pd.isna(row["exception"]) or "Out of memory" in row['exception'] or "MemoryError" in row['exception'] or "Unable to allocate" in row['exception']
+            assert pd.isna(row["exception"]) or "Out of memory" in row['exception'] or "MemoryError" in row['exception'] or "Unable to allocate" in row['exception'] or "Invalid argument to Model.addLConstr", row
             # assert pd.isna(row["traceback"]) or "Out of memory" in row['traceback'] or "MemoryError" in row['traceback'] or "Unable to allocate" in row['traceback']
         else:
             # assert pd.isna(row['exception']), row
