@@ -53,7 +53,7 @@ FEATURES = [
     ),
     (
         "coverlift",
-        (Coverlift.No, Coverlift.INPUT),
+        list(Coverlift),
     ),
     (
         "shrink",
