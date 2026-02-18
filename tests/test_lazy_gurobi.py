@@ -8,9 +8,11 @@ import random
 import numpy as np
 import pandas as pd
 import pytest
+import sys
 
 import cpmpy as cp
-from cpmpy.transformations.get_variables import get_variables_model
+from cpmpy.transformations.get_variables import get_variables_model, get_variables
+from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic, Coverlift
 from cpmpy.solvers.ortools import CPM_ortools
@@ -44,15 +46,19 @@ def generate_two_tables():
 def generate_models_w_tables(hard=2):
     """Generator yielding (name, model) tuples for various test cases"""
 
+    yield ("bug_a", "BeerJugs-dec-05_c23.xml")
+    yield ("bug_b", "DC-skinny-xor0-d0-t0-r18-v64-z0_c22.xml")  # other exception only occurs if full model runs?
+    yield ("bug_b_minimized", generate_table_from_data([[0, 0], [1, 1]], lb=0, ub=1))  # Weirdly doesn't repro bug b
+
     # Basic test cases
     # yield ("alldiff", cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3, name="x"))))
-    yield ("single_row", generate_table_from_data([[1, 1]], 2))
-    yield ("singleton_dom", generate_table_from_data([[1, 1]], 1))
-    yield ("singleton_dom_infeasible", generate_table_from_data([[1, 2]], 1))
-    yield ("feasible_diagonal", generate_table_from_data([[1, 1], [2, 2]], 3))
-    yield ("feasible_swap", generate_table_from_data([[1, 2], [2, 1]], 3))
-    yield ("infeasible_alldiff", with_constraints(generate_table_from_data([[1, 1], [2, 2]], 3), with_alldiff=True))
-    yield ("alldiff_min", with_constraints(generate_table_from_data([[1, 2], [2, 1]], 3), with_alldiff=True, with_min=True))
+    yield ("single_row", generate_table_from_data([[1, 1]]))
+    yield ("singleton_dom", generate_table_from_data([[1, 1]], ub=1))
+    yield ("singleton_dom_infeasible", generate_table_from_data([[1, 2]], ub=1))
+    yield ("feasible_diagonal", generate_table_from_data([[1, 1], [2, 2]], ub=3))
+    yield ("feasible_swap", generate_table_from_data([[1, 2], [2, 1]], ub=3))
+    yield ("infeasible_alldiff", with_constraints(generate_table_from_data([[1, 1], [2, 2]], ub=3), with_alldiff=True))
+    yield ("alldiff_min", with_constraints(generate_table_from_data([[1, 2], [2, 1]], ub=3), with_alldiff=True, with_min=True))
     yield ("example.", generate_table_from_example())
     yield ("example_alldiff.", with_constraints(generate_table_from_example(), with_alldiff=True))
 
@@ -187,10 +193,10 @@ def generate_models_w_tables(hard=2):
         # )
 
 
-def generate_table_from_data(T, d):
+def generate_table_from_data(T, lb=1, ub=2):
     """Generate a table constraint with the given `rows` and with var domains of size `d`"""
 
-    X = cp.intvar(1, d, shape=len(T[0]), name="x")
+    X = cp.intvar(lb, ub, shape=len(T[0]), name="x")
     return cp.Model(cp.Table(X, T))
 
 
@@ -253,15 +259,28 @@ def assert_integer_solution(A_enc):
         )
 
 
-def check_model(model, env=None):
+def check_model(model, env=None, checked=True):
     print("== Model ==")
-    print(model)
+    # print(model)
+    # print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
 
-    # print(", ".join(f"{x} in {list(x.dom())}" for x in get_variables_model(model)))
-    print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
-    expected_sat = model.deepcopy().solve()
-    print("expected feasible = ", expected_sat)
     try:
+        if True:
+            slv_ = CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](**env["solver_kwargs"])
+            print("ENCODING")
+            for i, c in enumerate(model.constraints, start=1):
+                print(f"C{i}", repr(c)[:100])
+                print("  ", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables(c)))
+                for ci in slv_.transform([c]):
+                    print("  ", ci)
+                    # print("  ", slv._csemap)
+            print("ENCODED")
+        if checked:
+            expected_sat = model.deepcopy().solve()
+            print("expected feasible = ", expected_sat)
+        else:
+            expected_sat = None
+
         slv = (
             CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](cpm_model=model, **env["solver_kwargs"])
         )
@@ -273,37 +292,25 @@ def check_model(model, env=None):
         if hasattr(slv, "stats"):
             print("stats = ", slv.stats())
 
-        if True:
-            slv_ = (
-                CPM_ortools(cpm_model=model)
-                if env["solver"] == "ortools"
-                else env["solver"](cpm_model=model, **env["solver_kwargs"])
-            )
-            print("ENCODING")
-            for i, c in enumerate(model.constraints, start=1):
-                print(f"C{i}", repr(c)[:100])
-                for ci in slv_.transform([c]):
-                    print("  ", ci)
-                    # print("  ", slv._csemap)
-
         # if hasattr(slv, "stats"):
         #     slv.stats()
 
-        if expected_sat and actual_sat:
-            X = cp.transformations.get_variables.get_variables_model(model)
-            print("assignment", show_assignment(X))
+        if checked:
+            if expected_sat and actual_sat:
+                X = cp.transformations.get_variables.get_variables_model(model)
+                print("assignment", show_assignment(X))
 
-            assert all(x.value() is not None for x in X), (
-                f"Expected all variables to be assigned, but found: {show_assignment(X)}"
-            )
+                assert all(x.value() is not None for x in X), (
+                    f"Expected all variables to be assigned, but found: {show_assignment(X)}"
+                )
 
-            violations = [c for c in model.constraints if c.value() is False]
-            assert not violations, (
-                f"For assignment:\n\n{show_assignment(X)}\n\nThe following constraints fail:\n\n'"
-                + "\n\n".join(str(v) for v in violations)
-            )
+                violations = [c for c in model.constraints if c.value() is False]
+                assert not violations, (
+                    f"For assignment:\n\n{show_assignment(X)}\n\nThe following constraints fail:\n\n'"
+                    + "\n\n".join(str(v) for v in violations)
+                )
 
-        assert expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
+            assert expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
 
         print("PASS.")
     except AssertionError as e:
@@ -708,6 +715,9 @@ class TestModels:
         pprint.pprint(env)
         print("env", env)
         _, _, model = case
+        if isinstance(model, str):
+            sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
+            model = read_xcsp3(pathlib.Path(model))
         check_model(model, env=env)
 
 
