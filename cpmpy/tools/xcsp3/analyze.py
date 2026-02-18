@@ -752,7 +752,7 @@ def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=
     # Filter by alias
     if glob_alias:
         df = df[df['alias'].map(lambda g: any(g_ in g for g_ in glob_alias))].copy()
-    df = df[~df['alias'].str.contains("mdd", na=False)]
+    # df = df[~df['alias'].str.contains("mdd", na=False)]
 
     # Filter by instance
     if glob_instance:
