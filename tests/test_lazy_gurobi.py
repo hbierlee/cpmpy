@@ -282,7 +282,7 @@ def check_model(model, env=None, checked=True, allsols=False):
             print("solving model to get expected feasibility")
             model_ = model.deepcopy()
             expected_sat = model_.solve()
-            expected_obj = model_.objective_value()
+            expected_obj = model_.objective_value() if model.has_objective() else None
             print("expected feasible = ", expected_sat, expected_obj)
         else:
             expected_sat = None
@@ -740,8 +740,8 @@ class TestModels:
     )
     def test_models(self, case, env):
         _, rep, model = case
-        print(env)
-        env["solver_kwargs"]["env"]["seed"] += rep
+        if "env" in env["solver_kwargs"]:
+            env["solver_kwargs"]["env"]["seed"] += rep
         if isinstance(model, str):
             sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
             model = read_xcsp3(pathlib.Path(model))

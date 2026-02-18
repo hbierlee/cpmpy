@@ -22,7 +22,7 @@ CHECKER_TIME_LIMIT = None
 # https://www.gurobi.com/documentation/current/refman/parameters.html#sec:Parameters
 INT_FEAS_TOL = 1e-5  # Gurobi's IntFeasTol: for checking integrality
 # FEAS_TOL = 1e-6  # Gurobi's FeasibilityTol: for checking constraint satisfaction
-FEAS_TOL = 1e-5  # relaxed tolerance; slightly slower but easier to work with
+FEAS_TOL = 1e-6  # relaxed tolerance; slightly slower but easier to work with
 
 
 def none(A):
@@ -252,8 +252,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.tables:
             self.native_model.Params.LazyConstraints = 1
-        # self.native_model.Params.Threads = 1
-        # self.native_model.Params.PreCrush = 1
+            # gurobi will stop when either parameter is met
+            self.native_model.Params.MIPGap = FEAS_TOL  # unlikely to reach (# TODO try 0 if wrong opt)
+            self.native_model.Params.MIPGapAbs = 1 - INT_FEAS_TOL  # guarantueed to be within integer range
         if self.env["seed"] is not None:
             self.native_model.Params.Seed = self.env["seed"]
         if self.env["verbosity"] >= 4:
@@ -976,7 +977,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     yield expr
                     if self.env["debug"] or self.env["checked"]:
                         self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
-                elif frm == "MIPSOL":  # unsat
+                elif is_integer:  # unsat
                     raise Infeasible
             except Infeasible:
                 raise Infeasible
