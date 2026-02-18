@@ -280,10 +280,13 @@ def check_model(model, env=None, checked=True, allsols=False):
 
         if checked:
             print("solving model to get expected feasibility")
-            expected_sat = model.deepcopy().solve()
-            print("expected feasible = ", expected_sat)
+            model_ = model.deepcopy()
+            expected_sat = model_.solve()
+            expected_obj = model_.objective_value()
+            print("expected feasible = ", expected_sat, expected_obj)
         else:
             expected_sat = None
+            expected_obj = None
 
         slv = (
             CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](cpm_model=model, **env["solver_kwargs"])
@@ -306,6 +309,8 @@ def check_model(model, env=None, checked=True, allsols=False):
             assert len(sols) < 1000, "increase sol limit"
         else:
             actual_sat = slv.solve()
+            print(slv.status())
+            print(slv.objective_value())
         print("actual feasible", actual_sat)
 
         if hasattr(slv, "stats"):
@@ -330,6 +335,7 @@ def check_model(model, env=None, checked=True, allsols=False):
                 )
 
             assert expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
+            assert expected_obj == slv.objective_value()
 
         print("PASS.")
     except AssertionError as e:
@@ -733,7 +739,9 @@ class TestModels:
         ids=idfn,
     )
     def test_models(self, case, env):
-        _, _, model = case
+        _, rep, model = case
+        print(env)
+        env["solver_kwargs"]["env"]["seed"] += rep
         if isinstance(model, str):
             sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
             model = read_xcsp3(pathlib.Path(model))

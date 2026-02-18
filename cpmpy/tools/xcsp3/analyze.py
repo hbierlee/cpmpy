@@ -507,23 +507,26 @@ def check_inconsistent_instances(df):
 
         # Check if both SAT and UNS appear
         if SAT in statuses and UNS in statuses:
-            # Get only the solvers that returned UNS
+            # Get solvers that returned UNS and SAT
             uns_results = group[group['status'] == UNS][['alias', 'time_total']]
             uns_solvers = [(row['alias'], row['time_total']) for _, row in uns_results.iterrows()]
+            sat_results = group[group['status'] == SAT][['alias', 'time_total']]
+            sat_solvers = [(row['alias'], row['time_total']) for _, row in sat_results.iterrows()]
 
             inconsistent.append({
                 'track': track,
                 'problem': problem,
                 'instance': instance,
                 'statuses': statuses,
-                'uns_solvers': uns_solvers
+                'uns_solvers': uns_solvers,
+                'sat_solvers': sat_solvers
             })
 
             # Set status to ERROR only for the UNS rows of this instance
             mask = (df['track'] == track) & (df['problem'] == problem) & (df['instance'] == instance) & (df['status'] == UNS)
             df.loc[mask, 'status'] = ERR
-            uns_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in uns_solvers])
-            err_msg = f"Inconsistent: UNS but other solvers found SAT. UNS from [{uns_info}]"
+            sat_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in sat_solvers])
+            err_msg = f"Inconsistent: UNS but SAT from [{sat_info}]"
             df.loc[mask, 'traceback'] = df.loc[mask, 'traceback'].fillna('') + '\n' + err_msg
 
         # Check for sub-optimal OPT claims
@@ -564,7 +567,8 @@ def check_inconsistent_instances(df):
                     df.loc[idx, 'status'] = ERR
                     better_solvers_str = ', '.join(better_solvers)
                     cmp = '>' if is_minimize else '<'
-                    err_msg = f"Sub-optimal OPT: claimed optimal={row['obj']} {cmp} best known={best_obj} from [{better_solvers_str}]"
+                    method_str = 'MIN' if is_minimize else 'MAX'
+                    err_msg = f"Sub-optimal OPT ({method_str}): claimed optimal={row['obj']} {cmp} best known={best_obj} from [{better_solvers_str}]"
                     existing = df.loc[idx, 'traceback']
                     df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
 
@@ -1407,6 +1411,19 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
     checker_fail_mask = df['checker_result'].apply(checker_failed)
     df.loc[checker_fail_mask, 'status'] = ERR
+
+    # Check if obj matches checker_result objective
+    for idx, row in df.iterrows():
+        if pd.isna(row['obj']) or pd.isna(row['checker_result']):
+            continue
+        lines = row['checker_result'].split("\n")
+        if len(lines) >= 2:
+            checker_obj = float(lines[-2].split("\t")[-1])
+            if row['obj'] != checker_obj:
+                df.loc[idx, 'status'] = ERR
+                err_msg = f"Objective mismatch: solver reported {row['obj']} but checker found {checker_obj}"
+                existing = df.loc[idx, 'traceback']
+                df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
 
     # Check for inconsistent instances
     check_inconsistent_instances(df)
