@@ -520,8 +520,8 @@ def check_inconsistent_instances(df):
                 'uns_solvers': uns_solvers
             })
 
-            # Set status to ERROR for all rows of this instance
-            mask = (df['track'] == track) & (df['problem'] == problem) & (df['instance'] == instance)
+            # Set status to ERROR only for the UNS rows of this instance
+            mask = (df['track'] == track) & (df['problem'] == problem) & (df['instance'] == instance) & (df['status'] == UNS)
             df.loc[mask, 'status'] = ERR
 
         # Check for super-optimal solutions
@@ -555,9 +555,8 @@ def check_inconsistent_instances(df):
                             'opt_solvers': opt_results['alias'].tolist()
                         })
 
-                        # Set status to ERROR for all rows of this instance
-                        mask = (df['track'] == track) & (df['problem'] == problem) & (df['instance'] == instance)
-                        df.loc[mask, 'status'] = ERR
+                        # Set status to ERROR only for the row with the super-optimal solution
+                        df.loc[idx, 'status'] = ERR
 
     if inconsistent:
         print("\n== INCONSISTENT INSTANCES (both SAT and UNS) ==")
