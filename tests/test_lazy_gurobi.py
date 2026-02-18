@@ -50,6 +50,10 @@ def generate_models_w_tables(hard=2):
     #yield ("bug_b", "DC-skinny-xor0-d0-t0-r18-v64-z0_c22.xml")  # other exception only occurs if full model runs?
     #yield ("bug_b_minimized", generate_table_from_data([[0, 0], [1, 1]], lb=0, ub=1))  # Weirdly doesn't repro bug b
 
+    yield ("bug_unsat", "Ortholatin-05_c22.xml")
+    
+    return
+
     # Basic test cases
     # yield ("alldiff", cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3, name="x"))))
     yield ("single_row", generate_table_from_data([[1, 1]]))
