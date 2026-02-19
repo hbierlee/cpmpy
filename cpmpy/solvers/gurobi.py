@@ -445,11 +445,12 @@ class CPM_gurobi(SolverInterface):
                                                                mdd_obj, level + 1, diff_level)
                         mdd_obj.MDD_cache[tuple_key] = mdd
 
-                        if level == diff_level:
-                            for key in mdd.transition:
-                                if key < value:
-                                    reduced_mdd = reduce_mdd(row, mdd.transition[key], mdd_obj, level + 1)
-                                    mdd.transition[key] = reduced_mdd
+                        if encoding == Encoding.MDD:
+                            if level == diff_level:
+                                for key in mdd.transition:
+                                    if key < value:
+                                        reduced_mdd = reduce_mdd(row, mdd.transition[key], mdd_obj, level + 1)
+                                        mdd.transition[key] = reduced_mdd
 
                     else:
                         mdd.transition[value] = add_row_to_mdd(row, mdd.transition[value], mdd_obj, level + 1,
