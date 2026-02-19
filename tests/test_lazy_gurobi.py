@@ -13,7 +13,7 @@ import sys
 
 import cpmpy as cp
 from cpmpy.expressions.utils import argvals
-from cpmpy.transformations.get_variables import get_variables
+from cpmpy.transformations.get_variables import get_variables, get_variables_model
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic, Coverlift
@@ -54,6 +54,13 @@ def _load_xcsp3(path):
 def generate_models_w_tables(hardness=(0, 2)):
     """Generator yielding (name, model) tuples for various test cases"""
     a, b = hardness
+
+    # for f in pathlib.Path("test_cases").glob("*.pkl"):
+    #     with open(f, "rb") as fp:
+    #         case = pickle.load(fp)
+    #     print(case)
+    #     yield case
+    # return
 
     if a <= 0 <= b:
         # Basic test cases
@@ -262,9 +269,10 @@ def generate_table(n, m, d, k=1, gaps=None, allow_duplicate_vars=True, ensure_fe
 
 
 def check_model(model, env=None, checked=True, allsols=False, expected_sat=None, expected_obj=None):
-    # print("== Model ==")
-    # print(model)
-    # print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
+    if True:
+        print("== Model ==")
+        print(model)
+        print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
 
     print("== ENV == ")
     pprint.pprint(env)
@@ -328,8 +336,8 @@ def check_model(model, env=None, checked=True, allsols=False, expected_sat=None,
                 + "\n\n".join(str(v) for v in violations)
             )
 
-            assert expected_sat is None or expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
-            assert expected_obj is None or expected_obj == slv.objective_value()
+        assert expected_obj is None or expected_obj == slv.objective_value()
+        assert expected_sat is None or expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
 
         print("PASS.")
     except AssertionError as e:
@@ -362,10 +370,11 @@ def with_constraints(model, with_alldiff=False, with_min=True):
 def get_envs():
 
     debug_env = {
-        "verbosity": 1,
+        "verbosity": 3,
         "debug": 1,
         "max_iterations": 500,
         "seed": 42,
+        # "checked": True,
     }
 
     if False:
@@ -700,7 +709,6 @@ class TestTables:
         m = cp.Model(cp.sum([2, 3, 5] * x) <= 6)
         print(m)
         X, sols = solutions(m, verbosity=2)
-        print("xx", sols)
 
         # m = generate_table_from_example()
         # model = cp.Model(cp.Table(X, T), cp.AllDifferent(X))
@@ -716,7 +724,7 @@ def idfn(a):
 
 
 REPEAT = 3
-SOLVE_EXPECTED = False  # Set to False to skip solving for expected values
+SOLVE_EXPECTED = True  # Set to False to skip solving for expected values
 
 
 def _generate_cases_with_expected():
@@ -836,18 +844,27 @@ def benchmark_table_constraints(envs=None, glob=None):
     results = []
 
     checked = True
-    verbosity = 3
+    verbosity = 1
     # max_iterations = 1000
     max_iterations = 5000
-    time_limit = 20
-    hardness = (0, 3)
+    time_limit = None
+    hardness = (0, 4)
 
     if hardness[1] > 1:
         checked = False
-        verbosity = 1
+        verbosity = 0
 
     # Generate all test cases once (to ensure same cases for all envs)
     test_cases = list(generate_models_w_tables(hardness=hardness))
+
+    # Save each test case as a pickle file
+    test_cases_dir = pathlib.Path("test_cases")
+    test_cases_dir.mkdir(exist_ok=True)
+    for name, model in test_cases:
+        pickle_path = test_cases_dir / f"{name}.pkl"
+        with open(pickle_path, "wb") as f:
+            pickle.dump((name, model), f)
+        print(f"Saved test case: {pickle_path}")
 
     # glob = "mdd"
     # if glob is not None:
@@ -865,11 +882,11 @@ def benchmark_table_constraints(envs=None, glob=None):
             env["solver_kwargs"]["env"]["verbosity"] = verbosity
             env["solver_kwargs"]["env"]["checked"] = checked
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
-            env["solver_kwargs"]["env"]["debug"] = True
+            env["solver_kwargs"]["env"]["debug"] = checked
 
         GLOB = tuple()
         # GLOB = ("example_alldiff",)
-        # GLOB = ("single_tuple",)
+        # GLOB = ("dev",)
         for name, model in test_cases:
             if any(g not in name for g in GLOB):
                 continue
@@ -881,7 +898,7 @@ def benchmark_table_constraints(envs=None, glob=None):
 
                 # Solve the model
                 time_solve = time.time()
-                sat = slv.solve(time_limit=10)
+                sat = slv.solve(time_limit=time_limit)
                 time_solve = time.time() - time_solve
                 if sat is None:
                     print(f"  TIMEOUT after {time_solve:.2f}s")
@@ -918,7 +935,7 @@ def benchmark_table_constraints(envs=None, glob=None):
     df["constraints"] = df["constraints"].fillna(0).astype(int)
     df["n_cuts"] = df["n_cuts"].fillna(0).astype(int)
     df["cons"] = df["constraints"] + df["n_cuts"]
-    df["cons"] = df["constraints"].astype(str) + " + " + df["n_cuts"].astype(str) + " = " + df["cons"].astype(str)
+    # df["cons"] = df["constraints"].astype(str) + " + " + df["n_cuts"].astype(str) + " = " + df["cons"].astype(str)
 
     print(df)
     # df["cb_rel"] = df["time_cb"].fillna(0.) / df["time_solve"]
