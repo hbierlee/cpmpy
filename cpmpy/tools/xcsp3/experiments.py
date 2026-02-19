@@ -53,7 +53,12 @@ FEATURES = [
     ),
     (
         "coverlift",
-        list(Coverlift),
+        (
+            Coverlift.No,
+            Coverlift.COM_MIN,
+            Coverlift.COM_MAX,
+            Coverlift.INPUT,
+        ),
     ),
     (
         "shrink",
@@ -130,10 +135,8 @@ def experiment(experiments, overrides={}, filters=None):
     # Filter DEFAULTS to avoid duplicates when overrides specify a value
     # (e.g., when --track is specified, don't create experiments for both tracks)
     filtered_defaults = [
-        [d for d in default_list if all(
-            k not in d or d[k] is None or d[k] == v
-            for k, v in overrides.items()
-        )] or default_list[:1]  # fallback to first if all filtered out
+        [d for d in default_list if all(k not in d or d[k] is None or d[k] == v for k, v in overrides.items())]
+        or default_list[:1]  # fallback to first if all filtered out
         for default_list in DEFAULTS
     ]
     return [
