@@ -446,7 +446,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
         RS = (C_enc * T_enc).sum(axis=1)
         R_tight = tight(R, RS)
         X = (T_enc.T & R_tight).any(1)
-        X = X | S
 
         if self.env["verbosity"]:
             self.log(f"S = {show_nz(S)}", verbosity=3)
