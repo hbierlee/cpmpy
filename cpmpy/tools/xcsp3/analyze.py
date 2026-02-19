@@ -495,80 +495,84 @@ def xcsp3_objective_performance_profile(df):
 def check_inconsistent_instances(df):
     """
     Check for instances that have both SAT and UNS results across different solvers/runs,
-    or where a solver found a "super-optimal" solution (better objective than another
-    solver's proven optimal).
+    or where a solver claims OPT but has a sub-optimal objective (worse than the best known).
     This indicates an inconsistency that should be investigated.
-    Sets status to ERROR for all rows of inconsistent instances.
+    Sets status to ERROR for the inconsistent rows.
     """
     inconsistent = []
-    super_optimal = []
+    suboptimal = []
 
     for (track, problem, instance), group in df.groupby(['track', 'problem', 'instance']):
         statuses = set(group['status'].unique())
 
         # Check if both SAT and UNS appear
         if SAT in statuses and UNS in statuses:
-            # Get only the solvers that returned UNS
+            # Get solvers that returned UNS and SAT
             uns_results = group[group['status'] == UNS][['alias', 'time_total']]
             uns_solvers = [(row['alias'], row['time_total']) for _, row in uns_results.iterrows()]
+            sat_results = group[group['status'] == SAT][['alias', 'time_total']]
+            sat_solvers = [(row['alias'], row['time_total']) for _, row in sat_results.iterrows()]
 
             inconsistent.append({
                 'track': track,
                 'problem': problem,
                 'instance': instance,
                 'statuses': statuses,
-                'uns_solvers': uns_solvers
+                'uns_solvers': uns_solvers,
+                'sat_solvers': sat_solvers
             })
 
             # Set status to ERROR only for the UNS rows of this instance
             mask = (df['track'] == track) & (df['problem'] == problem) & (df['instance'] == instance) & (df['status'] == UNS)
             df.loc[mask, 'status'] = ERR
-            uns_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in uns_solvers])
-            err_msg = f"Inconsistent: UNS but other solvers found SAT. UNS from [{uns_info}]"
-            for idx in df.index[mask]:
-                existing = df.loc[idx, 'traceback']
-                df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else str(existing) + '\n') + err_msg
+            sat_info = ', '.join([f"{solver} ({time:.2f}s)" for solver, time in sat_solvers])
+            err_msg = f"Inconsistent: UNS but SAT from [{sat_info}]"
+            df.loc[mask, 'traceback'] = df.loc[mask, 'traceback'].fillna('') + '\n' + err_msg
 
-        # Check for super-optimal solutions
-        # Get solvers that reported OPTIMUM FOUND and their objective values
+        # Check for sub-optimal OPT claims
+        # If a solver claims OPT but another solver found a better objective, the OPT claim is wrong
         opt_results = group[group['status'] == OPT]
-        if len(opt_results) > 0:
-            opt_objectives = opt_results['obj'].dropna()
-            if len(opt_objectives) > 0:
-                # Get optimization method from instance metadata
-                method = group['method'].iloc[0]
-                is_minimize = method == 'minimize'
+        verified_results = group[group['status'].isin([SAT, OPT])]
+        all_objectives = verified_results['obj'].dropna()
+        if len(opt_results) > 0 and len(all_objectives) > 0:
+            method = group['method'].iloc[0]
+            is_minimize = method == 'minimize'
 
-                # Get the optimal objective value
-                # For minimize: take min (best), for maximize: take max (best)
-                opt_obj = opt_objectives.min() if is_minimize else opt_objectives.max()
+            # Get the best known objective across ALL results
+            best_obj = all_objectives.min() if is_minimize else all_objectives.max()
 
-                # Check if any solver found a "better" objective (which would be invalid)
-                all_results = group[group['obj'].notna()]
-                for idx, row in all_results.iterrows():
-                    is_super_optimal = (row['obj'] < opt_obj) if is_minimize else (row['obj'] > opt_obj)
-                    if is_super_optimal:
-                        super_optimal.append({
-                            'track': track,
-                            'problem': problem,
-                            'instance': instance,
-                            'method': method,
-                            'solver': row['alias'],
-                            'solver_obj': row['obj'],
-                            'solver_status': row['status'],
-                            'opt_obj': opt_obj,
-                            'opt_solvers': opt_results['alias'].tolist()
-                        })
+            # Check if any OPT result has a worse objective than the best known
+            for idx, row in opt_results.iterrows():
+                if pd.isna(row['obj']):
+                    continue
+                is_suboptimal = (row['obj'] > best_obj) if is_minimize else (row['obj'] < best_obj)
+                if is_suboptimal:
+                    # Find which solvers found the better objective
+                    better_results = group[group['obj'] == best_obj]
+                    better_solvers = better_results['alias'].tolist()
 
-                        # Set status to ERROR only for the row with the super-optimal solution
-                        df.loc[idx, 'status'] = ERR
-                        opt_solvers_str = ', '.join(opt_results['alias'].tolist())
-                        cmp = '<' if is_minimize else '>'
-                        err_msg = f"Super-optimal: found obj={row['obj']} {cmp} optimal={opt_obj} from [{opt_solvers_str}]"
-                        existing = df.loc[idx, 'traceback']
-                        df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
+                    suboptimal.append({
+                        'track': track,
+                        'problem': problem,
+                        'instance': instance,
+                        'method': method,
+                        'solver': row['alias'],
+                        'solver_obj': row['obj'],
+                        'solver_status': row['status'],
+                        'best_obj': best_obj,
+                        'better_solvers': better_solvers
+                    })
 
-    return inconsistent, super_optimal
+                    # Set status to ERROR for the OPT result with suboptimal objective
+                    df.loc[idx, 'status'] = ERR
+                    better_solvers_str = ', '.join(better_solvers)
+                    cmp = '>' if is_minimize else '<'
+                    method_str = 'MIN' if is_minimize else 'MAX'
+                    err_msg = f"Sub-optimal OPT ({method_str}): claimed optimal={row['obj']} {cmp} best known={best_obj} from [{better_solvers_str}]"
+                    existing = df.loc[idx, 'traceback']
+                    df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
+
+    return inconsistent, suboptimal
 
 def reorder_cols(df, cols):
     return df[cols + [col for col in df.columns if col not in cols]]
@@ -883,9 +887,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     print("Problems", df['problem'].unique())
     # df = df[df["problem"].isin(problems[:2])]
 
-    # Check for inconsistent instances
-    check_inconsistent_instances(df)
-
     pd.set_option('display.float_format', '{:0.1f}'.format)
 
     df["post"] = ~df["time_post"].isna()
@@ -1075,10 +1076,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             for col in diff_cols:
                 # Subtract baseline values from all solvers
                 # For MultiIndex, we need to align by the non-alias levels
-                if "t_" in col:
-                    print("D", col)
-                    print(groups[col])
-                    print(baseline_data[col])
                 diff_[col] = groups[col] - baseline_data[col]
 
             # Drop the baseline itself from the diff
@@ -1411,8 +1408,29 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     checker_fail_mask = df['checker_result'].apply(checker_failed)
     df.loc[checker_fail_mask, 'status'] = ERR
 
-    errors = df[df["status"] == ERR]
-    # [["track","problem","instance","alias","status","time_total", "exception", "traceback", "checker_result"]]
+    # Check if obj matches checker_result objective
+    for idx, row in df.iterrows():
+        try:
+            if pd.isna(row['obj']) or pd.isna(row['checker_result']):
+                continue
+            row['checker_result']
+            lines = row['checker_result'].split("\n")
+            if len(lines) >= 2:
+                checker_obj = float(lines[-2].split("\t")[-1])
+                if row['obj'] != checker_obj:
+                    df.loc[idx, 'status'] = ERR
+                    err_msg = f"Objective mismatch: solver reported {row['obj']} but checker found {checker_obj}"
+                    existing = df.loc[idx, 'traceback']
+                    df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
+        except Exception as e:
+            # raise Exception(f"Exception in checker {row['checker_result']}") from e
+            df.loc[idx, 'status'] = ERR
+            err_msg = f"Exception in checker {row['checker_result']}"
+
+
+    # Check for inconsistent instances
+    check_inconsistent_instances(df)
+
     print("== ERRORS ==")
     for idx, row in df.iterrows():
         if row["status"] == ERR:

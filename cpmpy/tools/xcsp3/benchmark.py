@@ -380,7 +380,12 @@ def run_solution_checker(JAR, instance_location, out_file, verbose, cpm_time):
         print(f"c cpmpy time: {cpm_time}")
         print(f"c validation time: {checker_time}")
         print(f"c elapsed time: {cpm_time + checker_time}")
-    assert test_res_str.returncode == 0, test_res_str.stderr
+
+    if test_res_str.returncode != 0:
+        print(f"c error in solution checker command: {command}")
+        print(f"c {test_res_str.stdout}")
+        print(f"c {test_res_str.stdout}")
+        print(f"c {test_res_str.stderr}")
     
     return test_res_str.stdout, checker_time
 

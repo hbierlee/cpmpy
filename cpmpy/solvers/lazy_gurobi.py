@@ -21,8 +21,7 @@ CHECKER_TIME_LIMIT = None
 # Using Gurobi's default tolerance values:
 # https://www.gurobi.com/documentation/current/refman/parameters.html#sec:Parameters
 INT_FEAS_TOL = 1e-5  # Gurobi's IntFeasTol: for checking integrality
-# FEAS_TOL = 1e-6  # Gurobi's FeasibilityTol: for checking constraint satisfaction
-FEAS_TOL = 1e-5  # relaxed tolerance; slightly slower but easier to work with
+FEAS_TOL = 1e-6  # Gurobi's FeasibilityTol: for checking constraint satisfaction
 
 
 def none(A):
@@ -252,8 +251,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.tables:
             self.native_model.Params.LazyConstraints = 1
-        # self.native_model.Params.Threads = 1
-        # self.native_model.Params.PreCrush = 1
+            # gurobi will stop when either parameter is met
+            assert self.native_model.Params.IntFeasTol == INT_FEAS_TOL
+            assert self.native_model.Params.FeasibilityTol == FEAS_TOL
+            self.native_model.Params.MIPGap = FEAS_TOL  # unlikely to reach (# TODO try 0 if wrong opt)
+            self.native_model.Params.MIPGapAbs = 1 - INT_FEAS_TOL  # guaranteed to be within integer range
         if self.env["seed"] is not None:
             self.native_model.Params.Seed = self.env["seed"]
         if self.env["verbosity"] >= 4:
@@ -275,7 +277,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["remain"] = without(self.solutions_checker(), self.env["expected_solutions"])
             if self.env["verbosity"]:
                 self.log("SOLS", len(self.env["expected_solutions"]))
-                self.log("TO REMOVE", self.env["remain"])
+                self.log("TO REMOVE", self.env["remain"], verbosity=3)
 
     def log(self, *mess, verbosity=1, end="\n", indent=None):
         assert self.env["verbosity"]
@@ -549,8 +551,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if self.env["debug"]:
                 self.check_max_iterations(i)
 
-            if R_tight.all():
-                break
+            # if R_tight.all():
+            #     break
 
         return S, C_enc, k
 
@@ -976,7 +978,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     yield expr
                     if self.env["debug"] or self.env["checked"]:
                         self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
-                elif frm == "MIPSOL":  # unsat
+                elif is_integer:  # unsat
                     raise Infeasible
             except Infeasible:
                 raise Infeasible
@@ -1149,15 +1151,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     if not hassol:
                         break
 
-                    print("solve", self.env["remain"], self.env["remain"][0])
-                    for x, v in zip(self.env["user_vars"], self.env["remain"][0]):
+                    sol = min(self.env["remain"].tolist())
+                    for x, v in zip(self.env["user_vars"], sol):
                         x._value = v
 
                     all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
-                    print(self._csemap)
                     for expr, lit in self._csemap.items():
                         lit._value = expr.value()
-                        print(expr, expr.value(), lit, lit.value())
                     x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
 
                     self.check_max_iterations(iteration)

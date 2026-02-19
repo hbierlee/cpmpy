@@ -384,9 +384,9 @@ class CPM_gurobi(SolverInterface):
                         return new_node
 
                 def lookup_mdd(mdd, cache, current_id):
-                    print("mdd: ", mdd)
-                    print("cache: ", cache)
-                    print("current_id: ", current_id)
+                    # print("mdd: ", mdd)
+                    # print("cache: ", cache)
+                    # print("current_id: ", current_id)
 
                     while isinstance(mdd, Lookup) or isinstance(mdd, MultiLookup):
                         if isinstance(mdd, Lookup):
