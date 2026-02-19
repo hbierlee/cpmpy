@@ -551,8 +551,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if self.env["debug"]:
                 self.check_max_iterations(i)
 
-            if R_tight.all():
-                break
+            # if R_tight.all():
+            #     break
 
         return S, C_enc, k
 
