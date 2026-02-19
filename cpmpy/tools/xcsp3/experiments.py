@@ -59,7 +59,7 @@ FEATURES = [
         "shrink",
         (
             False,
-            # True,
+            True,
         ),
     ),
     (

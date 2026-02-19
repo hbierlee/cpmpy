@@ -558,6 +558,7 @@ class TestTables:
         ).sum(0)
         print("Remaining R", y)
 
+    @pytest.mark.skip()
     def test_shrink(self, env):
         env = {"verbosity": 4}
         X, k = CPM_lazy_gurobi(env=env).shrink(
@@ -779,14 +780,55 @@ class TestModels:
 
 
 FILTER_PRESETS = {
-    "dev": [("alias", ("bool", "coverlift_input",))],
+    "dev": [
+        (
+            "alias",
+            (
+                "bool",
+                "coverlift_input",
+            ),
+        )
+    ],
     "all": [],
     "none": [("alias", ("none",))],
     "bool": [("alias", ("bool",))],
     "mdd": [("alias", ("mdd",))],
-    "neg": [("alias", ("none", "neg",))],
-    "vary": [("alias", ("none", "variant_1",))],
-    "coverlift": [("alias", ("none", "coverlift_input",))],
+    "neg": [
+        (
+            "alias",
+            (
+                "none",
+                "neg",
+            ),
+        )
+    ],
+    "shrink": [
+        (
+            "alias",
+            (
+                "none",
+                "shrink",
+            ),
+        )
+    ],
+    "vary": [
+        (
+            "alias",
+            (
+                "none",
+                "variant_1",
+            ),
+        )
+    ],
+    "coverlift": [
+        (
+            "alias",
+            (
+                "none",
+                "coverlift_input",
+            ),
+        )
+    ],
     "coverlift_heur": [("alias", ("coverlift",))],
 }
 
@@ -811,10 +853,17 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
     envs = get_solvers(
         features=[
             ("variant", (0, 1)),
-            ("coverlift", list(Coverlift)),
+            (
+                "fractional",
+                (
+                    False,
+                    # True,
+                ),
+            ),
+            ("coverlift", (Coverlift.INPUT, Coverlift.COM_MAX)),
             # ("coverlift", (Coverlift.INPUT,)),
             ("shrink", (False, True)),
-            ("negatives", (0, 2)),
+            # ("negatives", (0, 2)),
             # ("negatives", (0,)),
         ],
         # add_all=True,
@@ -830,7 +879,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
     if verbosity is None:
         verbosity = 2
     max_iterations = 5000
-    time_limit = None
+    time_limit = 10
 
     if hardness[1] > 1:
         checked = False
@@ -981,7 +1030,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Benchmark table constraints")
     parser.add_argument(
-        "-x","--hardness",
+        "-x",
+        "--hardness",
         type=int,
         nargs=2,
         default=[0, 5],

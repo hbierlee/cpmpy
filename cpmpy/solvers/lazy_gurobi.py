@@ -377,55 +377,28 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # )
                 # return choice if choice is not None else self.choose(A, T_enc, R, heuristic=Heuristic.GREEDY)
 
-    def shrink(self, X, T_enc):
-        k = 0
+    def shrink(self, X, C_enc, k, T_enc, A_enc, parts):
         if self.env["verbosity"]:
-            self.log(f"start shrink for X={show_nz(X)}", verbosity=2)
+            self.log(f"start shrink for X={show_nz(X)}, k={k}", verbosity=2)
             self.log(show_table(T_enc), verbosity=3)
-        for i in X.nonzero()[0]:
-            X[i] = False
+            self.log("", show_table(C_enc), "C_enc", verbosity=3)
+            # self.log("", show_table(A_enc), "A_enc", verbosity=3)
+
+        for i in np.unique(parts):
+            C_enc_ = C_enc[parts == i]
+            C_enc[parts == i] = 0
 
             if self.env["verbosity"]:
-                self.log(f"shrinking {i + INDEX} in {show_nz(X)}", verbosity=3)
-                self.log(show_table(T_enc[:, X]), verbosity=3)
-                self.log(show_table(T_enc[:, X].all(1, keepdims=True)), verbosity=3)
-
-            # 1 0 | 0 all
-            # 0 1 | 0
-            # 1 0 | 0
-            # 0 0 | 0
-            # 1 1 | 1
-            # 1,3,5 and 2,5 = 5
-
-            # start shrink [1 2 3]
-            # [[1 1 0]
-            #  [0 0 1]
-            #  [1 1 0]
-            #  [0 0 0]
-            #  [1 1 0]]
-            # shrinking 1 in [1 2 3]
-            # [[1 0]
-            #  [0 1]
-            #  [1 0]
-            #  [0 0]
-            #  [1 0]] # 'and' over all rows
-            # [[0]
-            #  [0]
-            #  [0]
-            #  [0]
-            #  [0]]  # we find no row where b_2 and b_3 are both true, thus at most 1 is added to LHS
-            # shrunk 1
-            # shrinking 2 in [2 3]
-
-            if T_enc[:, X].all(axis=1).any():
+                self.log("i", i, show_table(parts == i))
+                self.log("C", show_table(C_enc))
+                self.log("A", np.sum(C_enc * T_enc, axis=1), verbosity=2)
+            if np.all(np.sum(C_enc * T_enc, axis=1) <= k - 1):
+                k -= 1
                 if self.env["verbosity"]:
-                    self.log(f"keep", i, f"because {show_nz(T_enc[:, X])} {T_enc[:, X]}", verbosity=3)
-                X[i] = True  # keep i
+                    self.log(f"shrinking {i + INDEX} in {show_nz(X)}", verbosity=3)
             else:
-                k += 1
-                if self.env["verbosity"]:
-                    self.log(f"shrunk", show(i), verbosity=3)
-        return X, k
+                C_enc[parts == i] = C_enc_
+        return C_enc, k
 
     def gencoverlift(self, S, C_enc, k, T_enc, A_enc, heuristic=Coverlift.INPUT):
         if self.env["verbosity"]:
@@ -501,6 +474,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
                 case Coverlift.COM_MAX:
                     j = np.nanargmax(com - (np.where(~X, A_enc, np.nan)))
+
             assert not X[j]
 
             if self.env["verbosity"]:
@@ -776,20 +750,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         self.show_cut(X, C_enc, k)
 
-        if self.env["shrink"]:
-            X_shrunk, shrunk = self.shrink(X, T_enc)
-            C_enc[~X_shrunk] = 0
-            k -= shrunk
-            if self.env["verbosity"] and shrunk:
-                self.log(f"shrunk by {shrunk}", indent=2, verbosity=2)
-                self.env["cuts"][-1] = {
-                    **self.env["cuts"][-1],
-                    "shrunk": shrunk,
-                    "cut": X_shrunk,
-                }
-            self.env["cuts"][-1]["shrunk"] = shrunk
-            self.show_cut(X, C_enc, k)
-
         if self.env["coverlift"]:
             if self.env["verbosity"]:
                 Xl = X.sum()
@@ -798,6 +758,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log("coverlift added ", X.sum() - Xl, verbosity=2)
 
             self.show_cut(X, C_enc, k)
+
+        if self.env["shrink"]:
+            C_enc, k = self.shrink(X, C_enc, k, T_enc, A_enc, parts)
+            self.show_cut(X, C_enc, k)
+
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -908,9 +873,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def _vary(self, a=None, b=None):
         if a is None:
-            a = lambda : False
+            a = lambda: False
         if b is None:
-            b = lambda : True
+            b = lambda: True
         return a() if self.env.get("variant", 0) == 0 else b()
 
     def _explain_assignment(self, x_enc_a, frm=None):
