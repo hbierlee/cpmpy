@@ -1055,8 +1055,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(expected_solutions, verbosity=3)
                 self.log(f"Actual ({len(actual_solutions)}) (model w/o table but with lazy constraints)", verbosity=2)
                 self.log(actual_solutions, verbosity=3)
-                self.log(f"Remaining non-solutions to cut ({len(remaining)})", verbosity=2)
-                self.log(remaining, verbosity=3)
             if len(self.env["cuts"]) >= 2:
                 removed = without(self.env["cuts"][-2]["remain"], remaining)
                 if self.env["verbosity"]:
@@ -1077,6 +1075,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["cuts"][-1]["strength"] = strength
             self.env["remain"] = remaining
             if self.env["verbosity"]:
+                self.log(f"Remaining non-solutions to cut ({len(remaining)}, STR={strength})", verbosity=1)
+                self.log(remaining, verbosity=3)
                 self.log(self.env["checker"], verbosity=4)
                 self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
                 self.log(expected_solutions, verbosity=3, indent=2)
@@ -1087,7 +1087,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(f"STRENGTH == {strength}", verbosity=2)
 
             # assert repeated or strength
-            assert strength
+            assert strength or len(self.tables) > 1
 
             assert len(expected_solutions) <= len(actual_solutions), (
                 f"Missing sols:\n\n{show_assignments(expected_solutions)}\n\n {show_assignments(actual_solutions)}\n\n{self.env['checker']}"
@@ -1141,17 +1141,19 @@ class CPM_lazy_gurobi(CPM_gurobi):
         try:
             dt = time.time()
             if self.env["checked"]:
+                expected_solution = min(self.env["expected_solutions"].tolist(), default=None)
                 for iteration in itertools.count():
-                    # hassol = self.env["checker"].solve(**kwargs)
-                    hassol = len(self.env["remain"]) > 0
+                    done = not len(self.env["remain"])
 
                     if time_limit is not None and time.time() - dt > time_limit:
                         raise TimeoutError
 
-                    if not hassol:
+                    sol = min(self.env["remain"].tolist(), default=expected_solution)
+                    hassol = sol is not None
+
+                    if sol is None:
                         break
 
-                    sol = min(self.env["remain"].tolist())
                     for x, v in zip(self.env["user_vars"], sol):
                         x._value = v
 
@@ -1161,10 +1163,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
 
                     self.check_max_iterations(iteration)
-                    # self.solution_callback_inner(x_enc_a, "MIPSOL")
                     assert all(x.value() is not None for x in all_xs), f"Has sol but no value {all_xs}"
                     for expr, k in self.solution_callback_inner(x_enc_a, "MIPSOL"):
                         self.env["checker"] += [expr <= k]
+
+                    if done:
+                        break
                     if self.env["found_feasible"]:
                         break
             else:
