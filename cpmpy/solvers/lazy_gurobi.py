@@ -255,7 +255,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             assert self.native_model.Params.IntFeasTol == INT_FEAS_TOL
             assert self.native_model.Params.FeasibilityTol == FEAS_TOL
             self.native_model.Params.MIPGap = FEAS_TOL  # unlikely to reach (# TODO try 0 if wrong opt)
-            self.native_model.Params.MIPGapAbs = 1 - INT_FEAS_TOL  # guarantueed to be within integer range
+            self.native_model.Params.MIPGapAbs = 1 - INT_FEAS_TOL  # guaranteed to be within integer range
         if self.env["seed"] is not None:
             self.native_model.Params.Seed = self.env["seed"]
         if self.env["verbosity"] >= 4:
@@ -277,7 +277,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["remain"] = without(self.solutions_checker(), self.env["expected_solutions"])
             if self.env["verbosity"]:
                 self.log("SOLS", len(self.env["expected_solutions"]))
-                self.log("TO REMOVE", self.env["remain"])
+                self.log("TO REMOVE", self.env["remain"], verbosity=3)
 
     def log(self, *mess, verbosity=1, end="\n", indent=None):
         assert self.env["verbosity"]
@@ -1151,15 +1151,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     if not hassol:
                         break
 
-                    print("solve", self.env["remain"], self.env["remain"][0])
-                    for x, v in zip(self.env["user_vars"], self.env["remain"][0]):
+                    sol = min(self.env["remain"].tolist())
+                    for x, v in zip(self.env["user_vars"], sol):
                         x._value = v
 
                     all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
-                    print(self._csemap)
                     for expr, lit in self._csemap.items():
                         lit._value = expr.value()
-                        print(expr, expr.value(), lit, lit.value())
                     x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
 
                     self.check_max_iterations(iteration)
