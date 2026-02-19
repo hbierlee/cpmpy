@@ -85,8 +85,8 @@ class Encoding(Feature):
     XCSP3 = "xcsp3"
     GLEB = "gleb"
     BOOL = "bool"
-    MDD = "mdd"
-    NOREDUCEMDD = "noreducemdd"
+    MDD = "mdd_reduce"
+    NOREDUCEMDD = "mdd_noreduce"
 
 NAMED = True
 
