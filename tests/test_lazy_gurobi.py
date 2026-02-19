@@ -805,7 +805,7 @@ def benchmark_table_constraints(envs=None, glob=None):
         ],
         add_all=False,
         add_none=True,
-        # filters=[("alias", ("bool", "mdd"))],
+        filters=[("alias", ("bool", "mdd"))],
         # filters=[("alias", ("none", "coverlift_input",))],
         # filters=[
         #     (
@@ -816,15 +816,15 @@ def benchmark_table_constraints(envs=None, glob=None):
         #         ),
         #     )
         # ],
-        filters=[
-            (
-                "alias",
-                (
-                    "none",
-                    "variant_b",
-                ),
-            )
-        ],
+        # filters=[
+        #     (
+        #         "alias",
+        #         (
+        #             "none",
+        #             "variant_b",
+        #         ),
+        #     )
+        # ],
         # filters=[("alias", ("none", "shrink",))],
     )
 
