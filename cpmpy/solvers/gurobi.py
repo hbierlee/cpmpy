@@ -86,6 +86,7 @@ class Encoding(Feature):
     GLEB = "gleb"
     BOOL = "bool"
     MDD = "mdd"
+    NOREDUCEMDD = "noreducemdd"
 
 NAMED = True
 
@@ -293,12 +294,12 @@ class CPM_gurobi(SolverInterface):
                     return cons, []
 
                 Table.decompose = bool_decompose
-            case Encoding.MDD:
-
+            case Encoding.MDD | Encoding.NOREDUCEMDD:
 
                 class MDD:
                     def __init__(self):
                         self.MDD_cache = {}
+                        self.repeated_keys = set()
 
                 class TerminatingState(enum.Enum):
                     SRC = 'src'
@@ -315,6 +316,17 @@ class CPM_gurobi(SolverInterface):
                             return self.mdd_id == other.mdd_id
 
                     __hash__ = object.__hash__
+
+                class MultiLookup:
+                    def __init__(self, mdd_id1, mdd_id2):
+                        self.mdd_id1 = mdd_id1
+                        self.mdd_id2 = mdd_id2
+
+                    def __eq__(self, other):
+                        if not isinstance(other, MultiLookup):
+                            return False
+                        else:
+                            return self.mdd_id1 == other.mdd_id1 and self.mdd_id2 == other.mdd_id2
 
                 class MDD_node:
                     def __init__(self, mdd_id, level, transition):
@@ -342,6 +354,9 @@ class CPM_gurobi(SolverInterface):
                             if isinstance(v1, Lookup) and isinstance(v2, Lookup):
                                 if v1 != v2:
                                     return False
+                            if isinstance(v1, MultiLookup) and isinstance(v2, MultiLookup):
+                                if v1 != v2:
+                                    return False
                             if isinstance(v1, TerminatingState) and isinstance(v2, TerminatingState):
                                 return True
                             return False
@@ -350,18 +365,49 @@ class CPM_gurobi(SolverInterface):
 
                     __hash__ = object.__hash__
 
-                def reduce_mdd(row, mdd, cache, level):
+                    def deepcopy(self, memo=None):
+                        if memo is None:
+                            memo = {}
 
+                        if self in memo:
+                            return memo[self]
+
+                        new_node = MDD_node(self.mdd_id, self.level, {})
+                        memo[self] = new_node
+
+                        for key, value in self.transition.items():
+                            if isinstance(value, MDD_node):
+                                new_node.transition[key] = value.deepcopy(memo)
+                            else:
+                                new_node.transition[key] = value
+
+                        return new_node
+
+                def lookup_mdd(mdd, cache, current_id):
+                    print("mdd: ", mdd)
+                    print("cache: ", cache)
+                    print("current_id: ", current_id)
+
+                    while isinstance(mdd, Lookup) or isinstance(mdd, MultiLookup):
+                        if isinstance(mdd, Lookup):
+                            mdd = cache[mdd.mdd_id]
+                        elif isinstance(mdd, MultiLookup):
+                            if current_id == mdd.mdd_id2[0][:len(current_id)]:
+                                mdd = cache[mdd.mdd_id2]
+                            else:
+                                mdd = cache[mdd.mdd_id1]
+                    return mdd
+
+                def reduce_mdd(row, mdd, mdd_obj, level):
                     if isinstance(mdd, TerminatingState):
                         return mdd
 
-                    while isinstance(mdd, Lookup):
-                        mdd = cache.MDD_cache[mdd.mdd_id]
+                    mdd = lookup_mdd(mdd, mdd_obj.MDD_cache, tuple(row[:level]))
 
                     B = {}
 
                     for key in mdd.transition.keys():
-                        reduced_mdd = reduce_mdd(row, mdd.transition[key], cache, level + 1)
+                        reduced_mdd = reduce_mdd(row, mdd.transition[key], mdd_obj, level + 1)
                         if reduced_mdd != False:
                             B[key] = reduced_mdd
 
@@ -369,18 +415,25 @@ class CPM_gurobi(SolverInterface):
                         return False
 
                     G = MDD_node(mdd.mdd_id, level, B)
-                    for (G_key, G_elem) in cache.MDD_cache.items():
+                    for (G_key, G_elem) in mdd_obj.MDD_cache.items():
                         if G_key != mdd.mdd_id:
                             if G_elem == G:
-                                cache.MDD_cache[G.mdd_id] = Lookup(G_elem.mdd_id)
+                                mdd_obj.MDD_cache[G.mdd_id] = Lookup(G_elem.mdd_id)
+                                mdd_obj.repeated_keys.add(G_elem.mdd_id)
                                 return Lookup(G_elem.mdd_id)
                     else:
-                        cache.MDD_cache[mdd.mdd_id] = G
+                        mdd_obj.MDD_cache[mdd.mdd_id] = G
                         return Lookup(mdd.mdd_id)
 
-                def add_row_to_mdd(row, mdd, cache, level=0, diff_level=None):
-                    while isinstance(mdd, Lookup):
-                        mdd = cache.MDD_cache[mdd.mdd_id]
+                def add_row_to_mdd(row, mdd, mdd_obj, level=0, diff_level=None):
+                    mdd = lookup_mdd(mdd, mdd_obj.MDD_cache, tuple(row[:level]))
+                    tuple_key = tuple(row[:level])
+                    if isinstance(mdd, MDD_node):
+                        if mdd.mdd_id in mdd_obj.repeated_keys:
+                            mdd_obj.MDD_cache[mdd.mdd_id] = MultiLookup((mdd.mdd_id, 0), (mdd.mdd_id, 1))
+                            mdd_obj.MDD_cache[(mdd.mdd_id, 0)] = mdd.deepcopy()
+                            mdd_obj.MDD_cache[(mdd.mdd_id, 1)] = mdd
+                            tuple_key = (mdd.mdd_id, 1)
 
                     if level == len(row):
                         return TerminatingState.SNK
@@ -388,22 +441,22 @@ class CPM_gurobi(SolverInterface):
                     value = row[level]
 
                     if value not in mdd.transition:
-                        mdd.transition[value] = add_row_to_mdd(row, MDD_node(tuple(row[:(level + 1)]), level + 1, {}), cache, level + 1,
-                                                               diff_level)
-                        cache.MDD_cache[tuple(row[:level])] = mdd
+                        mdd.transition[value] = add_row_to_mdd(row, MDD_node(tuple(row[:(level + 1)]), level + 1, {}),
+                                                               mdd_obj, level + 1, diff_level)
+                        mdd_obj.MDD_cache[tuple_key] = mdd
 
                         if level == diff_level:
                             for key in mdd.transition:
                                 if key < value:
-                                    reduced_mdd = reduce_mdd(row, mdd.transition[key], cache, level + 1)
+                                    reduced_mdd = reduce_mdd(row, mdd.transition[key], mdd_obj, level + 1)
                                     mdd.transition[key] = reduced_mdd
 
-                        return Lookup(tuple(row[:level]))
-
                     else:
-                        mdd.transition[value] = add_row_to_mdd(row, mdd.transition[value], cache, level + 1, diff_level)
-                        cache.MDD_cache[tuple(row[:level])] = mdd
-                        return Lookup(tuple(row[:level]))
+                        mdd.transition[value] = add_row_to_mdd(row, mdd.transition[value], mdd_obj, level + 1,
+                                                               diff_level)
+                        mdd_obj.MDD_cache[tuple(row[:level])] = mdd
+
+                    return Lookup(tuple_key)
 
                 def find_different_level(row1, row2):
                     mask = row1 < row2
@@ -412,15 +465,14 @@ class CPM_gurobi(SolverInterface):
                     return indices[0] if indices.size > 0 else -1
 
                 def construct_mdd(table):
-
                     if table.size == 0:
                         return
 
-                    mdd_cache = MDD()
+                    mdd_obj = MDD()
 
                     mdd = MDD_node(tuple(), 0, {})
 
-                    mdd = add_row_to_mdd(table[0], mdd, mdd_cache, 0, None)
+                    mdd = add_row_to_mdd(table[0], mdd, mdd_obj, 0, None)
                     for i in range(1, table.shape[0]):
                         row = table[i]
                         prev_row = table[i - 1]
@@ -428,9 +480,9 @@ class CPM_gurobi(SolverInterface):
                         diff_level = find_different_level(prev_row, row)
 
                         if diff_level != -1:
-                            mdd = add_row_to_mdd(row, mdd, mdd_cache, 0, diff_level)
+                            mdd = add_row_to_mdd(row, mdd, mdd_obj, 0, diff_level)
 
-                    return mdd_cache.MDD_cache
+                    return mdd_obj.MDD_cache
 
 
                 class Flow:
@@ -473,9 +525,8 @@ class CPM_gurobi(SolverInterface):
                     flow['snk'] = Flow()
 
                     for key in cache.keys():
-                        val = cache[key]
-                        while isinstance(val, Lookup):
-                            val = cache[val.mdd_id]
+
+                        val = lookup_mdd(cache[key], cache, key)
 
                         for (k,v) in val.transition.items():
                             column = sum(domains[:val.level]) + k - lb[val.level]
