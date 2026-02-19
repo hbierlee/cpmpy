@@ -21,8 +21,7 @@ CHECKER_TIME_LIMIT = None
 # Using Gurobi's default tolerance values:
 # https://www.gurobi.com/documentation/current/refman/parameters.html#sec:Parameters
 INT_FEAS_TOL = 1e-5  # Gurobi's IntFeasTol: for checking integrality
-# FEAS_TOL = 1e-6  # Gurobi's FeasibilityTol: for checking constraint satisfaction
-FEAS_TOL = 1e-6  # relaxed tolerance; slightly slower but easier to work with
+FEAS_TOL = 1e-6  # Gurobi's FeasibilityTol: for checking constraint satisfaction
 
 
 def none(A):
@@ -253,6 +252,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.tables:
             self.native_model.Params.LazyConstraints = 1
             # gurobi will stop when either parameter is met
+            assert self.native_model.Params.IntFeasTol == INT_FEAS_TOL
+            assert self.native_model.Params.FeasibilityTol == FEAS_TOL
             self.native_model.Params.MIPGap = FEAS_TOL  # unlikely to reach (# TODO try 0 if wrong opt)
             self.native_model.Params.MIPGapAbs = 1 - INT_FEAS_TOL  # guarantueed to be within integer range
         if self.env["seed"] is not None:

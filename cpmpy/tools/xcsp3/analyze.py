@@ -1414,16 +1414,23 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
     # Check if obj matches checker_result objective
     for idx, row in df.iterrows():
-        if pd.isna(row['obj']) or pd.isna(row['checker_result']):
-            continue
-        lines = row['checker_result'].split("\n")
-        if len(lines) >= 2:
-            checker_obj = float(lines[-2].split("\t")[-1])
-            if row['obj'] != checker_obj:
-                df.loc[idx, 'status'] = ERR
-                err_msg = f"Objective mismatch: solver reported {row['obj']} but checker found {checker_obj}"
-                existing = df.loc[idx, 'traceback']
-                df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
+        try:
+            if pd.isna(row['obj']) or pd.isna(row['checker_result']):
+                continue
+            row['checker_result']
+            lines = row['checker_result'].split("\n")
+            if len(lines) >= 2:
+                checker_obj = float(lines[-2].split("\t")[-1])
+                if row['obj'] != checker_obj:
+                    df.loc[idx, 'status'] = ERR
+                    err_msg = f"Objective mismatch: solver reported {row['obj']} but checker found {checker_obj}"
+                    existing = df.loc[idx, 'traceback']
+                    df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
+        except Exception as e:
+            # raise Exception(f"Exception in checker {row['checker_result']}") from e
+            df.loc[idx, 'status'] = ERR
+            err_msg = f"Exception in checker {row['checker_result']}"
+
 
     # Check for inconsistent instances
     check_inconsistent_instances(df)

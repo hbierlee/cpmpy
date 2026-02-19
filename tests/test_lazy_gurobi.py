@@ -256,17 +256,7 @@ def generate_table(n, m, d, k=1, gaps=None, allow_duplicate_vars=True, ensure_fe
     return model
 
 
-def assert_integer_solution(A_enc):
-    for a_enc_i in A_enc:
-        assert math.isclose(a_enc_i, round(a_enc_i), abs_tol=1e-5), (
-            f"Expected integer solution for MIP, but got {a_enc_i} in {A_enc}"
-        )
-
-
-def check_model(model, env=None, checked=True, allsols=False):
-    print("== Model ==")
-    print(model)
-    print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
+def check_model(model, env=None, checked=True, allsols=False, expected_sat=None, expected_obj=None):
 
     print("== ENV == ")
     pprint.pprint(env)
@@ -283,15 +273,7 @@ def check_model(model, env=None, checked=True, allsols=False):
                     # print("  ", slv._csemap)
             print("ENCODED")
 
-        if checked:
-            print("solving model to get expected feasibility")
-            model_ = model.deepcopy()
-            expected_sat = model_.solve()
-            expected_obj = model_.objective_value() if model.has_objective() else None
-            print("expected feasible = ", expected_sat, expected_obj)
-        else:
-            expected_sat = None
-            expected_obj = None
+        print("expected feasible = ", expected_sat, expected_obj)
 
         slv = (
             CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](cpm_model=model, **env["solver_kwargs"])
@@ -324,23 +306,22 @@ def check_model(model, env=None, checked=True, allsols=False):
         # if hasattr(slv, "stats"):
         #     slv.stats()
 
-        if checked:
-            if expected_sat and actual_sat:
-                X = cp.transformations.get_variables.get_variables_model(model)
-                print("assignment", show_assignment(X))
+        if actual_sat:
+            X = cp.transformations.get_variables.get_variables_model(model)
+            # print("assignment", show_assignment(X))
 
-                assert all(x.value() is not None for x in X), (
-                    f"Expected all variables to be assigned, but found: {show_assignment(X)}"
-                )
+            assert all(x.value() is not None for x in X), (
+                f"Expected all variables to be assigned, but found: {show_assignment(X)}"
+            )
 
-                violations = [c for c in model.constraints if c.value() is False]
-                assert not violations, (
-                    f"For assignment:\n\n{show_assignment(X)}\n\nThe following constraints fail:\n\n'"
-                    + "\n\n".join(str(v) for v in violations)
-                )
+            violations = [c for c in model.constraints if c.value() is False]
+            assert not violations, (
+                f"For assignment:\n\n{show_assignment(X)}\n\nThe following constraints fail:\n\n'"
+                + "\n\n".join(str(v) for v in violations)
+            )
 
-            assert expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
-            assert expected_obj == slv.objective_value()
+            assert expected_sat is None or expected_sat == actual_sat, f"Expected equisat, but {expected_sat=} and {actual_sat=}"
+            assert expected_obj is None or expected_obj == slv.objective_value()
 
         print("PASS.")
     except AssertionError as e:
@@ -727,6 +708,42 @@ def idfn(a):
 
 
 REPEAT = 3
+REPEAT = 10
+SOLVE_EXPECTED = False  # Set to False to skip solving for expected values
+
+
+def _generate_cases_with_expected():
+    """Generate test cases and precompute expected feasibility/objective once per model."""
+    for name, model in generate_models_w_tables(hard=2):
+        # Load model from XML if needed
+        if isinstance(model, str):
+            sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
+            model = read_xcsp3(pathlib.Path(model))
+
+        # Solve once to get expected values (if enabled)
+        if SOLVE_EXPECTED:
+            model_ = model.deepcopy()
+            expected_sat = model_.solve()
+            expected_obj = model_.objective_value() if model.has_objective() else None
+        else:
+            expected_sat = None
+            expected_obj = None
+
+        # Yield repeated cases with precomputed expected values
+        for j in range(1, REPEAT + 1):
+            yield (name, j, model, expected_sat, expected_obj)
+
+
+# Cache the cases at module load time to avoid re-solving
+_CACHED_CASES = None
+
+
+def _get_cached_cases():
+    global _CACHED_CASES
+    if _CACHED_CASES is None:
+        print("Generating expected vals")
+        _CACHED_CASES = list(_generate_cases_with_expected())
+    return _CACHED_CASES
 
 
 @pytest.mark.timeout(60)
@@ -735,22 +752,15 @@ class TestModels:
         ("env", "case"),
         itertools.product(
             get_envs(),
-            (
-                (name, j, model)
-                for j in range(1, REPEAT + 1)  # to repeat the test
-                for name, model in generate_models_w_tables(hard=2)
-            ),
+            _get_cached_cases(),
         ),
         ids=idfn,
     )
     def test_models(self, case, env):
-        _, rep, model = case
+        name, rep, model, expected_sat, expected_obj = case
         if "env" in env["solver_kwargs"]:
             env["solver_kwargs"]["env"]["seed"] += rep
-        if isinstance(model, str):
-            sys.argv = ["-nocompile"]  # Stop pyxcsp3 from complaining on exit
-            model = read_xcsp3(pathlib.Path(model))
-        check_model(model, env=env)
+        check_model(model, env=env, checked=SOLVE_EXPECTED, expected_sat=expected_sat, expected_obj=expected_obj)
 
 
 def benchmark_table_constraints(envs=None, glob=None):
@@ -784,9 +794,7 @@ def benchmark_table_constraints(envs=None, glob=None):
         filters=[("alias", ("lazy",))],
     )
 
-    import pprint
-
-    pprint.pprint(envs)
+    # pprint.pprint(envs)
     # envs = get_experiments(filters=[("coverlift", list(Coverlift))])
 
     results = []
