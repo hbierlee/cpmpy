@@ -270,8 +270,12 @@ class Hashabledict(dict):
             f"{{{', '.join(f'{k}: {v}' for k, v in sorted(self.items(), key=lambda k: k[0].name))}}}"
         )
 
-def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosity=1, diverse=False, asynchronous=False):
-    """Return all solutions of `P` as values of the projected variables, `X`, within the time limit, or `False` iff `P` is determined to be unsatisfiable."""
+def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosity=1, diverse=False, asynchronous=False, sorted=False):
+    """Return all solutions of `P` as values of the projected variables, `X`, within the time limit, or `False` iff `P` is determined to be unsatisfiable.
+
+    Args:
+        sorted: If True, return solutions lexicographically sorted (default: False)
+    """
     P = P.copy()
     dt = time.time()
 
@@ -348,5 +352,12 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
 
     if verbosity >= 2:
         print("")
-    return X, np.array(sols, dtype=int)
+
+    sols_array = np.array(sols, dtype=int)
+    if sorted and sols_array.size > 0:
+        # Sort lexicographically by columns from left to right
+        sort_idx = np.lexsort(sols_array.T[::-1])
+        sols_array = sols_array[sort_idx]
+
+    return X, sols_array
 

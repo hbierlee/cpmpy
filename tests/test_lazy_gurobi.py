@@ -112,7 +112,7 @@ def generate_models_w_tables(hardness=(0, 2)):
         yield ("fixed_infeasible", cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[4, 2]])))
         yield ("bool_vars", cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
         x = cp.intvar(0, 3, name="x", shape=2)
-        yield ("soccer_problem", cp.Model(*[cp.InDomain(x_i, [0, 1, 3]) for x_i in x], cp.Table(x, [[0, 3], [1, 1], [3, 0]])))
+        yield ("soccer_table", cp.Model(*[cp.InDomain(x_i, [0, 1, 3]) for x_i in x], cp.Table(x, [[0, 3], [1, 1], [3, 0]])))
 
         # yield ("random_gaps", generate_table(5, 10, 10, k=1, gaps=0.5))
         yield ("random_gaps", generate_table(5, 5, 3, k=1, gaps=0.5))
@@ -135,6 +135,10 @@ def generate_models_w_tables(hardness=(0, 2)):
 
         yield ("two_tables", generate_two_tables())
 
+        yield ("many_rows_1", with_constraints(generate_table(2, 20, 5)))
+        # yield ("many_rows_2", with_constraints(generate_table(2, 95, 10)))
+        # yield ("many_rows_3", with_constraints(generate_table(3, 100, 5))) # -4.5%
+
     if a <= 2 <= b:
         yield (
             "sparse_table",
@@ -155,8 +159,8 @@ def generate_models_w_tables(hardness=(0, 2)):
         # for gaps in (None, 0.5):
         for k in (
             1,
-            # 5,
-            # 10,
+            5,
+            10,
             # 25,
         ):
             # suffix = "_gaps" if gaps else "_nogaps"
@@ -377,7 +381,7 @@ def get_envs():
         # "checked": True,
     }
 
-    if False:
+    if True:
         yield {
             "alias": "dev",
             "solver": CPM_lazy_gurobi,
@@ -394,6 +398,7 @@ def get_envs():
                     # "heuristic": Heuristic.REDUCE,
                     "cutoff": 0,
                     "verbosity": 3,
+                    "variant": 1,
                 }
             },
         }
@@ -773,86 +778,62 @@ class TestModels:
         check_model(model, env=env, checked=SOLVE_EXPECTED, expected_sat=expected_sat, expected_obj=expected_obj)
 
 
-def benchmark_table_constraints(envs=None, glob=None):
+FILTER_PRESETS = {
+    "dev": [("alias", ("bool", "coverlift_input",))],
+    "all": [],
+    "none": [("alias", ("none",))],
+    "bool": [("alias", ("bool",))],
+    "mdd": [("alias", ("mdd",))],
+    "neg": [("alias", ("none", "neg",))],
+    "vary": [("alias", ("none", "variant_1",))],
+    "coverlift": [("alias", ("none", "coverlift_input",))],
+    "coverlift_heur": [("alias", ("coverlift",))],
+}
+
+
+def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
     Args:
         envs: List of environment configurations to test (uses default if None)
-        use_all_envs: If True, test with all environments from get_envs() (ignores envs parameter)
+        glob: Filter test cases by name substring
+        hardness: Tuple (min, max) for test case hardness levels (default: (0, 3))
+        filter_preset: Name of filter preset from FILTER_PRESETS (default: "dev")
+        verbosity: Verbosity level for solver (default: 2)
     """
+    if hardness is None:
+        hardness = (0, 3)
+    if filter_preset is None:
+        filter_preset = "dev"
+
+    filters = FILTER_PRESETS.get(filter_preset, FILTER_PRESETS["dev"])
+
     envs = get_solvers(
         features=[
-            (
-                "variant",
-                ("a", "b"),
-            ),
-            (
-                "coverlift",
-                # list(Coverlift),
-                (
-                    Coverlift.No,
-                    Coverlift.INPUT,
-                    # Coverlift.COM_MIN,
-                    # Coverlift.COM_MAX,
-                ),
-            ),
-            (
-                "shrink",
-                # list(Coverlift),
-                (
-                    False,
-                    True,
-                    # Coverlift.COM_MIN,
-                    # Coverlift.COM_MAX,
-                ),
-            ),
-            # (
-            #     "variant",
-            #     ("a", "b"),
-            # ),
+            ("variant", (0, 1)),
+            ("coverlift", list(Coverlift)),
+            # ("coverlift", (Coverlift.INPUT,)),
+            ("shrink", (False, True)),
+            ("negatives", (0, 2)),
+            # ("negatives", (0,)),
         ],
-        add_all=False,
+        # add_all=True,
         add_none=True,
-        filters=[("alias", ("bool", "mdd"))],
-        # filters=[("alias", ("none", "coverlift_input",))],
-        # filters=[
-        #     (
-        #         "alias",
-        #         (
-        #             "bool",
-        #             "coverlift_input",
-        #         ),
-        #     )
-        # ],
-        # filters=[
-        #     (
-        #         "alias",
-        #         (
-        #             "none",
-        #             "variant_b",
-        #         ),
-        #     )
-        # ],
-        # filters=[("alias", ("none", "shrink",))],
+        filters=filters,
     )
 
-    assert envs
-
-    # pprint.pprint(envs)
-    # envs = get_experiments(filters=[("coverlift", list(Coverlift))])
+    assert envs, f"No environments matched filter preset '{filter_preset}'"
 
     results = []
 
     checked = True
-    verbosity = 1
-    # max_iterations = 1000
+    if verbosity is None:
+        verbosity = 2
     max_iterations = 5000
     time_limit = None
-    hardness = (0, 4)
 
     if hardness[1] > 1:
         checked = False
-        verbosity = 0
 
     # Generate all test cases once (to ensure same cases for all envs)
     test_cases = list(generate_models_w_tables(hardness=hardness))
@@ -884,11 +865,9 @@ def benchmark_table_constraints(envs=None, glob=None):
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
             env["solver_kwargs"]["env"]["debug"] = checked
 
-        GLOB = tuple()
-        # GLOB = ("example_alldiff",)
-        # GLOB = ("dev",)
+        glob_filters = (glob,) if glob else tuple()
         for name, model in test_cases:
-            if any(g not in name for g in GLOB):
+            if any(g not in name for g in glob_filters):
                 continue
             print(f"Running {name} with {env_alias}...")
 
@@ -922,6 +901,7 @@ def benchmark_table_constraints(envs=None, glob=None):
 
             except Exception as e:
                 print(f"  ERROR: {e}")
+                # raise e
                 traceback.print_exc()
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
 
@@ -944,6 +924,8 @@ def benchmark_table_constraints(envs=None, glob=None):
     print("=" * 80)
     print(df.to_string())
     print("\n")
+
+    assert not df.empty, "No benchmark results collected - check if test cases ran successfully"
 
     # Print comparison summary if multiple environments
     if len(envs) > 1:
@@ -969,6 +951,24 @@ def benchmark_table_constraints(envs=None, glob=None):
             aggfunc="first",
             sort=False,  # Don't sort, use categorical order
         )
+
+        # Add relative difference columns for each metric
+        env_names = [e.get("alias", "unknown") for e in envs]
+        if len(env_names) >= 2:
+            base_env = env_names[0]
+            for metric in [v for v in values if v in df.columns]:
+                if (metric, base_env) in comparison.columns:
+                    base_col = comparison[(metric, base_env)]
+                    for other_env in env_names[1:]:
+                        if (metric, other_env) in comparison.columns:
+                            other_col = comparison[(metric, other_env)]
+                            # Calculate relative difference: (other - base) / base * 100
+                            rel_diff = ((other_col - base_col) / base_col * 100).round(1)
+                            comparison[(metric, f"Δ%({other_env})")] = rel_diff
+
+            # Sort columns to group metric, envs, and diffs together
+            comparison = comparison.sort_index(axis=1, level=0)
+
         print("\nTime (time_cb) and Cuts by Environment:")
         print(comparison.to_string())
         print("\n")
@@ -977,10 +977,62 @@ def benchmark_table_constraints(envs=None, glob=None):
 
 
 if __name__ == "__main__":
-    print("Running table constraints benchmark...")
-    df = benchmark_table_constraints()
+    import argparse
 
-    # Optionally save to CSV
-    output_file = "table_benchmark_results.csv"
-    df.to_csv(output_file, index=False)
-    print(f"Results saved to {output_file}")
+    parser = argparse.ArgumentParser(description="Benchmark table constraints")
+    parser.add_argument(
+        "-x","--hardness",
+        type=int,
+        nargs=2,
+        default=[0, 5],
+        metavar=("MIN", "MAX"),
+        help="Hardness range for test cases (default: 0 3)",
+    )
+    parser.add_argument(
+        "--filter",
+        "-f",
+        dest="filter_preset",
+        choices=list(FILTER_PRESETS.keys()),
+        default="dev",
+        help=f"Filter preset (default: dev). Available: {', '.join(FILTER_PRESETS.keys())}",
+    )
+    parser.add_argument(
+        "--glob",
+        "-g",
+        type=str,
+        default=None,
+        help="Filter test cases by name substring",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default="table_benchmark_results.csv",
+        help="Output CSV file (default: table_benchmark_results.csv)",
+    )
+    parser.add_argument(
+        "--verbosity",
+        "-v",
+        type=int,
+        default=0,
+        help="Verbosity level for solver (default: 2)",
+    )
+
+    args = parser.parse_args()
+
+    print(f"Running table constraints benchmark...")
+    print(f"  Hardness: {tuple(args.hardness)}")
+    print(f"  Filter preset: {args.filter_preset}")
+    print(f"  Verbosity: {args.verbosity}")
+    if args.glob:
+        print(f"  Glob: {args.glob}")
+
+    df = benchmark_table_constraints(
+        hardness=tuple(args.hardness),
+        filter_preset=args.filter_preset,
+        glob=args.glob,
+        verbosity=args.verbosity,
+    )
+
+    df.to_csv(args.output, index=False)
+    print(f"Results saved to {args.output}")

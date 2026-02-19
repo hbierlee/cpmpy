@@ -123,7 +123,7 @@ def show_table(T_enc, index=INDEX):
 
 
 def show_nz(A, index=INDEX):
-    return A.nonzero()[0] + 1
+    return np.atleast_1d(A).nonzero()[0] + 1
 
 
 def show_ind(a, index=INDEX):
@@ -264,7 +264,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.native_model.write("/tmp/gurobi.lp")
 
         if self.env["checked"] and cpm_model is not None:
-            self.log("CHECKED: solve model to determine expected feasibility")
+            if self.env["verbosity"]:
+                self.log("CHECKED: solve model to determine expected feasibility")
             self.env["user_vars"] = tuple(sorted(self.user_vars, key=lambda x: x.name))
             self.env["feasible"] = cpm_model.solve()
             self.env["model"] = cpm_model
@@ -277,7 +278,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["remain"] = without(self.solutions_checker(), self.env["expected_solutions"])
             if self.env["verbosity"]:
                 self.log("SOLS", len(self.env["expected_solutions"]))
-                self.log("TO REMOVE", self.env["remain"], verbosity=3)
+                self.log("TO REMOVE\n", self.env["remain"], verbosity=3)
 
     def log(self, *mess, verbosity=1, end="\n", indent=None):
         assert self.env["verbosity"]
@@ -333,13 +334,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "avg_strength": (sum(s["strength"] for s in cuts) / len(cuts)) if cuts and self.env["checked"] else None,
         }
 
-    def choose(self, choices, T_enc, R, parts, A_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
+    def choose(self, choices, T_enc, R, parts, A_enc, C_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
         if self.env["verbosity"]:
-            self.log(f"Choose from {show_nz(choices)} to allow remaining rows R={show_nz(R)}", verbosity=3)
+            self.log(f"Choose from {show_nz(choices)} to allow remaining rows R=\n{show_nz(R)}", verbosity=3)
             self.log(show_table(T_enc[R, :]), verbosity=3)
             self.log("", parts, "parts", verbosity=3)
             self.log("", show_table(A_enc), "A_enc", verbosity=3)
             self.log("", choices.astype(int), "choices", verbosity=3)
+            self.log("", C_enc, "C_enc", verbosity=3)
 
         if none(choices):
             return None
@@ -558,10 +560,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def show_cut(self, X, C_enc, k):
         if self.env["verbosity"]:
             self.log(
-                f"X == {X}",
-                verbosity=2,
-            )
-            self.log(
                 f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
                 indent=2,
                 verbosity=2,
@@ -577,12 +575,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["verbosity"]:
             self.log(f"Explain frm={frm}", end="\n", verbosity=2)
-            self.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc, verbosity=3, indent=0)
+            self.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc, "A_enc", verbosity=3, indent=0)
             # self.log("", A_enc, verbosity=2, indent=0)
             # if frm == "MIPSOL":
             #     self.log("", np.array(assign_mipsol(A_enc)), verbosity=2, indent=0)
-            self.log(np.astype(T_enc, int), verbosity=3, indent=0)
-            self.log(f"p{np.astype(parts, int)}", verbosity=3, indent=0)
+            self.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
+            self.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
             # self.log(
             #     "",
             #     np.array(
@@ -654,7 +652,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return True
             else:
                 R = np.ones(m, dtype=bool)
-                choice = self.choose(U, T_enc, R, parts, A_enc, heuristic=self.env["heuristic"])
+                choice = self.choose(U, T_enc, R, parts, A_enc, C_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
@@ -680,7 +678,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                 if self.env["verbosity"]:
                     self.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=self.indent + 2)
-                    self.log(f"choices {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
+                    self.log(f"choices = {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
                     self.log(f"R ({R.sum()}) = {show_nz(R)}", verbosity=3, indent=self.indent + 2)
                     self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
                     self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
@@ -708,6 +706,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 R,
                 parts if make_pos_choice else np.arange(len(T_enc.T)),
                 A_enc,
+                C_enc,
                 # heuristic=self.env["heuristic"] if make_pos_choice else Heuristic.INPUT,
                 heuristic=self.env["heuristic"],
                 make_pos_choice=make_pos_choice,
@@ -745,9 +744,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     verbosity=3,
                     indent=self.indent + 2,
                 )
-                self.log(f"choices {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
+                self.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
                 self.log(f"C_ {show_nz(C_)}", verbosity=3, indent=self.indent + 2)
-                self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
+                # self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
                 if F.any():
                     self.log("FRAC", frm, verbosity=2, indent=self.indent + 2)
                 self.log(f"R choice={choice} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
@@ -907,10 +906,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return expr
 
+    def _vary(self, a=None, b=None):
+        if a is None:
+            a = lambda : False
+        if b is None:
+            b = lambda : True
+        return a() if self.env.get("variant", 0) == 0 else b()
+
     def _explain_assignment(self, x_enc_a, frm=None):
         # If fully integer, we can check if the tables are feasible yet
         if self.env["verbosity"]:
-            self.log("EXPLAIN", frm, x_enc_a, verbosity=2)
+            self.log("EXPLAIN", frm, verbosity=2)
+            self.log("Full sol", x_enc_a, verbosity=3)
 
         for i, (X_enc, T_enc, parts, table) in enumerate(self.tables, start=INDEX):
             # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
@@ -1003,6 +1010,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             X=self.env["user_vars"],
             projected_solution_limit=None,
             time_limit=time_limit,
+            sorted=True,
         )[1]
 
     def check_explanation(self, expr, X_enc, A_enc, T_enc, frm):
