@@ -50,8 +50,9 @@ def generate_models_w_tables(hard=2):
 
 
     yield ("bug_unsat", "Ortholatin-05_c22.xml")
+    yield ("bug_sat", generate_table_from_data([[4, 2, 3], [4, 2, 2], [1, 2, 2]], lb=1, ub=4))
     
-    return
+    #return
 
     # Basic test cases
     # yield ("alldiff", cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3, name="x"))))
