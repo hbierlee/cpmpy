@@ -127,6 +127,15 @@ def get_experiments(features=None, overrides={}, filters=[]):
 
 
 def experiment(experiments, overrides={}, filters=None):
+    # Filter DEFAULTS to avoid duplicates when overrides specify a value
+    # (e.g., when --track is specified, don't create experiments for both tracks)
+    filtered_defaults = [
+        [d for d in default_list if all(
+            k not in d or d[k] is None or d[k] == v
+            for k, v in overrides.items()
+        )] or default_list[:1]  # fallback to first if all filtered out
+        for default_list in DEFAULTS
+    ]
     return [
         experiment
         for experiment in [
@@ -134,7 +143,7 @@ def experiment(experiments, overrides={}, filters=None):
                 **dict(it for di in experiment_ for it in di.items()),
                 **overrides,
             }
-            for experiment_ in itertools.product(*DEFAULTS, experiments)
+            for experiment_ in itertools.product(*filtered_defaults, experiments)
         ]
         if filters is None or all(any(v in experiment[k] for v in vs) for k, vs in filters)
     ]

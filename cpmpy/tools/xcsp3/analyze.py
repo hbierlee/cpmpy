@@ -1076,10 +1076,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             for col in diff_cols:
                 # Subtract baseline values from all solvers
                 # For MultiIndex, we need to align by the non-alias levels
-                if "t_" in col:
-                    print("D", col)
-                    print(groups[col])
-                    print(baseline_data[col])
                 diff_[col] = groups[col] - baseline_data[col]
 
             # Drop the baseline itself from the diff
