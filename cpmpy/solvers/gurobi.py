@@ -89,10 +89,10 @@ class Encoding(Feature):
     BOOL = "bool"
     MDD = "mdd"
 
-class MDDOrder(Feature):
+class Order(Feature):
     INPUT = "input"
-    DOM_INCR = "incr-domain"
-    DOM_DECR = "decr-domain"
+    DOM_INCR = "dom-incr"
+    DOM_DECR = "dom-decr"
     FIEDLER = "fiedler"
 
 def trivial_decomposition(arr, tab):
@@ -258,7 +258,7 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], cons
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, column_ordering=None, named=False, output_stats=False, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, order=Order.INPUT, named=False, output_stats=False, time_limit=None, **kwargs):
         """
         Constructor of the native solver object
 
@@ -638,15 +638,17 @@ class CPM_gurobi(SolverInterface):
 
                     Tb = np.array(Tb)
 
-                    match column_ordering:
-                        case "input":
+                    match order:
+                        case Order.INPUT:
                             ordering = np.array(range(len(X)))
-                        case "incr-domain":
+                        case Order.DOM_INCR:
                             ordering = np.argsort([dom_size(x) for x in X])
-                        case "decr-domain":
+                        case Order.DOM_DECR:
                             ordering = np.argsort([-dom_size(x) for x in X])
-                        case "fiedler":
+                        case Order.FIEDLER:
                             ordering = np.array(spectral_order_edges(Tb))
+                        case _:
+                            raise ValueError(order)
 
                     reordered_Tb = Tb[:, ordering]
 

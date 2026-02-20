@@ -1,7 +1,7 @@
 import itertools
 import math
 from cpmpy.solvers.lazy_gurobi import Heuristic, Coverlift, CPM_lazy_gurobi
-from cpmpy.solvers.gurobi import CPM_gurobi, Encoding
+from cpmpy.solvers.gurobi import CPM_gurobi, Encoding, Order
 
 
 MEM_LIMIT = 8
@@ -95,21 +95,20 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
             *[
                 {
                     "solver": CPM_gurobi,
-                    "alias": f"base_gurobi-{encoding}-{f'reduce' if reduce else 'noreduce'}-{column_ordering}"
-                    if encoding == Encoding.MDD
-                    else f"base_gurobi-{encoding}",
+                    "alias": f"base_gurobi-{encoding}"
+                    + (f"-{f'reduce' if reduce else 'noreduce'}-{order}" if encoding is Encoding.MDD else ""),
                     "solver_kwargs": {
                         "encoding": encoding,
                         "reduce": reduce,
-                        "column_ordering": column_ordering,
+                        "order": order,
                         "output_stats": True,
                     },
-                    # "solve_kwargs": {"Seed": 42},
+                    # "solve_kwargs": {"Seed": 42}, # TODO
                 }
                 for encoding in [Encoding.GLEB, Encoding.BOOL, Encoding.MDD]
                 for reduce in [True, False]
                 if encoding is Encoding.MDD
-                for column_ordering in ["input", "incr-domain", "decr-domain", "fiedler"]
+                for order in Order
                 if encoding is Encoding.MDD
             ],
             *[

@@ -856,7 +856,24 @@ FILTER_PRESETS = {
     "all": [],
     "none": [("alias", ("none",))],
     "bool": [("alias", ("bool",))],
-    "mdd": [("alias", ("mdd",))],
+    "mdd-reduce": [
+        (
+            "alias",
+            (
+                "mdd-reduce-input",
+                "mdd-noreduce-input",
+            ),
+        )
+    ],
+    "mdd": [
+        (
+            "alias",
+            (
+                "bool",
+                "mdd-reduce",
+            ),
+        )
+    ],
     "neg": [
         (
             "alias",
