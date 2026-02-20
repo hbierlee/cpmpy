@@ -95,16 +95,22 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
             *[
                 {
                     "solver": CPM_gurobi,
-                    "alias": f"base_gurobi-{encoding}",
-                    "solver_kwargs": {"encoding": encoding, "output_stats": True},
+                    "alias": f"base_gurobi-{encoding}-reduce_{f'reduce' if reduce else 'noreduce'}_{column_ordering}"
+                    if encoding == Encoding.MDD
+                    else f"base_gurobi-{encoding}",
+                    "solver_kwargs": {
+                        "encoding": encoding,
+                        "reduce": reduce,
+                        "column_ordering": column_ordering,
+                        "output_stats": True,
+                    },
                     # "solve_kwargs": {"Seed": 42},
                 }
-                for encoding in [
-                    Encoding.GLEB,
-                    Encoding.BOOL,
-                    Encoding.MDD,
-                    Encoding.NOREDUCEMDD,
-                ]
+                for encoding in [Encoding.GLEB, Encoding.BOOL, Encoding.MDD]
+                for reduce in [True, False]
+                if encoding is Encoding.MDD
+                for column_ordering in ["input", "incr-domain", "decr-domain", "fiedler"]
+                if encoding is Encoding.MDD
             ],
             *[
                 {

@@ -468,29 +468,37 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 ).all()
             ), f"{i}; {[i + 1 for i in X.nonzero()[0]]}"
 
+            choices = ~X
+
             match heuristic:
                 case _ if self.env["example2"]:
                     j = [3, 7, 0][i]
                 case Coverlift.INPUT:
-                    # j = np.nanargmax(np.where(~X, A_enc, np.nan))
-                    j = np.argmax(~X)
+                    j = np.argmax(choices)
                 case Coverlift.COM_MIN:
-                    j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
+                    j = np.argmin(com - choices)
                 case Coverlift.COM_MAX:
-                    j = np.nanargmax(com - (np.where(~X, A_enc, np.nan)))
+                    j = np.argmax(com - choices)
 
             assert not X[j]
 
-            if self.env["verbosity"]:
-                self.log(f"Lift j = {show(j)}", verbosity=2)
-
             non_tight = (~R_tight) & T_enc[:, j]
-            # print(f'NON TIGHT = {show_nz(non_tight)}', )
+
+            is_pos = A_enc[j]
+
+            # TODO ?
+            # ub = np.max(RS[non_tight], initial=0)
+            # a_j = k + 1 - ub
 
             if non_tight.any():
-                a_j = np.min(k - RS[non_tight])
+                ub = np.max(RS[non_tight])
+                a_j = k - ub
             else:
                 a_j = k + 1  # infinite
+
+
+            if self.env["verbosity"]:
+                self.log(f"Lift {'+' if is_pos else '-'}j = {a_j}*b_{show(j)} {'(inf)' if {a_j == k + 1} else ''}", verbosity=2)
 
             RS = RS + a_j * T_enc.T[j]
             N_tight = tight(~R_tight, RS)
@@ -706,7 +714,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 C_enc[X] = 1
                 k += 1
             else:
-                assert False
                 C_ = choice
                 choices[choice] = False
                 R = R & (~T_enc[:, choice])
@@ -727,7 +734,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
                 if F.any():
                     self.log("FRAC", frm, verbosity=2, indent=self.indent + 2)
-                self.log(f"R choice={choice} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
+                self.log(f"R choice = {'+' if is_pos else '-'}b_{show(choice)} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
                 self.log(f"= {show_nz(R)}", verbosity=3, indent=self.indent + 3)
                 self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
                 self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
@@ -766,7 +773,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["shrink"]:
             C_enc, k = self.shrink(X, C_enc, k, T_enc, A_enc, parts)
             self.show_cut(X, C_enc, k)
-
 
         self.env["cuts"][-1]["size"] = len(X)
 

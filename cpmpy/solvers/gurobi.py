@@ -68,6 +68,8 @@ from ..transformations.safening import no_partial_functions, safen_objective
 from cpmpy.expressions.globalconstraints import Table
 from cpmpy.expressions.utils import dom_size
 import numpy as np
+from collections import Counter
+from itertools import product
 import enum
 
 # save this to reset it (for unit tests)
@@ -78,15 +80,20 @@ class Feature(Enum):
         return repr(self.value)
 
     def __str__(self):
-        return self.value
+        return str(self.value)
 
 class Encoding(Feature):
     CPMPY = "cpmpy"
     XCSP3 = "xcsp3"
     GLEB = "gleb"
     BOOL = "bool"
-    MDD = "mdd_reduce"
-    NOREDUCEMDD = "mdd_noreduce"
+    MDD = "mdd"
+
+class MDDOrder(Feature):
+    INPUT = "input"
+    DOM_INCR = "incr-domain"
+    DOM_DECR = "decr-domain"
+    FIEDLER = "fiedler"
 
 def trivial_decomposition(arr, tab):
     if len(tab) == 0:
@@ -94,7 +101,50 @@ def trivial_decomposition(arr, tab):
     elif len(tab) == 1:
         return [(x == tab[0][i]) for i, x in enumerate(arr)], []
     else:
-        assert False, f"non-trivial {arr} {tabl}"
+        assert False, f"non-trivial {arr} {tab}"
+
+
+def agreement_score(col1, col2):
+    pairs = Counter(zip(col1, col2))
+    return sum(n - 1 for n in pairs.values() if n > 1)
+
+def agreement_matrix(arr):
+    n_cols = arr.shape[1]
+    scores = np.zeros((n_cols, n_cols), dtype=int)
+    for i in range(n_cols):
+        for j in range(i + 1, n_cols):
+            score = agreement_score(arr[:, i], arr[:, j])
+            scores[i, j] = score
+            scores[j, i] = score
+    return scores
+
+def spectral_order_edges(arr):
+    """
+       Spectral ordering with high-similarity columns tending to edges
+       """
+    n_cols = arr.shape[1]
+    if n_cols == 1:
+        return [0]
+
+    S = agreement_matrix(arr)
+
+    D = np.diag(S.sum(axis=1))
+    L = D - S
+
+    eigvals, eigvecs = np.linalg.eigh(L)
+    fiedler = eigvecs[:, 1]
+
+    # Centrality = total similarity
+    centrality = S.sum(axis=1)
+
+    # Edge tendency score: deviation from mean weighted by centrality
+    mean_f = np.mean(fiedler)
+    score = np.abs(fiedler - mean_f) * centrality
+
+    # Sort by score descending → highest score to edges
+    column_order = np.argsort(-score)
+
+    return list(column_order)
 
 try:
     import gurobipy as gp
@@ -208,7 +258,7 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], cons
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, output_stats=False, named=False, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, column_ordering=None, named=False, output_stats=False, **kwargs):
         """
         Constructor of the native solver object
 
@@ -311,7 +361,7 @@ class CPM_gurobi(SolverInterface):
                         if not isinstance(other, Lookup):
                             return False
                         else:
-                            return self.mdd_id == other.mdd_id
+                            return reduced_key(self.mdd_id) == reduced_key(other.mdd_id)
 
                     __hash__ = object.__hash__
 
@@ -324,7 +374,8 @@ class CPM_gurobi(SolverInterface):
                         if not isinstance(other, MultiLookup):
                             return False
                         else:
-                            return self.mdd_id1 == other.mdd_id1 and self.mdd_id2 == other.mdd_id2
+                            return (reduced_key(self.mdd_id1) == reduced_key(other.mdd_id1)
+                                    and reduced_key(self.mdd_id2) == reduced_key(other.mdd_id2))
 
                 class MDD_node:
                     def __init__(self, mdd_id, level, transition):
@@ -382,9 +433,6 @@ class CPM_gurobi(SolverInterface):
                         return new_node
 
                 def lookup_mdd(mdd, cache, current_id):
-                    # print("mdd: ", mdd)
-                    # print("cache: ", cache)
-                    # print("current_id: ", current_id)
 
                     while isinstance(mdd, Lookup) or isinstance(mdd, MultiLookup):
                         if isinstance(mdd, Lookup):
@@ -395,6 +443,19 @@ class CPM_gurobi(SolverInterface):
                             else:
                                 mdd = cache[mdd.mdd_id1]
                     return mdd
+
+                def reduced_key(t):
+                    current = t
+
+                    while (
+                            isinstance(current, tuple)
+                            and len(current) > 0
+                            and isinstance(current[0], tuple)
+                    ):
+                        current = current[0]
+
+                    return current
+
 
                 def reduce_mdd(row, mdd, mdd_obj, level):
                     if isinstance(mdd, TerminatingState):
@@ -414,8 +475,11 @@ class CPM_gurobi(SolverInterface):
 
                     G = MDD_node(mdd.mdd_id, level, B)
                     for (G_key, G_elem) in mdd_obj.MDD_cache.items():
-                        if G_key != mdd.mdd_id:
+
+                        if reduced_key(G_key) != mdd.mdd_id:
+
                             if G_elem == G:
+
                                 mdd_obj.MDD_cache[G.mdd_id] = Lookup(G_elem.mdd_id)
                                 mdd_obj.repeated_keys.add(G_elem.mdd_id)
                                 return Lookup(G_elem.mdd_id)
@@ -443,7 +507,7 @@ class CPM_gurobi(SolverInterface):
                                                                mdd_obj, level + 1, diff_level)
                         mdd_obj.MDD_cache[tuple_key] = mdd
 
-                        if encoding == Encoding.MDD:
+                        if reduce:
                             if level == diff_level:
                                 for key in mdd.transition:
                                     if key < value:
@@ -499,23 +563,22 @@ class CPM_gurobi(SolverInterface):
 
                     cumulative = 0
 
-                    for x, x_enc in zip(X, X_enc):
+                    for i, x in enumerate(X):
                         d_size = dom_size(x)
 
                         if column_number < cumulative + d_size:
-
                             offset = column_number - cumulative
-
-                            return x_enc._xs[offset]
+                            return X_enc[i]._xs[offset]
 
                         cumulative += d_size
+
                     return None
 
 
                 def mdd_to_flow(cache, X, X_enc):
-
-                    domains = [dom_size(x) for x in X]
-                    lb = [x.lb for x in X]
+                    """Convert MDD cache to flow constraints, accounting for column reordering"""
+                    domains = np.array([dom_size(x) for x in X])
+                    lb = np.array([x.lb for x in X])
 
                     no_columns = sum(domains)
 
@@ -574,12 +637,28 @@ class CPM_gurobi(SolverInterface):
                         return trivial_decomposition(X, Tb)
 
                     Tb = np.array(Tb)
-                    sorted_T = Tb[np.lexsort(Tb.T[::-1])]
+
+                    match column_ordering:
+                        case "input":
+                            ordering = np.array(range(len(X)))
+                        case "incr-domain":
+                            ordering = np.argsort([dom_size(x) for x in X])
+                        case "decr-domain":
+                            ordering = np.argsort([-dom_size(x) for x in X])
+                        case "fiedler":
+                            ordering = np.array(spectral_order_edges(Tb))
+
+                    reordered_Tb = Tb[:, ordering]
+
+                    sorted_T = reordered_Tb[np.lexsort(reordered_Tb.T[::-1])]
 
                     mdd_cache = construct_mdd(sorted_T)
 
-                    X_enc, cons = self.encode_table_expr(X)
-                    flow_cons = mdd_to_flow(mdd_cache, X, X_enc)
+                    X_reordered = [X[i] for i in ordering]
+
+                    X_enc, cons = self.encode_table_expr(X_reordered)
+
+                    flow_cons = mdd_to_flow(mdd_cache, X_reordered, X_enc)
 
                     return cons + flow_cons, []
                 Table.decompose = mdd_decompose
@@ -701,12 +780,12 @@ class CPM_gurobi(SolverInterface):
                 if cpm_var.is_bool():
                     cpm_var._value = solver_val >= 0.5
                 else:
-                    cpm_var._value = round(solver_val)
+                    cpm_var._value = int(solver_val)
             # set _objective_value
             if self.has_objective():
                 grb_obj_val = grb_objective.getValue()
                 if round(grb_obj_val) == grb_obj_val: # it is an integer?:
-                    self.objective_value_ = round(grb_obj_val)
+                    self.objective_value_ = int(grb_obj_val)
                 else: #  can happen with DirectVar or when using floats as coefficients
                     self.objective_value_ =  float(grb_obj_val)
 
