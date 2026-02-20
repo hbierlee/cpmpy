@@ -967,7 +967,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
         checked = False
         max_iterations = 5000
         if hardness[1] >= 3:
-            time_limit = 30
+            time_limit = 10
 
     # Generate all test cases once (to ensure same cases for all envs)
     test_cases = list(generate_models_w_tables(hardness=hardness, glob=glob))
@@ -999,18 +999,23 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
 
             try:
                 # Create solver with the environment
-                time_solve = time.time()
+                dt = time.time()
                 slv = env["solver"](cpm_model=model, **env["solver_kwargs"], time_limit=time_limit)
-                print("POSTED IN", time.time() - time_solve)
+                dt = time.time() - dt
+                print("POSTED IN", dt)
 
                 # Solve the model
-                sat = slv.solve(time_limit=time_limit - (time.time() - time_solve))
-                time_solve = time.time() - time_solve
+                solve_start = time.time()
+                if time_limit - dt < 0:
+                    raise TimeoutError
+                sat = slv.solve(time_limit=time_limit - dt)
+                sdt = time.time() - solve_start
 
                 if sat is None:
-                    print(f"  TIMEOUT after {time_solve:.2f}s")
+                    print(f"  TIMEOUT after {dt:.2f}s")
+                    raise TimeoutError
                 else:
-                    print("SOLVED IN", time_solve)
+                    print("SOLVED IN", sdt)
 
                 # Get stats
                 stats = slv.stats()
@@ -1022,14 +1027,13 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
                     "name": name,
                     "satisfiable": sat,
                     "timeout": timeout,
-                    "time_solve": time_solve,
+                    "time_solve": dt,
                     **stats,
                 }
                 results.append(result)
 
             except Exception as e:
                 print(f"  ERROR: {e}")
-                raise e
                 traceback.print_exc()
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
 
@@ -1045,7 +1049,6 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
     df["cons"] = df["constraints"] + df["n_cuts"]
     # df["cons"] = df["constraints"].astype(str) + " + " + df["n_cuts"].astype(str) + " = " + df["cons"].astype(str)
 
-    print(df)
     # df["cb_rel"] = df["time_cb"].fillna(0.) / df["time_solve"]
     print("\n" + "=" * 80)
     print("BENCHMARK RESULTS")
@@ -1073,7 +1076,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
             # "constraints",
             # "n_cuts",
             "cons",
-        ] + (["avg_strength"] if checked else ["time_solve"])
+        ] + (["avg_strength"] if checked else [])
 
         comparison = df.pivot_table(
             index="name",

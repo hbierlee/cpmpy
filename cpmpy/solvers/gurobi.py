@@ -278,6 +278,13 @@ class CPM_gurobi(SolverInterface):
         self.verbose = verbose
         self.ivarmap = dict()
 
+        # these should be save for integer objectives
+        # the objective for an optimal result has to be strictly within one integer
+        self.native_model.Params.MIPGapAbs = 1 - self.native_model.Params.IntFeasTol
+        # MIPGap is set to 0, since it is a relative gap: even a small MIPGap will, for a large enough objective, lead to a sub-optimal integer objective declared as optimal
+        # e.g., for the default MIPGap of 1e-4 and for an instance with a true optimal objective of 1000000, an objective of 1000010 may be declared optimal
+        self.native_model.Params.MIPGap = 0  # no relative MIPGap, just use MIPGapAbs
+
         match encoding:
             case Encoding.CPMPY:
                 Table.decompose = cpmpy_decompose

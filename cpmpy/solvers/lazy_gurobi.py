@@ -253,8 +253,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # gurobi will stop when either parameter is met
             assert self.native_model.Params.IntFeasTol == INT_FEAS_TOL
             assert self.native_model.Params.FeasibilityTol == FEAS_TOL
-            self.native_model.Params.MIPGap = 0  # no relative MIPGap, just use MIPGapAbs
-            self.native_model.Params.MIPGapAbs = 1 - INT_FEAS_TOL  # guaranteed to be within integer range
         if self.env["verbosity"] >= 4:
             self.native_model.Params.LogFile = "/tmp/gurobi.log"
             self.native_model.Params.OutputFlag = 1
