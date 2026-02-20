@@ -272,18 +272,18 @@ def generate_table(n, m, d, k=1, gaps=None, allow_duplicate_vars=True, ensure_fe
     return model
 
 
-def check_model(model, env=None, checked=True, allsols=False, expected_sat=None, expected_obj=None):
-    if True:
+def check_model(model, exp=None, checked=True, allsols=False, expected_sat=None, expected_obj=None):
+    if False:
         print("== Model ==")
         print(model)
         print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
 
     print("== ENV == ")
-    pprint.pprint(env)
+    pprint.pprint(exp)
 
     try:
         if False:
-            slv_ = CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](**env["solver_kwargs"])
+            slv_ = CPM_ortools(cpm_model=model) if exp["solver"] == "ortools" else exp["solver"](**exp["solver_kwargs"])
             print("ENCODING")
             for i, c in enumerate(model.constraints, start=1):
                 print(f"C{i}", repr(c)[:100])
@@ -296,7 +296,7 @@ def check_model(model, env=None, checked=True, allsols=False, expected_sat=None,
         print("expected feasible = ", expected_sat, expected_obj)
 
         slv = (
-            CPM_ortools(cpm_model=model) if env["solver"] == "ortools" else env["solver"](cpm_model=model, **env["solver_kwargs"])
+            CPM_ortools(cpm_model=model) if exp["solver"] == "ortools" else exp["solver"](cpm_model=model, **exp["solver_kwargs"])
         )
 
         print("solving for actual feasibility", slv)
@@ -315,7 +315,7 @@ def check_model(model, env=None, checked=True, allsols=False, expected_sat=None,
             actual_sat = bool(sols)
             assert len(sols) < 1000, "increase sol limit"
         else:
-            actual_sat = slv.solve()
+            actual_sat = slv.solve(*exp["solve_kwargs"])
             print(slv.status())
             print(slv.objective_value())
         print("actual feasible", actual_sat)
@@ -349,12 +349,12 @@ def check_model(model, env=None, checked=True, allsols=False, expected_sat=None,
             pickle.dump(model, f)
 
         raise e
-        if env["debug"]:
+        if exp["debug"]:
             raise e
         else:
             print("try debug", e)
 
-            check_model(model, env={**env, "debug": True})
+            check_model(model, exp={**exp, "debug": True})
 
 
 def show_sols(sols, T):
@@ -406,8 +406,10 @@ def get_envs():
     for e in get_solvers():
         if "ort" in e["alias"]:
             continue
-        if "solver_kwargs" in e and "env" in e["solver_kwargs"]:
+        elif "lazy" in e["alias"]:
             e["solver_kwargs"]["env"] |= debug_env
+        # elif "base" in e["alias"]:
+        #     e["solve_kwargs"] = {"Seed": SEED}
         yield e
 
 
@@ -698,7 +700,7 @@ class TestTables:
     def test_repro_model(self, env):
         m = load_model("/tmp/failed_model.pkl")
         print("Repro model:", m)
-        check_model(m, env=env)
+        check_model(m, exp=env)
 
     def test_enc(self, env):
         x = cp.intvar(1, 5, name="x")
@@ -775,8 +777,10 @@ class TestModels:
     def test_models(self, case, env):
         name, rep, model, expected_sat, expected_obj = case
         if "env" in env["solver_kwargs"]:
-            env["solver_kwargs"]["env"]["seed"] += rep
-        check_model(model, env=env, checked=SOLVE_EXPECTED, expected_sat=expected_sat, expected_obj=expected_obj)
+            env["solver_kwargs"]["env"]["seed"] = rep
+        # else:
+        #     env["solve_kwargs"]["Seed"] = rep
+        check_model(model, exp=env, checked=SOLVE_EXPECTED, expected_sat=expected_sat, expected_obj=expected_obj)
 
 
 FILTER_PRESETS = {
