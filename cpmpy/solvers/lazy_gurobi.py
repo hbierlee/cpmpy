@@ -468,16 +468,17 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 ).all()
             ), f"{i}; {[i + 1 for i in X.nonzero()[0]]}"
 
+
+            choices = np.where(~X, A_enc, np.nan)
             match heuristic:
                 case _ if self.env["example2"]:
                     j = [3, 7, 0][i]
                 case Coverlift.INPUT:
-                    # j = np.nanargmax(np.where(~X, A_enc, np.nan))
-                    j = np.argmax(~X)
+                    j = np.nanargmax(choices)
                 case Coverlift.COM_MIN:
-                    j = np.nanargmin(com - (np.where(~X, A_enc, np.nan)))
+                    j = np.nanargmin(com - choices)
                 case Coverlift.COM_MAX:
-                    j = np.nanargmax(com - (np.where(~X, A_enc, np.nan)))
+                    j = np.nanargmax(com - choices)
 
             assert not X[j]
 
