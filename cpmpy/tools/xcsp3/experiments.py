@@ -99,7 +99,12 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
                     "solver_kwargs": {"encoding": encoding, "output_stats": True},
                     # "solve_kwargs": {"Seed": 42},
                 }
-                for encoding in Encoding
+                for encoding in [
+                    Encoding.GLEB,
+                    Encoding.BOOL,
+                    Encoding.MDD,
+                    Encoding.NOREDUCEMDD,
+                ]
             ],
             *[
                 {
