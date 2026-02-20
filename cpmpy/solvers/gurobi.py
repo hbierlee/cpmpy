@@ -551,7 +551,9 @@ class CPM_gurobi(SolverInterface):
                         elif column_counter[key] == 1:
                             substitution[(key, 1)] = get_correct_bv(key, X, X_enc)
                         else:
-                            bvs = cp.boolvar(shape=column_counter[key], name=f"e_{key}" if NAMED else None)
+
+                            bvs = cp.boolvar(shape=column_counter[key], name=f"e_{key}_{_BoolVarImpl.counter}" if NAMED else None)
+                            _BoolVarImpl.counter += 1
                             bv = get_correct_bv(key, X, X_enc)
                             cons += [cp.sum(bvs) == bv]
                             for n in range(1, column_counter[key] + 1):
