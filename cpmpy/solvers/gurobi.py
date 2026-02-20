@@ -703,7 +703,7 @@ class CPM_gurobi(SolverInterface):
                 if cpm_var.is_bool():
                     cpm_var._value = solver_val >= 0.5
                 else:
-                    cpm_var._value = int(solver_val)
+                    cpm_var._value = round(solver_val)
             # set _objective_value
             if self.has_objective():
                 grb_obj_val = grb_objective.getValue()
@@ -1071,7 +1071,7 @@ class CPM_gurobi(SolverInterface):
                 if cpm_var.is_bool():
                     cpm_var._value = solver_val >= 0.5
                 else:
-                    cpm_var._value = int(solver_val)
+                    cpm_var._value = round(solver_val)
 
             # Translate objective
             if self.has_objective():
