@@ -384,20 +384,24 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("", show_table(C_enc), "C_enc", verbosity=3)
             # self.log("", show_table(A_enc), "A_enc", verbosity=3)
 
+        shrunk = 0
         for i in np.unique(parts):
             C_enc_ = C_enc[parts == i]
             C_enc[parts == i] = 0
 
             if self.env["verbosity"]:
-                self.log("i", i, show_table(parts == i))
-                self.log("C", show_table(C_enc))
-                self.log("A", np.sum(C_enc * T_enc, axis=1), verbosity=2)
+                self.log("i", i, show_table(parts == i), verbosity=3)
+                self.log("C", show_table(C_enc), verbosity=3)
+                self.log("A", np.sum(C_enc * T_enc, axis=1), verbosity=3)
             if np.all(np.sum(C_enc * T_enc, axis=1) <= k - 1):
+                shrunk += 1
                 k -= 1
                 if self.env["verbosity"]:
                     self.log(f"shrinking {i + INDEX} in {show_nz(X)}", verbosity=3)
             else:
                 C_enc[parts == i] = C_enc_
+        if self.env["verbosity"] and shrunk:
+            self.log(f"shrunk by {shrunk}", verbosity=1)
         return C_enc, k
 
     def gencoverlift(self, S, C_enc, k, T_enc, A_enc, heuristic=Coverlift.INPUT):
