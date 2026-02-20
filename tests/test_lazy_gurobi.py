@@ -341,7 +341,7 @@ def check_model(model, exp=None, checked=True, expected_sat=None, expected_obj=N
             actual_sat = len(actual_sols) > 0
         else:
             print("onesol")
-            actual_sat = slv.solve(*exp["solve_kwargs"], time_limit=TIME_LIMIT)
+            actual_sat = slv.solve(time_limit=TIME_LIMIT)
             print(slv.status())
             print(slv.objective_value())
             if actual_sat is None:
@@ -437,7 +437,7 @@ def get_envs():
         elif "lazy" in e["alias"]:
             e["solver_kwargs"]["env"] |= debug_env
         elif "base" in e["alias"]:
-            e["solve_kwargs"] = {}
+            e["solver_kwargs"] |= {"named": True}
         yield e
 
 
