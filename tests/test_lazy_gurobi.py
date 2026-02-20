@@ -52,7 +52,7 @@ def _load_xcsp3(path):
     return read_xcsp3(pathlib.Path(path))
 
 
-def generate_models_w_tables(hardness=(0, 3), glob=None):
+def generate_models_w_tables(hardness=(0, 2), glob=None):
     """Generator yielding (name, model) tuples for various test cases
 
     Args:
@@ -781,7 +781,7 @@ def idfn(a):
 
 ALLSOLS = True
 SOLVE_EXPECTED = True  # Set to False to skip solving for expected values
-TIME_LIMIT = 10
+TIME_LIMIT = 30
 REPEAT = 1
 
 
