@@ -105,8 +105,8 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
                     Encoding.MDD
                 ]
 
-                for reduce in [True, False]
-                for column_ordering in ["input", "incr-domain", "decr-domain", "fiedler"]
+                for reduce in [True, False] if encoding == Encoding.MDD
+                for column_ordering in ["input", "incr-domain", "decr-domain", "fiedler"] if encoding == Encoding.MDD
             ],
             *[
                 {
