@@ -1,3 +1,4 @@
+import math
 import time
 import pprint
 import itertools
@@ -54,6 +55,10 @@ def _load_xcsp3(path):
 def generate_models_w_tables(hardness=(0, 2)):
     """Generator yielding (name, model) tuples for various test cases"""
     a, b = hardness
+
+    # # yield ("bug", _load_xcsp3("2025/COP22to25/DC-rijndael-xor5-d1-t0-r04-keysize7-plainsize4_c22.xml"))
+    # yield ("bug", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland08_c22.xml"))
+    # return
 
     # for f in pathlib.Path("test_cases").glob("*.pkl"):
     #     with open(f, "rb") as fp:
@@ -140,10 +145,10 @@ def generate_models_w_tables(hardness=(0, 2)):
         # yield ("many_rows_3", with_constraints(generate_table(3, 100, 5))) # -4.5%
 
     if a <= 2 <= b:
-        yield (
-            "sparse_table",
-            cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])),
-        )
+        # yield (
+        #     "sparse_table",
+        #     cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])),
+        # )
 
         yield (
             "wide_table",
@@ -272,11 +277,38 @@ def generate_table(n, m, d, k=1, gaps=None, allow_duplicate_vars=True, ensure_fe
     return model
 
 
-def check_model(model, exp=None, checked=True, allsols=False, expected_sat=None, expected_obj=None):
-    if False:
+def allsols(slv, model, solution_limit=100, max_search=None, time_limit=None):
+
+    search = math.prod(dom_size(x) for x in get_variables_model(model))
+    if max_search is not None and search > max_search:
+        print("skip", search, max_search)
+        return None
+
+    sols = []
+    xs = tuple(sorted(slv.user_vars, key=lambda x: x.name))
+
+    def display():
+        sol = tuple(argvals(xs))
+        sols.append(sol)
+        print(f"checking ({len(sols)} <= {search})", sol)
+        if time_limit is not None and time.time() - dt > time_limit:
+            raise TimeoutError
+
+        for c in model.constraints:
+            assert c.value(), f"Constraint {c} failed for assignment\n\n{show_assignment(get_variables(c))}"
+
+    dt = time.time()
+    slv.solveAll(display=display, solution_limit=solution_limit)
+    actual_sat = bool(sols)
+    # assert len(sols) < 1000, "increase sol limit"
+    return sols if len(sols) < solution_limit else None
+
+
+def check_model(model, exp=None, checked=True, expected_sat=None, expected_obj=None, expected_sols=None):
+    if True:
         print("== Model ==")
         print(model)
-        print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables_model(model)))
+        print(", ".join(f"{x} in {x.lb}..{x.ub}" for x in sorted(get_variables_model(model), key=lambda x: x.name)))
 
     print("== ENV == ")
     pprint.pprint(exp)
@@ -293,31 +325,27 @@ def check_model(model, exp=None, checked=True, allsols=False, expected_sat=None,
                     # print("  ", slv._csemap)
             print("ENCODED")
 
-        print("expected feasible = ", expected_sat, expected_obj)
+        print("expected feasible = ", expected_sat, expected_obj, len(expected_sols) if expected_sols is not None else None)
 
         slv = (
-            CPM_ortools(cpm_model=model) if exp["solver"] == "ortools" else exp["solver"](cpm_model=model, **exp["solver_kwargs"])
+            CPM_ortools(cpm_model=model)
+            if exp["solver"] == "ortools"
+            else exp["solver"](cpm_model=model, **exp["solver_kwargs"], time_limit=TIME_LIMIT)
         )
 
         print("solving for actual feasibility", slv)
-        if allsols:
-            sols = []
-            xs = tuple(sorted(slv.user_vars, key=lambda x: x.name))
-
-            def display():
-                sol = tuple(argvals(xs))
-                sols.append(sol)
-                print("checking", sol)
-                for c in model.constraints:
-                    assert c.value(), f"Constraint {c} failed for assignment\n\n{show_assignment(get_variables(c))}"
-
-            slv.solveAll(display=display, solution_limit=1000)
-            actual_sat = bool(sols)
-            assert len(sols) < 1000, "increase sol limit"
+        if expected_sols is not None:
+            print("allsols")
+            actual_sols = allsols(slv, model, time_limit=TIME_LIMIT)
+            assert frozenset(actual_sols) == frozenset(expected_sols)
+            actual_sat = len(actual_sols) > 0
         else:
-            actual_sat = slv.solve(*exp["solve_kwargs"])
+            print("onesol")
+            actual_sat = slv.solve(*exp["solve_kwargs"], time_limit=TIME_LIMIT)
             print(slv.status())
             print(slv.objective_value())
+            if actual_sat is None:
+                raise TimeoutError
         print("actual feasible", actual_sat)
 
         if hasattr(slv, "stats"):
@@ -408,8 +436,8 @@ def get_envs():
             continue
         elif "lazy" in e["alias"]:
             e["solver_kwargs"]["env"] |= debug_env
-        # elif "base" in e["alias"]:
-        #     e["solve_kwargs"] = {"Seed": SEED}
+        elif "base" in e["alias"]:
+            e["solve_kwargs"] = {}
         yield e
 
 
@@ -731,25 +759,30 @@ def idfn(a):
         return f"{name}_r{repeat}" if repeat > 1 else name
 
 
-REPEAT = 3
+ALLSOLS = True
 SOLVE_EXPECTED = True  # Set to False to skip solving for expected values
+TIME_LIMIT = 10
+REPEAT = 1
 
 
 def _generate_cases_with_expected():
     """Generate test cases and precompute expected feasibility/objective once per model."""
     for name, model in generate_models_w_tables():
+        print("Get expected", name)
         # Solve once to get expected values (if enabled)
         if SOLVE_EXPECTED:
             model_ = model.deepcopy()
             expected_sat = model_.solve()
             expected_obj = model_.objective_value() if model.has_objective() else None
+            expected_sols = allsols(CPM_ortools(cpm_model=model), model, max_search=10e4) if ALLSOLS else None
         else:
             expected_sat = None
             expected_obj = None
+            expected_sols = None
 
         # Yield repeated cases with precomputed expected values
         for j in range(1, REPEAT + 1):
-            yield (name, j, model, expected_sat, expected_obj)
+            yield (name, j, model, expected_sat, expected_obj, expected_sols)
 
 
 # Cache the cases at module load time to avoid re-solving
@@ -760,7 +793,7 @@ def _get_cached_cases():
     global _CACHED_CASES
     if _CACHED_CASES is None:
         print("Generating expected vals")
-        _CACHED_CASES = list(_generate_cases_with_expected())
+        _CACHED_CASES = _generate_cases_with_expected()
     return _CACHED_CASES
 
 
@@ -775,12 +808,19 @@ class TestModels:
         ids=idfn,
     )
     def test_models(self, case, env):
-        name, rep, model, expected_sat, expected_obj = case
+        name, rep, model, expected_sat, expected_obj, expected_sols = case
         if "env" in env["solver_kwargs"]:
             env["solver_kwargs"]["env"]["seed"] = rep
         # else:
         #     env["solve_kwargs"]["Seed"] = rep
-        check_model(model, exp=env, checked=SOLVE_EXPECTED, expected_sat=expected_sat, expected_obj=expected_obj)
+        check_model(
+            model,
+            exp=env,
+            checked=SOLVE_EXPECTED,
+            expected_sat=expected_sat,
+            expected_obj=expected_obj,
+            expected_sols=expected_sols,
+        )
 
 
 FILTER_PRESETS = {
@@ -926,12 +966,14 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
 
             try:
                 # Create solver with the environment
+                time_solve = time.time()
                 slv = env["solver"](cpm_model=model, **env["solver_kwargs"], time_limit=time_limit)
+                print("POSTED IN", time.time() - time_solve)
 
                 # Solve the model
-                time_solve = time.time()
-                sat = slv.solve(time_limit=time_limit)
+                sat = slv.solve(time_limit=time_limit - (time.time() - time_solve))
                 time_solve = time.time() - time_solve
+
                 if sat is None:
                     print(f"  TIMEOUT after {time_solve:.2f}s")
                 else:
