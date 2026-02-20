@@ -256,7 +256,7 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], cons
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, column_ordering=None, output_stats=False, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, column_ordering=None, named=False, output_stats=False, **kwargs):
         """
         Constructor of the native solver object
 
@@ -359,7 +359,7 @@ class CPM_gurobi(SolverInterface):
                         if not isinstance(other, Lookup):
                             return False
                         else:
-                            return self.mdd_id == other.mdd_id
+                            return reduced_key(self.mdd_id) == reduced_key(other.mdd_id)
 
                     __hash__ = object.__hash__
 
@@ -372,7 +372,8 @@ class CPM_gurobi(SolverInterface):
                         if not isinstance(other, MultiLookup):
                             return False
                         else:
-                            return self.mdd_id1 == other.mdd_id1 and self.mdd_id2 == other.mdd_id2
+                            return (reduced_key(self.mdd_id1) == reduced_key(other.mdd_id1)
+                                    and reduced_key(self.mdd_id2) == reduced_key(other.mdd_id2))
 
                 class MDD_node:
                     def __init__(self, mdd_id, level, transition):
@@ -441,6 +442,19 @@ class CPM_gurobi(SolverInterface):
                                 mdd = cache[mdd.mdd_id1]
                     return mdd
 
+                def reduced_key(t):
+                    current = t
+
+                    while (
+                            isinstance(current, tuple)
+                            and len(current) > 0
+                            and isinstance(current[0], tuple)
+                    ):
+                        current = current[0]
+
+                    return current
+
+
                 def reduce_mdd(row, mdd, mdd_obj, level):
                     if isinstance(mdd, TerminatingState):
                         return mdd
@@ -459,8 +473,11 @@ class CPM_gurobi(SolverInterface):
 
                     G = MDD_node(mdd.mdd_id, level, B)
                     for (G_key, G_elem) in mdd_obj.MDD_cache.items():
-                        if G_key != mdd.mdd_id:
+
+                        if reduced_key(G_key) != mdd.mdd_id:
+
                             if G_elem == G:
+
                                 mdd_obj.MDD_cache[G.mdd_id] = Lookup(G_elem.mdd_id)
                                 mdd_obj.repeated_keys.add(G_elem.mdd_id)
                                 return Lookup(G_elem.mdd_id)
