@@ -948,6 +948,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         for t in TIMES:
             df[f"time_{t}_p2"] = df[f"time_{t}"].fillna(value=time_limit * 2)
 
+    # Check for inconsistent instances
+    check_inconsistent_instances(df)
+
+
     for grouping_type, grouping in (
             # ("per_alias", ['alias', 'problem']),
             ("per_instance", ['track', 'problem', 'instance', 'alias']),
@@ -1428,9 +1432,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             err_msg = f"Exception in checker {row['checker_result']}"
 
 
-    # Check for inconsistent instances
-    check_inconsistent_instances(df)
-
     print("== ERRORS ==")
     for idx, row in df.iterrows():
         if row["status"] == ERR:
@@ -1438,7 +1439,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             if pd.notna(row['exception']) and "object has no attribute" in str(row['exception']):
                 continue
 
-            print(f"\n[{row['track']}/{row['problem']}-{row['instance']} - {row['alias']}]")
+            print(f"\n[2025/{row['track']}/{row['problem']}-{row['instance']}.xml - {row['alias']}]")
             print(f"Status: {row['status']} | Time: {row['time_total']:.2f}s")
             if pd.notna(row['exception']):
                 print(f"Exception: {row['exception']}")
