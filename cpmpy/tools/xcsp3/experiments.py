@@ -108,11 +108,12 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
                     },
                     "solve_kwargs": {"Seed": SEED},
                 }
-                for encoding in [Encoding.GLEB, Encoding.BOOL, Encoding.MDD]
-                for reduce in [True, False]
-                if encoding is Encoding.MDD
-                for order in Order
-                if encoding is Encoding.MDD
+                for encoding, reduce, order in [
+                    (encoding_, reduce, order)
+                    for encoding_ in [Encoding.GLEB, Encoding.BOOL, Encoding.MDD]
+                    for reduce in ([True, False] if encoding_ is Encoding.MDD else [None])
+                    for order in (Order if encoding_ is Encoding.MDD else [None])
+                ]
             ],
             *[
                 {
