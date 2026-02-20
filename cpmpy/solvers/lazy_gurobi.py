@@ -18,52 +18,9 @@ from cpmpy.transformations.linearize import only_positive_bv
 
 CHECKER_TIME_LIMIT = None
 
-# Using Gurobi's default tolerance values:
-# https://www.gurobi.com/documentation/current/refman/parameters.html#sec:Parameters
-INT_FEAS_TOL = 1e-5  # Gurobi's IntFeasTol: for checking integrality
-FEAS_TOL = 1e-6  # Gurobi's FeasibilityTol: for checking constraint satisfaction
-
 
 def none(A):
     return not A.any()
-
-
-# Based on https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
-# Functions for approximate comparison of floating point numbers
-def is_eq(x, y):
-    return abs(x - y) <= FEAS_TOL
-
-
-def is_lt(x, y):
-    return x - y < -FEAS_TOL
-
-
-def is_le(x, y):
-    return x - y <= FEAS_TOL
-
-
-def is_gt(x, y):
-    return x - y > FEAS_TOL
-
-
-def is_ge(x, y):
-    return x - y >= -FEAS_TOL
-
-
-def eps_floor(x):
-    return np.floor(x + INT_FEAS_TOL)
-
-
-def eps_ceil(x):
-    return np.ceil(x - INT_FEAS_TOL)
-
-
-def eps_round(x):
-    return np.ceil(x - 0.5 + INT_FEAS_TOL)
-
-
-def is_integral(x):
-    return np.abs(x - np.round(x)) <= INT_FEAS_TOL
 
 
 def assign_mipsol(A_enc):
@@ -250,9 +207,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.tables:
             self.native_model.Params.LazyConstraints = 1
-            # gurobi will stop when either parameter is met
-            assert self.native_model.Params.IntFeasTol == INT_FEAS_TOL
-            assert self.native_model.Params.FeasibilityTol == FEAS_TOL
         if self.env["verbosity"] >= 4:
             self.native_model.Params.LogFile = "/tmp/gurobi.log"
             self.native_model.Params.OutputFlag = 1
@@ -579,13 +533,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
         assert len(A_enc) == len(T_enc.T)
 
         C_enc = np.zeros(len(A_enc), dtype=int)
-        A_enc_pos = is_gt(A_enc, 0.0)
+        A_enc_pos = self.is_gt(A_enc, 0.0)
 
         self.env["cuts"].append({"from": frm})
 
         m = len(T_enc)  # number of cols
-        # W = np.argwhere(is_ge(A_enc, 1.0))  # find a == 1.0
-        W = is_ge(A_enc, 1.0)
+        # W = np.argwhere(self.is_ge(A_enc, 1.0))  # find a == 1.0
+        W = self.is_ge(A_enc, 1.0)
 
         # W = set(i for i, a in enumerate(A_enc) if is_ge(a, 1.0))  # find a == 1.0
         # W = set(i for i, a in enumerate(A_enc) if is_eq(a, 1.0))  # find a == 1.0
@@ -729,7 +683,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
                 if F.any():
                     self.log("FRAC", frm, verbosity=2, indent=self.indent + 2)
-                self.log(f"R choice = {'+' if is_pos else '-'}b_{show(choice)} -> ({R.sum()})", verbosity=2, indent=self.indent + 2)
+                self.log(
+                    f"R choice = {'+' if is_pos else '-'}b_{show(choice)} -> ({R.sum()})", verbosity=2, indent=self.indent + 2
+                )
                 self.log(f"= {show_nz(R)}", verbosity=3, indent=self.indent + 3)
                 self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
                 self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
@@ -897,7 +853,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             else:
                 A_enc = np.fromiter((x_enc_a[x_enc_i] for x_enc_i in X_enc), dtype=float)
                 is_integer = False
-                if is_integral(A_enc).all():
+                if self.is_integral(A_enc).all():
                     A_enc = A_enc > 0.5
                     assert A_enc.dtype == bool
                     is_integer = True
@@ -994,7 +950,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             (expr,) = only_positive_bv([expr])
             ws, xs, k = terms(expr)  # sum(ws*xs) <= k
             lhs = sum(w * x.value() for w, x in zip(ws, xs))
-            return bool(is_le(lhs, k))  # np -> python bool
+            return bool(self.is_le(lhs, k))  # np -> python bool
 
         case = f"The explanation\n\n{expr}\n== {value(expr)}\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
 

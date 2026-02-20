@@ -699,6 +699,45 @@ class CPM_gurobi(SolverInterface):
         """
         return self.grb_model
 
+    # Floating point comparison methods using Gurobi's tolerance parameters
+    # Based on https://github.com/ed-lam/cpaior2025-master-class/blob/5c727db2a103ded7971bb89693fe5bb69d509c76/common.py#L9
+    # https://www.gurobi.com/documentation/current/refman/parameters.html#sec:Parameters
+
+    def is_eq(self, x, y):
+        """Check if x equals y within FeasibilityTol."""
+        return abs(x - y) <= self.native_model.Params.FeasibilityTol
+
+    def is_lt(self, x, y):
+        """Check if x is less than y within FeasibilityTol."""
+        return x - y < -self.native_model.Params.FeasibilityTol
+
+    def is_le(self, x, y):
+        """Check if x is less than or equal to y within FeasibilityTol."""
+        return x - y <= self.native_model.Params.FeasibilityTol
+
+    def is_gt(self, x, y):
+        """Check if x is greater than y within FeasibilityTol."""
+        return x - y > self.native_model.Params.FeasibilityTol
+
+    def is_ge(self, x, y):
+        """Check if x is greater than or equal to y within FeasibilityTol."""
+        return x - y >= -self.native_model.Params.FeasibilityTol
+
+    def eps_floor(self, x):
+        """Floor with IntFeasTol tolerance."""
+        return np.floor(x + self.native_model.Params.IntFeasTol)
+
+    def eps_ceil(self, x):
+        """Ceiling with IntFeasTol tolerance."""
+        return np.ceil(x - self.native_model.Params.IntFeasTol)
+
+    def eps_round(self, x):
+        """Round with IntFeasTol tolerance."""
+        return np.ceil(x - 0.5 + self.native_model.Params.IntFeasTol)
+
+    def is_integral(self, x):
+        """Check if x is integral within IntFeasTol."""
+        return np.abs(x - np.round(x)) <= self.native_model.Params.IntFeasTol
 
     def solve(self, time_limit:Optional[float]=None, solution_callback=None, **kwargs):
         """
