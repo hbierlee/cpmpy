@@ -437,7 +437,7 @@ def get_envs():
         elif "lazy" in e["alias"]:
             e["solver_kwargs"]["env"] |= debug_env
         elif "base" in e["alias"]:
-            e["solve_kwargs"] = {}
+            e["solver_kwargs"] |= {"named": True}
         yield e
 
 

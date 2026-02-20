@@ -88,8 +88,6 @@ class Encoding(Feature):
     MDD = "mdd_reduce"
     NOREDUCEMDD = "mdd_noreduce"
 
-NAMED = True
-
 def trivial_decomposition(arr, tab):
     if len(tab) == 0:
         return [False], []
@@ -210,7 +208,7 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], cons
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, output_stats=False, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, output_stats=False, named=False, **kwargs):
         """
         Constructor of the native solver object
 
@@ -240,7 +238,7 @@ class CPM_gurobi(SolverInterface):
                     if len(tab) < 2:
                         return trivial_decomposition(arr, tab)
 
-                    if NAMED:
+                    if named:
                         row_selected = cp.boolvar(shape=len(tab), name=f"_BV{_BoolVarImpl.counter}_r")
                         _BoolVarImpl.counter += 1
                     else:
@@ -262,7 +260,7 @@ class CPM_gurobi(SolverInterface):
                         return trivial_decomposition(arr, tab)
 
                     cons = []
-                    if NAMED:
+                    if named:
                         row_selected = cp.boolvar(shape=len(tab), name=f"_BV{_BoolVarImpl.counter}_r")
                         _BoolVarImpl.counter += 1
                     else:
@@ -552,7 +550,7 @@ class CPM_gurobi(SolverInterface):
                             substitution[(key, 1)] = get_correct_bv(key, X, X_enc)
                         else:
 
-                            bvs = cp.boolvar(shape=column_counter[key], name=f"e_{key}_{_BoolVarImpl.counter}" if NAMED else None)
+                            bvs = cp.boolvar(shape=column_counter[key], name=f"_BV{_BoolVarImpl.counter}_e_{key}" if named else None)
                             _BoolVarImpl.counter += 1
                             bv = get_correct_bv(key, X, X_enc)
                             cons += [cp.sum(bvs) == bv]
