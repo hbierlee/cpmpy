@@ -806,25 +806,28 @@ def _generate_cases_with_expected():
             yield (name, j, model, expected_sat, expected_obj, expected_sols)
 
 
-# Cache the cases at module load time to avoid re-solving
-_CACHED_CASES = None
-
-
-def _get_cached_cases():
-    global _CACHED_CASES
-    if _CACHED_CASES is None:
-        print("Generating expected vals")
-        _CACHED_CASES = _generate_cases_with_expected()
-    return _CACHED_CASES
-
-
 @pytest.mark.timeout(60)
 class TestModels:
+    _cached_cases = None
+
+    @classmethod
+    def setup_class(cls):
+        """Cache test cases with expected values to avoid re-solving for each env."""
+        if cls._cached_cases is None:
+            print("Generating expected vals")
+            cls._cached_cases = list(_generate_cases_with_expected())
+
+    @classmethod
+    def _get_cached_cases(cls):
+        if cls._cached_cases is None:
+            cls.setup_class()
+        return cls._cached_cases
+
     @pytest.mark.parametrize(
         ("env", "case"),
         itertools.product(
             get_envs(),
-            _get_cached_cases(),
+            list(_generate_cases_with_expected()),
         ),
         ids=idfn,
     )
