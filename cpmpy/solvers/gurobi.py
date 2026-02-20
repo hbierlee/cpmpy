@@ -87,11 +87,13 @@ class Encoding(Feature):
     XCSP3 = "xcsp3"
     GLEB = "gleb"
     BOOL = "bool"
-
     MDD = "mdd"
 
-
-NAMED = True
+class MDDOrder(Feature):
+    INPUT = "input"
+    DOM_INCR = "incr-domain"
+    DOM_DECR = "decr-domain"
+    FIEDLER = "fiedler"
 
 def trivial_decomposition(arr, tab):
     if len(tab) == 0:
@@ -286,7 +288,7 @@ class CPM_gurobi(SolverInterface):
                     if len(tab) < 2:
                         return trivial_decomposition(arr, tab)
 
-                    if NAMED:
+                    if named:
                         row_selected = cp.boolvar(shape=len(tab), name=f"_BV{_BoolVarImpl.counter}_r")
                         _BoolVarImpl.counter += 1
                     else:
@@ -308,7 +310,7 @@ class CPM_gurobi(SolverInterface):
                         return trivial_decomposition(arr, tab)
 
                     cons = []
-                    if NAMED:
+                    if named:
                         row_selected = cp.boolvar(shape=len(tab), name=f"_BV{_BoolVarImpl.counter}_r")
                         _BoolVarImpl.counter += 1
                     else:
@@ -611,7 +613,7 @@ class CPM_gurobi(SolverInterface):
                             substitution[(key, 1)] = get_correct_bv(key, X, X_enc)
                         else:
 
-                            bvs = cp.boolvar(shape=column_counter[key], name=f"e_{key}_{_BoolVarImpl.counter}" if NAMED else None)
+                            bvs = cp.boolvar(shape=column_counter[key], name=f"_BV{_BoolVarImpl.counter}_e_{key}" if named else None)
                             _BoolVarImpl.counter += 1
                             bv = get_correct_bv(key, X, X_enc)
                             cons += [cp.sum(bvs) == bv]
@@ -778,7 +780,7 @@ class CPM_gurobi(SolverInterface):
                 if cpm_var.is_bool():
                     cpm_var._value = solver_val >= 0.5
                 else:
-                    cpm_var._value = round(solver_val)
+                    cpm_var._value = int(solver_val)
             # set _objective_value
             if self.has_objective():
                 grb_obj_val = grb_objective.getValue()
