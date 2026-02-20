@@ -95,7 +95,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
             *[
                 {
                     "solver": CPM_gurobi,
-                    "alias": f"base_gurobi-{encoding}-reduce_{reduce}-{column_ordering}" if encoding == Encoding.MDD else f"base_gurobi-{encoding}",
+                    "alias": f"base_gurobi-{encoding}-reduce_{f'reduce' if reduce else 'noreduce'}_{column_ordering}" if encoding == Encoding.MDD else f"base_gurobi-{encoding}",
                     "solver_kwargs": {"encoding": encoding, "reduce" : reduce, "column_ordering" : column_ordering,  "output_stats": True},
                     # "solve_kwargs": {"Seed": 42},
                 }
