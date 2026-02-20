@@ -447,8 +447,9 @@ def get_envs():
                     "cutoff": 0,
                     "verbosity": 3,
                     "variant": 1,
-                }
+                },
             },
+            "solve_kwargs": {"Seed": 42},
         }
 
     for e in get_solvers():
@@ -829,10 +830,7 @@ class TestModels:
     )
     def test_models(self, case, env):
         name, rep, model, expected_sat, expected_obj, expected_sols = case
-        if "env" in env["solver_kwargs"]:
-            env["solver_kwargs"]["env"]["seed"] = rep
-        # else:
-        #     env["solve_kwargs"]["Seed"] = rep
+        env["solve_kwargs"]["Seed"] = rep
         check_model(
             model,
             exp=env,

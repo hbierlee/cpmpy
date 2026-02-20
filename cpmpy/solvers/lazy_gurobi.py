@@ -213,7 +213,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "negatives": 0,
             "cuts": [],
             "max_iterations": None,
-            "seed": 42,
             "checked": False,
             "checker": None,
             "tables": [],
@@ -256,8 +255,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             assert self.native_model.Params.FeasibilityTol == FEAS_TOL
             self.native_model.Params.MIPGap = 0  # no relative MIPGap, just use MIPGapAbs
             self.native_model.Params.MIPGapAbs = 1 - INT_FEAS_TOL  # guaranteed to be within integer range
-        if self.env["seed"] is not None:
-            self.native_model.Params.Seed = self.env["seed"]
         if self.env["verbosity"] >= 4:
             self.native_model.Params.LogFile = "/tmp/gurobi.log"
             self.native_model.Params.OutputFlag = 1

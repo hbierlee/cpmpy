@@ -88,10 +88,13 @@ def glob_filter(experiments, filters):
     ]
 
 
+SEED = 42
+
+
 def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_none=True):
     return glob_filter(
         [
-            *[{"solver": "ortools", "alias": "ortools"}],
+            *[{"solver": "ortools", "alias": "ortools", "solve_kwargs": {"random_seed": SEED}}],
             *[
                 {
                     "solver": CPM_gurobi,
@@ -103,7 +106,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
                         "order": order,
                         "output_stats": True,
                     },
-                    # "solve_kwargs": {"Seed": 42}, # TODO
+                    "solve_kwargs": {"Seed": SEED},
                 }
                 for encoding in [Encoding.GLEB, Encoding.BOOL, Encoding.MDD]
                 for reduce in [True, False]
@@ -116,6 +119,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
                     "alias": f"{solver}-{alias}",
                     "solver": CPM_lazy_gurobi,
                     "solver_kwargs": solver_kwargs | {"output_stats": True},
+                    "solve_kwargs": {"Seed": SEED},
                 }
                 for solver in ["lazy_gurobi"]
                 for alias, solver_kwargs in [
