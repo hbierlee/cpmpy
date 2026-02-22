@@ -238,9 +238,39 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                     # )
 
         if a <= 5 <= b:
-            # yield ("hcpizza", _load_xcsp3("2025/COP22to25/HCPizza-20-20-2-8-01_c23.xml"))
+            yield ("hcpizza", _load_xcsp3("2025/COP22to25/HCPizza-20-20-2-8-01_c23.xml"))
             yield ("soccer", _load_xcsp3("2025/CSP22to25/Soccer-20-12-20-1_c24.xml"))
+            yield ("airland", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml"))
             # yield ("opt_bug", "2025/COP22to25/Fortress1-05_c25.xml")
+            # yield ("opt_bug", "2025/COP22to25/Fortress1-05_c25.xml")
+
+            # TODO fix
+            # [2025/COP22to25/TankAllocation2-0000_c25.xml - lazy_gurobi-none]
+            # Status: ERROR | Time: 3.22s
+            # Exception: BV[x[13][0] == -1]
+            # Traceback:
+            # Traceback (most recent call last):
+            #   File "/cw/dtailocal/henk/Projects/cpmpy/cpmpy/tools/xcsp3/benchmark.py", line 141, in xcsp3_wrapper
+            #     xcsp3_cpmpy(**kwargs, verbose=verbose)
+            #   File "/cw/dtailocal/henk/Projects/cpmpy/cpmpy/tools/xcsp3/xcsp3_cpmpy.py", line 815, in xcsp3_cpmpy
+            #     raise e
+            #   File "/cw/dtailocal/henk/Projects/cpmpy/cpmpy/tools/xcsp3/xcsp3_cpmpy.py", line 745, in xcsp3_cpmpy
+            #     s.solve(**solver_args, time_limit=time_limit)
+            #   File "/cw/dtailocal/henk/Projects/cpmpy/cpmpy/solvers/lazy_gurobi.py", line 1139, in solve
+            #     raise e
+            #   File "/cw/dtailocal/henk/Projects/cpmpy/cpmpy/solvers/lazy_gurobi.py", line 1108, in solve
+            #     hassol = super().solve(
+            #              ^^^^^^^^^^^^^^
+            #   File "/cw/dtailocal/henk/Projects/cpmpy/cpmpy/solvers/gurobi.py", line 814, in solve
+            #     raise getattr(self.native_model, "_callback_exception", None) or Exception("Gurobi was interrupted (perhaps the solution callback called model.terminate())")
+            #   File "/cw/dtailocal/henk/Projects/cpmpy/cpmpy/solvers/lazy_gurobi.py", line 794, in solution_callback
+            #     x_enc_a = {x_enc_i: cbGetVal(x_enc_i, what.cbGetSolution) for x_enc_i in all_xs}
+            #                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            #   File "/cw/dtailocal/henk/Projects/cpmpy/cpmpy/solvers/lazy_gurobi.py", line 780, in cbGetVal
+            #     else cbGet(self._varmap[cpm_var])
+            #                ~~~~~~~~~~~~^^^^^^^^^
+            # KeyError: BV[x[13][0] == -1]
+            # yield ("varmap_bug", _load_xcsp3("2025/COP22to25/TankAllocation2-0000_c25.xml"))
 
     for name, model in _generate():
         if matches(name):
