@@ -93,6 +93,15 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             )
             yield ("example.", generate_table_from_example())
             yield ("example_alldiff.", with_constraints(generate_table_from_example(), with_alldiff=True))
+            yield (
+                "issue_9_mix_bool_and_intvar.",
+                cp.Model(
+                    cp.Table(
+                        [cp.intvar(0, 8, name="x"), cp.boolvar(name="p")],
+                        [[0, 0], [1, 0], [2, 0], [2, 1], [3, 1], [4, 0], [5, 0], [6, 0], [7, 0], [8, 0]],
+                    )
+                ),
+            )
 
             # Edge cases
             yield ("single_column", cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]])))
