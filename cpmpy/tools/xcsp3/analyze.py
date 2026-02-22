@@ -188,7 +188,7 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
 
     return fig
 
-def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None, track=None):
+def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst_metric="median", time_limit=None, track=None, inst_metric_range=None, paper=False):
     """
     Create a scatter plot comparing the performance of two solvers.
 
@@ -305,8 +305,8 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
             marker=problem_markers[problem],
             label=f"{problem} ({n_instances})",
             norm=LogNorm(
-                vmin=inst_metrics.min(),
-                vmax=inst_metrics.max(),
+                vmin=inst_metric_range[0] if inst_metric_range else inst_metrics.min(),
+                vmax=inst_metric_range[1] if inst_metric_range else inst_metrics.max(),
             ),
         )
         scatter_plots.append(scatter)
@@ -364,8 +364,9 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
         ax.set_xlim(min_max[0], min_max[1] * padding)
         ax.set_ylim(min_max[0], min_max[1] * padding)
 
-    # Place legend inside plot area at top-left with transparency
-    ax.legend(loc='upper left', fontsize=9, framealpha=0.5)
+    # Place legend inside plot area at top-left with transparency (hide for paper)
+    if not paper:
+        ax.legend(loc='upper left', framealpha=0.5)
     plt.tight_layout()
 
     # Add hover labels for instance names
@@ -880,11 +881,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             if slowest_idx is not None and not pd.isna(slowest_idx):
                 print(f"Slowest {phase}: {df.loc[slowest_idx, f'time_{phase}']}s ({df.loc[slowest_idx, 'instance']}, {df.loc[slowest_idx, 'solver']})")
 
-    # TODO show each unique solver+solver_kwargs row
-    # print("Solvers", df[['alias', 'solver_kwargs']].nunique())
+    # Show each unique solver+solver_kwargs row
+    print("\n== Solvers ==")
+    solver_configs = df[['alias', 'solver', 'solver_kwargs']].drop_duplicates().sort_values('alias')
+    for _, row in solver_configs.iterrows():
+        print(f"  {row['alias']}: {row['solver']} {row['solver_kwargs']}")
 
     problems = df['problem'].unique()
-    print("Problems", df['problem'].unique())
+    print("\nProblems", df['problem'].unique())
     # df = df[df["problem"].isin(problems[:2])]
 
     pd.set_option('display.float_format', '{:0.1f}'.format)
@@ -1232,13 +1236,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                                         padding = 0.1  # 10% padding
                                         ax.set_ylim(-PAR * (1 + padding), PAR * (1 + padding))
 
-                                        ax.set_xlabel(metadata_col, fontsize=12)
-                                        ax.set_ylabel(f'{time_col} differential', fontsize=12)
-                                        ax.set_title(f'{baseline} - {solver}: {metadata_col} vs {time_col} differential ({track})', fontsize=14)
+                                        ax.set_xlabel(metadata_col)
+                                        ax.set_ylabel(f'{time_col} differential')
+                                        ax.set_title(f'{baseline} - {solver}: {metadata_col} vs {time_col} differential ({track})')
 
-                                        # Place legend outside plot area to avoid covering data
-                                        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left',
-                                                borderaxespad=0., fontsize=9)
+                                        # Place legend outside plot area to avoid covering data (hide for paper)
+                                        if not paper:
+                                            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left',
+                                                    borderaxespad=0.)
                                         ax.grid(True, alpha=0.3)
 
                                         plt.tight_layout()
@@ -1271,12 +1276,23 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 else:
                     return f"\\{x.split('-')[1:][0]}"
 
-            tex_df = groups
-            # tex_df = groups.rename(index=rename_idx)
+            # Aggregate per alias for tex output
+            tex_df = groups.groupby('alias').agg(
+                unk=('unknown', 'sum'),
+                mem=('memory', 'sum'),
+                post=('post', 'sum'),
+                feas=('feasible', 'sum'),
+                solv=('solved', 'sum'),
+                t_solv_p2=('time_solve_p2', 'mean'),
+                cuts=('cuts', 'mean'),
+                cb_rel=('cb_rel', 'mean'),
+            )
+            # tex_df = tex_df.rename(index=rename_idx)
+            print(tex_df)
             latex_output = tex_df[
                 [
                     *(["unk", "mem", "post"]),
-                    *(["feas"] if is_cop else [] ),
+                    *(["feas"] if is_cop else []),
                     *(["solv", "t_solv_p2", "cuts", "cb_rel"])
                 ]
             ].to_latex(
@@ -1317,7 +1333,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 latex_output = '\n'.join(other_lines)
 
             # Save to file
-            with open(tex.with_name(tex.name + "_table.tex"), 'w') as f:
+            with open(tex / f"table-{track}.tex", 'w') as f:
                 f.write(latex_output)
             print(f"LaTeX table saved to {tex}")
 
@@ -1353,6 +1369,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         # Generate scatter plot(s) if --compare option is provided
         fig_scatters = []
         aliases = sorted(groups["alias"].unique())
+        # Compute global inst_metric range for consistent colorbar across plots
+        inst_metric_col = "rows"
+        inst_metric_range = (groups[inst_metric_col].min(), groups[inst_metric_col].max())
         if compare is not None:
             # Find baseline solver
             baseline_solver = match_solver(compare[0], aliases)
@@ -1392,6 +1411,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     time_limit=time_limit,
                     inst_metric="rows",
                     track=track,
+                    inst_metric_range=inst_metric_range,
+                    paper=paper,
                 )
                 fig_scatters.append(fig_scatter)
 
@@ -1399,7 +1420,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     # Include both solver names in filename for clarity
                     solver1_short = baseline_solver.replace('gurobi-', '').replace('-', '')
                     solver2_short = solver2.replace('gurobi-', '').replace('-', '')
-                    save_plot(fig_scatter, plot, f"scatter-{track}-{solver1_short}-vs-{solver2_short}")
+                    save_plot(fig_scatter, plot, f"scatter-{track}-{solver1_short}--{solver2_short}")
 
     # Set status to ERR for rows that don't pass the checker
     def checker_failed(checker_result):

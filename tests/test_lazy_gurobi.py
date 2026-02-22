@@ -93,6 +93,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             )
             yield ("example.", generate_table_from_example())
             yield ("example_alldiff.", with_constraints(generate_table_from_example(), with_alldiff=True))
+            yield ("com.", generate_table_from_data([[2, 2], [2, 4], [4, 4], [4, 6]], ub=6))
             yield (
                 "issue_9_mix_bool_and_intvar.",
                 cp.Model(
@@ -140,6 +141,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             yield ("bool_vars", cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
             x = cp.intvar(0, 3, name="x", shape=2)
             yield ("soccer_table", cp.Model(*[cp.InDomain(x_i, [0, 1, 3]) for x_i in x], cp.Table(x, [[0, 3], [1, 1], [3, 0]])))
+            yield ("hcpizza_table", cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 6)], [[0, 1], [1, 6]])))
 
             # yield ("random_gaps", generate_table(5, 10, 10, k=1, gaps=0.5))
             yield ("random_gaps", generate_table(5, 5, 3, k=1, gaps=0.5))
@@ -163,6 +165,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                 ),
             )
 
+            yield (f"tmp_t5x100x10", with_constraints(generate_table(5, 100, 10)))
             yield ("two_tables", generate_two_tables())
 
             yield ("many_rows_1", with_constraints(generate_table(2, 20, 5)))
@@ -239,6 +242,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
 
         if a <= 5 <= b:
             yield ("hcpizza", _load_xcsp3("2025/COP22to25/HCPizza-20-20-2-8-01_c23.xml"))
+            yield ("fillomino", _load_xcsp3("2025/CSP22to25/Fillomino-5-0_c24.xml"))
             yield ("soccer", _load_xcsp3("2025/CSP22to25/Soccer-20-12-20-1_c24.xml"))
             yield ("airland", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml"))
             # yield ("opt_bug", "2025/COP22to25/Fortress1-05_c25.xml")

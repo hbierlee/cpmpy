@@ -860,7 +860,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["verbosity"]:
                     self.log(
                         f"table {i}/{len(self.tables)} feasible: ({show_nz((T_enc == A_enc).all(1))})",
-                        verbosity=3,
+                        verbosity=4,
                     )
                     self.log(
                         f"by {A_enc}\n\n{np.astype(T_enc, int)}",
