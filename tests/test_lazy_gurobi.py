@@ -319,7 +319,7 @@ def allsols(slv, model, solution_limit=100, max_search=None, time_limit=None):
     def display():
         sol = tuple(argvals(xs))
         sols.append(sol)
-        print(f"checking ({len(sols)} <= {search})", sol)
+        # print(f"checking ({len(sols)} <= {search})", sol)
         if time_limit is not None and time.time() - dt > time_limit:
             raise TimeoutError
 
@@ -865,7 +865,7 @@ FILTER_PRESETS = {
     ],
     "all": [],
     "none": [("alias", ("none",))],
-    "bool": [("alias", ("bool",))],
+    "bool": [("alias", ("bool", "coverlift_input"))],
     "mdd-reduce": [
         (
             "alias",
@@ -920,7 +920,15 @@ FILTER_PRESETS = {
             ),
         )
     ],
-    "coverlift_heur": [("alias", ("coverlift",))],
+    "coverlift_heur": [
+        (
+            "alias",
+            (
+                "none",
+                "coverlift",
+            ),
+        )
+    ],
 }
 
 
@@ -977,9 +985,9 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
         max_iterations = 100
     else:
         checked = False
-        max_iterations = 5000
+        max_iterations = None
         if hardness[1] >= 3:
-            time_limit = 10
+            time_limit = 120
 
     # Generate all test cases once (to ensure same cases for all envs)
     test_cases = list(generate_models_w_tables(hardness=hardness, glob=glob))
@@ -1039,7 +1047,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
                     "name": name,
                     "satisfiable": sat,
                     "timeout": timeout,
-                    "time_solve": dt,
+                    "time_solve": sdt,
                     **stats,
                 }
                 results.append(result)
@@ -1100,20 +1108,19 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
 
         # Add relative difference columns for each metric
         env_names = [e.get("alias", "unknown") for e in envs]
-        if len(env_names) >= 2:
-            base_env = env_names[0]
-            for metric in [v for v in values if v in df.columns]:
-                if (metric, base_env) in comparison.columns:
-                    base_col = comparison[(metric, base_env)]
-                    for other_env in env_names[1:]:
-                        if (metric, other_env) in comparison.columns:
-                            other_col = comparison[(metric, other_env)]
-                            # Calculate relative difference: (other - base) / base * 100
-                            rel_diff = ((other_col - base_col) / base_col * 100).round(1)
-                            comparison[(metric, f"Δ%({other_env})")] = rel_diff
+        base_env = env_names[0]
+        for metric in [v for v in values if v in df.columns]:
+            if (metric, base_env) in comparison.columns:
+                base_col = comparison[(metric, base_env)]
+                for other_env in env_names[1:]:
+                    if (metric, other_env) in comparison.columns:
+                        other_col = comparison[(metric, other_env)]
+                        # Calculate relative difference: (other - base) / base * 100
+                        rel_diff = ((other_col - base_col) / base_col * 100).round(1)
+                        comparison[(metric, f"Δ%({other_env})")] = rel_diff
 
-            # Sort columns to group metric, envs, and diffs together
-            comparison = comparison.sort_index(axis=1, level=0)
+        # Sort columns to group metric, envs, and diffs together
+        comparison = comparison.sort_index(axis=1, level=0)
 
         print("\nTime (time_cb) and Cuts by Environment:")
         print(comparison.to_string())
