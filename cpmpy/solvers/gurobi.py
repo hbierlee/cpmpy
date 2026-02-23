@@ -222,17 +222,20 @@ class CPM_gurobi(SolverInterface):
             for i, row in enumerate(T):
                 offset = 0
                 for x, x_width, a in zip(X, dom_sizes, row):
-                    try:
+                    if x.lb <= a <= x.ub:
                         T_enc[i, offset + a - x.lb] = True
-                    except IndexError:
+                    else:  # i is not in domain of x -> delete row
                         np.delete(T_enc, i)
                     offset += x_width
             return T_enc
 
         T_enc = encode(X, T)
 
+
+        X_enc = []
         cons = []
-        for x in X:
+        parts = []
+        for i, x in enumerate(X):
             x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
                 self.ivarmap, x, "direct", csemap=self._csemap
             )
@@ -242,7 +245,35 @@ class CPM_gurobi(SolverInterface):
             cons += exactly_one_con
             cons += [cp.sum(c * b for c, b in expr) - x == -k]
 
-        return [self.ivarmap[x.name] for x in X], T_enc, cons
+            xs = list(x_enc._xs)
+            X_enc += xs
+            parts += [i] * len(xs)
+
+        X_enc = np.array(X_enc)
+        parts = np.array(parts)
+
+        # Remove constant columns (all True or all False) from T_enc and parts
+        for polarity in (True, False):
+            cols = T_enc.all(axis=0) if polarity else (~T_enc).all(axis=0)
+            if polarity:
+                cons += [x >= 1 for x in X_enc[cols]]
+            else:
+                cons += [x <= 0 for x in X_enc[cols]]
+            T_enc = T_enc[:, ~cols]
+            parts = parts[~cols]
+            X_enc = X_enc[~cols]
+
+        return X_enc, T_enc, cons, parts
+
+
+    def boolvar(self, name=None, **kwargs):
+        """Wrap cp.boolvar with safe debug names if enabled"""
+        if self.named and name is not None:
+            b = cp.boolvar(**kwargs, name=f"_BV{_BoolVarImpl.counter}_{name}")
+            _BoolVarImpl.counter += 1
+            return b
+        else:
+            return cp.boolvar(**kwargs)
 
     def encode_table_expr(self, X):
         cons = []
@@ -278,6 +309,7 @@ class CPM_gurobi(SolverInterface):
         self.output_stats = output_stats
         self.verbose = verbose
         self.ivarmap = dict()
+        self.named = named
 
         # these should be save for integer objectives
         # the objective for an optimal result has to be strictly within one integer
@@ -296,11 +328,7 @@ class CPM_gurobi(SolverInterface):
                     if len(tab) < 2:
                         return trivial_decomposition(arr, tab)
 
-                    if named:
-                        row_selected = cp.boolvar(shape=len(tab), name=f"_BV{_BoolVarImpl.counter}_r")
-                        _BoolVarImpl.counter += 1
-                    else:
-                        row_selected = cp.boolvar(shape=len(tab))
+                    row_selected = self.new_boolvar("r", shape=len(tab))
 
                     cons = []
                     for i, row in enumerate(tab):
@@ -312,17 +340,14 @@ class CPM_gurobi(SolverInterface):
                 Table.decompose = xcsp3_decompose
 
             case Encoding.GLEB:
-                def gleb_decompose(self):
-                    arr, tab = self.args
+                def gleb_decompose(self_):
+                    arr, tab = self_.args
                     if len(tab) < 2:
                         return trivial_decomposition(arr, tab)
 
                     cons = []
-                    if named:
-                        row_selected = cp.boolvar(shape=len(tab), name=f"_BV{_BoolVarImpl.counter}_r")
-                        _BoolVarImpl.counter += 1
-                    else:
-                        row_selected = cp.boolvar(shape=len(tab))
+
+                    row_selected = self.boolvar(shape=len(tab), name="r")
 
                     nptab = np.array(tab)
 
@@ -339,12 +364,12 @@ class CPM_gurobi(SolverInterface):
                         return trivial_decomposition(X, T)
 
                     # Encode table T to 01 table `T_enc` and X variables to encodings `X_enc`
-                    X_enc, T_enc, cons = self.encode_table_constraint(X, T)
+                    X_enc, T_enc, cons, _ = self.encode_table_constraint(X, T)
+                    # assert len(X_enc)
 
-                    row_selected = cp.boolvar(shape=len(T_enc))
-                    # For an encoding `x_enc`, the encoding variables are in `x_enc.xs_`, so we can iter over each integer variable, then over each of its encoding variables
-                    # Then enforce for each column `i` and its associated encoding variable `b_i`, enforce it to be equal to whatever row is selected
-                    cons += [b_i == cp.sum(row_selected * col) for b_i, col in zip((b_i for x_enc in X_enc for b_i in x_enc._xs), T_enc.T)]
+                    row_selected = self.boolvar(shape=len(T_enc), name="r")
+
+                    cons += [b_i == cp.sum(row_selected * col) for b_i, col in zip(X_enc, T_enc.T)]
                     cons += [cp.sum(row_selected) == 1]
 
                     return cons, []
@@ -601,8 +626,7 @@ class CPM_gurobi(SolverInterface):
                         elif column_counter[key] == 1:
                             substitution[(key, 1)] = get_correct_bv(key, X, X_enc)
                         else:
-                            bvs = cp.boolvar(shape=column_counter[key], name=f"_BV{_BoolVarImpl.counter}_e_{key}" if named else None)
-                            _BoolVarImpl.counter += 1
+                            bvs = self.boolvar(shape=column_counter[key], name=f"e_{key}")
                             bv = get_correct_bv(key, X, X_enc)
                             cons += [cp.sum(bvs) == bv]
                             for n in range(1, column_counter[key] + 1):

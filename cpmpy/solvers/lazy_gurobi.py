@@ -11,7 +11,7 @@ import pandas as pd
 
 import cpmpy as cp
 from cpmpy.expressions.core import Comparison, Operator
-from cpmpy.expressions.utils import is_true_cst, is_false_cst, show_assignment, dom_size
+from cpmpy.expressions.utils import is_true_cst, is_false_cst, show_assignment, is_bool
 from cpmpy.solvers.gurobi import CPM_gurobi, Feature
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.transformations.linearize import only_positive_bv
@@ -438,16 +438,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             assert not X[j]
 
-            non_tight = (~R_tight) & T_enc[:, j]
-
-            if non_tight.any():
-                ub = np.max(RS[non_tight])
-                a_j = k - ub
-            else:  # a zero column
-                if self.env["debug"]:
-                    assert none(T_enc[:, j])
-                a_j = k + 1  # infinite
-                X[j] = True
+            # any pure 0/1 columns have been filtered out, a min always exists
+            a_j = np.min(k - RS[(~R_tight) & T_enc[:, j]])
 
             if self.env["verbosity"]:
                 is_pos = A_enc[j]
@@ -1143,7 +1135,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         return [x_enc_i for x in X for x_enc_i in self.ivarmap[x]._xs]
 
     def transform_(self, cpm_expr):
-        if cpm_expr.name != "table" or len(cpm_expr.args[1]) <= self.env["cutoff"]:
+        if is_bool(cpm_expr) or cpm_expr.name != "table" or len(cpm_expr.args[1]) <= self.env["cutoff"]:
             cons = super().transform(cpm_expr)
         else:
             if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
@@ -1155,8 +1147,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return [cp.BoolVal(False)]
             assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
 
-            X_enc, T_enc, cons = self.encode_table_constraint(X, T)
-            X_enc = np.fromiter((x_enc_i for x_enc in X_enc for x_enc_i in x_enc._xs), _BoolVarImpl)
+            X_enc, T_enc, cons, parts = self.encode_table_constraint(X, T)
 
             if self.env["verbosity"]:
                 self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
@@ -1164,9 +1155,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(T, verbosity=3)
                 self.log("T_enc =", verbosity=3)
                 self.log(np.astype(T_enc, int), verbosity=3)
+                self.log("X_enc =", X_enc, verbosity=3)
             assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
-
-            parts = np.fromiter((i for i, x in enumerate(X) for _ in range(dom_size(x))), dtype=int)
             self.tables.append((X_enc, T_enc, parts, cpm_expr))
 
         if self.env["checked"]:

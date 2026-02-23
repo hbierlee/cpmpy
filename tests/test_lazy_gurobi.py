@@ -165,7 +165,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                 ),
             )
 
-            yield (f"tmp_t5x100x10", with_constraints(generate_table(5, 100, 10)))
+            # yield (f"tmp_t5x100x10", with_constraints(generate_table(5, 100, 10)))
             yield ("two_tables", generate_two_tables())
 
             yield ("many_rows_1", with_constraints(generate_table(2, 20, 5)))

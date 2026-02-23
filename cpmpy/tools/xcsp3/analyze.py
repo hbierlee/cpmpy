@@ -1258,6 +1258,11 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     # Collect all scatter plots for show logic
     fig_scatters = []
 
+    # Compute global inst_metric range for consistent colorbar across plots (only solved instances)
+    inst_metric_col = "rows"
+    solved_df = df[df['solved']]
+    inst_metric_range = (solved_df[inst_metric_col].min(), solved_df[inst_metric_col].max())
+
     for track, groups in df.groupby(by="track"):
         is_cop = "COP" in track
         if tex is not None:
@@ -1369,9 +1374,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         # Generate scatter plot(s) if --compare option is provided
         fig_scatters = []
         aliases = sorted(groups["alias"].unique())
-        # Compute global inst_metric range for consistent colorbar across plots
-        inst_metric_col = "rows"
-        inst_metric_range = (groups[inst_metric_col].min(), groups[inst_metric_col].max())
         if compare is not None:
             # Find baseline solver
             baseline_solver = match_solver(compare[0], aliases)
