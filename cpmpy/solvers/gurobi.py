@@ -257,7 +257,6 @@ class CPM_gurobi(SolverInterface):
             cols = T_enc.all(axis=0) if polarity else (~T_enc).all(axis=0)
             if polarity:
                 cons += [x >= 1 for x in X_enc[cols]]
-                print("ccc", [x >= 1 for x in X_enc[cols]])
             else:
                 cons += [x <= 0 for x in X_enc[cols]]
             T_enc = T_enc[:, ~cols]
