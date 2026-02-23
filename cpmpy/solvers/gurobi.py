@@ -222,9 +222,9 @@ class CPM_gurobi(SolverInterface):
             for i, row in enumerate(T):
                 offset = 0
                 for x, x_width, a in zip(X, dom_sizes, row):
-                    try:
+                    if x.lb <= a <= x.ub:
                         T_enc[i, offset + a - x.lb] = True
-                    except IndexError:
+                    else:  # i is not in domain of x -> delete row
                         np.delete(T_enc, i)
                     offset += x_width
             return T_enc
