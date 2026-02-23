@@ -1230,6 +1230,7 @@ class CPM_gurobi(SolverInterface):
         return opt_sol_count
 
     def stats(self):
+        self.native_model.update()  # Ensure NumConstrs reflects latest state
         return {
             "constraints": self.native_model.NumConstrs,
         }

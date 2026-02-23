@@ -277,6 +277,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             # yield ("varmap_bug", _load_xcsp3("2025/COP22to25/TankAllocation2-0000_c25.xml"))
 
     for name, model in _generate():
+        name = f"{name}."
         if matches(name):
             yield (name, model)
 
@@ -966,7 +967,7 @@ FILTER_PRESETS = {
 }
 
 
-def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None):
+def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None, max_iterations=None):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
     Args:
@@ -1016,10 +1017,13 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
 
     if hardness[1] <= 1:
         checked = True
-        max_iterations = 100
+        debug = True
+        if max_iterations is None:
+            max_iterations = 100
     else:
         checked = False
-        max_iterations = None
+        debug = False
+        # max_iterations stays as provided (or None)
         if hardness[1] >= 3:
             time_limit = 120
 
@@ -1045,7 +1049,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
             env["solver_kwargs"]["env"]["verbosity"] = verbosity
             env["solver_kwargs"]["env"]["checked"] = checked
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
-            env["solver_kwargs"]["env"]["debug"] = checked
+            env["solver_kwargs"]["env"]["debug"] = debug
 
         for name, model in test_cases:
             print(f"Running {name} with {env_alias}...")
@@ -1095,13 +1099,14 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
     pd.set_option("display.float_format", "{:0.2f}".format)
     df = pd.DataFrame(results)
 
-    for col in ["constraints", "n_cuts"]:
+    for col in ["constraints", "n_cuts", "time_solve"]:
         if col not in df.columns:
             df[col] = 0
     df["constraints"] = df["constraints"].fillna(0).astype(int)
     df["n_cuts"] = df["n_cuts"].fillna(0).astype(int)
-    df["cons"] = df["constraints"] + df["n_cuts"]
-    # df["cons"] = df["constraints"].astype(str) + " + " + df["n_cuts"].astype(str) + " = " + df["cons"].astype(str)
+
+    df["cons+cuts_num"] = df["constraints"] + df["n_cuts"]
+    df["cons+cuts"] = df["constraints"].astype(str) + " + " + df["n_cuts"].astype(str) + " = " + df["cons+cuts_num"].astype(str)
 
     # df["cb_rel"] = df["time_cb"].fillna(0.) / df["time_solve"]
     print("\n" + "=" * 80)
@@ -1129,8 +1134,15 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
         values = [
             # "constraints",
             # "n_cuts",
-            "cons",
-        ] + (["avg_strength"] if checked else [])
+            "cons+cuts",
+        ]
+
+        if checked:
+            values += ["avg_strength"]
+            values += ["avg_power"]
+
+        if not checked and verbosity == 0:
+            values += "time_solve"
 
         comparison = df.pivot_table(
             index="name",
@@ -1143,12 +1155,27 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
         # Add relative difference columns for each metric
         env_names = [e.get("alias", "unknown") for e in envs]
         base_env = env_names[0]
+
+        # Create a separate pivot for numeric diff calculation (cons+cuts uses cons+cuts_num)
+        diff_values = [("cons+cuts_num" if v == "cons+cuts" else v) for v in values if v in df.columns or v == "cons+cuts"]
+        diff_comparison = df.pivot_table(
+            index="name",
+            columns="env",
+            values=[v for v in diff_values if v in df.columns],
+            aggfunc="first",
+            sort=False,
+        )
+
         for metric in [v for v in values if v in df.columns]:
-            if (metric, base_env) in comparison.columns:
-                base_col = comparison[(metric, base_env)]
+            diff_metric = "cons+cuts_num" if metric == "cons+cuts" else metric
+            if (diff_metric, base_env) in diff_comparison.columns:
+                base_col = diff_comparison[(diff_metric, base_env)]
+                # Skip diff calculation for non-numeric columns
+                if not pd.api.types.is_numeric_dtype(base_col):
+                    continue
                 for other_env in env_names[1:]:
-                    if (metric, other_env) in comparison.columns:
-                        other_col = comparison[(metric, other_env)]
+                    if (diff_metric, other_env) in diff_comparison.columns:
+                        other_col = diff_comparison[(diff_metric, other_env)]
                         # Calculate relative difference: (other - base) / base * 100
                         rel_diff = ((other_col - base_col) / base_col * 100).round(1)
                         comparison[(metric, f"Δ%({other_env})")] = rel_diff
@@ -1205,6 +1232,13 @@ if __name__ == "__main__":
         default=0,
         help="Verbosity level for solver (default: 2)",
     )
+    parser.add_argument(
+        "--max-iterations",
+        "-m",
+        type=int,
+        default=None,
+        help="Maximum iterations for lazy solver (default: auto based on hardness)",
+    )
 
     args = parser.parse_args()
 
@@ -1212,6 +1246,7 @@ if __name__ == "__main__":
     print(f"  Hardness: {tuple(args.hardness)}")
     print(f"  Filter preset: {args.filter_preset}")
     print(f"  Verbosity: {args.verbosity}")
+    print(f"  Max iterations: {args.max_iterations}")
     if args.glob:
         print(f"  Glob: {args.glob}")
 
@@ -1220,6 +1255,7 @@ if __name__ == "__main__":
         filter_preset=args.filter_preset,
         glob=args.glob,
         verbosity=args.verbosity,
+        max_iterations=args.max_iterations,
     )
 
     df.to_csv(args.output, index=False)

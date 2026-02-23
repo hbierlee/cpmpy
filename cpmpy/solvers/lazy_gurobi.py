@@ -75,12 +75,17 @@ DEBUG_NP_PRINTOPTIONS = {
 }
 
 
-def show_table(T_enc, index=INDEX):
-    return np.astype(T_enc, int) if T_enc.dtype == bool else T_enc
+def show_table(T_enc, index=INDEX, full=False):
+    result = np.astype(T_enc, int) if T_enc.dtype == bool else T_enc
+    if full:
+        with np.printoptions(**DEBUG_NP_PRINTOPTIONS):
+            return np.array2string(result)
+    return result
 
 
 def show_nz(A, index=INDEX):
-    return np.atleast_1d(A).nonzero()[0] + 1
+    nz = np.atleast_1d(A).nonzero()[0] + 1
+    return nz[:10]
 
 
 def show_ind(a, index=INDEX):
@@ -281,6 +286,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "n_cuts_explained": len(cuts_mipnode_exp),
             "n_cuts_unexplained": len(cuts_mipnode_unexp),
             "avg_strength": (sum(s["strength"] for s in cuts) / len(cuts)) if cuts and self.env["checked"] else None,
+            "avg_power": (sum(s["power"] for s in cuts) / len(cuts)) if cuts and self.env["checked"] else None,
         }
 
     def choose(self, choices, T_enc, R, parts, A_enc, C_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
@@ -353,7 +359,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"shrunk by {shrunk}", verbosity=1)
         return C_enc, k
 
-    def gencoverlift(self, S, C_enc, k, T_enc, A_enc, parts, heuristic=Coverlift.INPUT):
+    def gencoverlift(self, S, C_enc, k, T_enc, A_enc, parts, X_enc=None, heuristic=Coverlift.INPUT, frm=None):
         if self.env["verbosity"]:
             self.log("gencoverlift", verbosity=2)
             self.log(show_table(T_enc), verbosity=3)
@@ -481,15 +487,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return S, C_enc, k
 
-    def show_cut(self, X, C_enc, k):
+    def show_cut(self, X, C_enc, k, verbosity=2):
         if self.env["verbosity"]:
             self.log(
                 f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
                 indent=2,
-                verbosity=2,
+                verbosity=verbosity,
             )
 
-    def explain(self, A_enc, T_enc, parts, frm=None):
+    def explain(self, A_enc, T_enc, parts, frm=None, X_enc=None):
         """The `explain_frac2` alg."""
 
         def assert_example(A, B):
@@ -696,7 +702,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log(f"by explanation of size ({sum(X)})", verbosity=2)
             self.log(show_nz(X), verbosity=3)
             self.log("C_enc", C_enc, verbosity=3)
-            self.env["cuts"][-1]["cut"] = X.copy()
             assert C_enc[X].all()
 
         self.show_cut(X, C_enc, k)
@@ -704,15 +709,26 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["coverlift"]:
             if self.env["verbosity"]:
                 Xl = X.sum()
-            X, C_enc, k = self.gencoverlift(X, C_enc, k, T_enc, A_enc, parts, heuristic=self.env["coverlift"])
+            X, C_enc, k = self.gencoverlift(
+                X,
+                C_enc,
+                k,
+                T_enc,
+                A_enc,
+                parts,
+                X_enc=X_enc,
+                heuristic=self.env["coverlift"],
+                frm=frm,
+            )
             if self.env["verbosity"]:
-                self.log("coverlift added ", X.sum() - Xl, "of", len(X), verbosity=2)
+                self.log("coverlift added ", X.sum() - Xl, "of", Xl, verbosity=2)
 
             self.show_cut(X, C_enc, k)
 
         if self.env["shrink"]:
             C_enc, k = self.shrink(X, C_enc, k, T_enc, A_enc, parts)
-            self.show_cut(X, C_enc, k)
+
+        self.show_cut(X, C_enc, k, verbosity=1)
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -730,7 +746,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 feasible = False  # any expr means not feasible
                 assert isinstance(expr.args[0], Operator)
                 expr, k = expr.args
+                if self.env["verbosity"]:
+                    self.env["cuts"][-1]["cut"] = (expr, k)
                 yield expr, k
+                # break # TODO could lead to fewer cuts, but then expensive part of callback is repeated often
             elif is_true_cst(expr):
                 continue
             elif is_false_cst(expr):
@@ -832,7 +851,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         # If fully integer, we can check if the tables are feasible yet
         if self.env["verbosity"]:
             self.log("EXPLAIN", frm, verbosity=2)
-            self.log("Full sol", x_enc_a, verbosity=3)
+            self.log("Full sol", x_enc_a, verbosity=4)
 
         for i, (X_enc, T_enc, parts, table) in enumerate(self.tables, start=INDEX):
             # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
@@ -855,8 +874,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         verbosity=4,
                     )
                     self.log(
-                        f"by {A_enc}\n\n{np.astype(T_enc, int)}",
-                        verbosity=3,
+                        f"by {show_table(A_enc)}\n\n{np.astype(T_enc, int)}",
+                        verbosity=4,
                         indent=2,
                     )
                 continue
@@ -875,7 +894,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # encode assignment
                 if self.env["verbosity"]:
                     self.log(" ", np.array(X_enc), verbosity=3, indent=0)
-                explanation = self.explain(A_enc, T_enc, parts, frm=frm)
+                explanation = self.explain(A_enc, T_enc, parts, frm=frm, X_enc=X_enc)
 
                 if self.env["verbosity"]:
                     # self.check_explanation(explanation, X_enc, A_enc, T_enc)
@@ -951,6 +970,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 x_i._value = a_i_j
             assert value(expr) is True, f"Cut off row {show(i)} for case:\n\n{case}\n\n{show_table(T_enc_i)}"
 
+        if "cut" not in self.env["cuts"][-1]:
+            return
+
+
         if self.env["checked"]:
             # if self.env["checker"] and self.env["feasible"]:
             repeated = expr in self.env["checker"].constraints
@@ -995,6 +1018,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 else len(self.env["remain"]) - len(remaining)
             )
             self.env["cuts"][-1]["strength"] = strength
+            self.env["cuts"][-1]["power"] = strength / len(self.env["cuts"][-1]["cut"][0].args)
             self.env["remain"] = remaining
             if self.env["verbosity"]:
                 self.log(f"Remaining non-solutions to cut ({len(remaining)}, STR={strength})", verbosity=1)
