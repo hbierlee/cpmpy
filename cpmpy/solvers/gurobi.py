@@ -247,10 +247,6 @@ class CPM_gurobi(SolverInterface):
     def encode_table_expr(self, X):
         cons = []
         for x in X:
-            if isinstance(x, _BoolVarImpl):
-                old_x = x
-                x = cp.intvar(lb=0, ub=1, name=f"{x.name}_int")
-                cons += [old_x == (x == 1)]
 
             x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
                 self.ivarmap, x, "direct", csemap=self._csemap
@@ -261,7 +257,7 @@ class CPM_gurobi(SolverInterface):
             cons += exactly_one_con
             cons += [cp.sum(c * b for c, b in expr) - x == -k]
 
-        return [self.ivarmap[x.name] if not isinstance(x, _BoolVarImpl) else self.ivarmap[f"{x.name}_int"] for x in X], cons
+        return [self.ivarmap[x.name] for x in X], cons
 
     def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, order=Order.INPUT, named=False, output_stats=False, time_limit=None, **kwargs):
         """
@@ -581,8 +577,6 @@ class CPM_gurobi(SolverInterface):
 
                     for key in cache.keys():
 
-                        print("Key: ", key)
-
                         val = lookup_mdd(cache[key], cache)
 
                         for (k,v) in val.transition.items():
@@ -598,10 +592,7 @@ class CPM_gurobi(SolverInterface):
                             if isinstance(v, TerminatingState):
                                 flow['snk'].add_flow_in((column, column_counter[column]))
 
-                    for key in flow.keys():
-                        print("Flow key: ", key)
-                        print("Flow in : ", flow[key].flow_in)
-                        print("Flow out : ", flow[key].flow_out)
+
                     cons = []
                     substitution = {}
                     for key in column_counter.keys():
@@ -658,11 +649,6 @@ class CPM_gurobi(SolverInterface):
                     X_enc, cons = self.encode_table_expr(X_reordered)
 
                     flow_cons = mdd_to_flow(mdd_cache, X_reordered, X_enc)
-
-                    print("Cons")
-                    print(cons)
-                    print("Flow cons")
-                    print(flow_cons)
 
                     return cons + flow_cons, []
                 Table.decompose = mdd_decompose
