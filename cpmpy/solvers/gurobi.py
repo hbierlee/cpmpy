@@ -278,6 +278,7 @@ class CPM_gurobi(SolverInterface):
     def encode_table_expr(self, X):
         cons = []
         for x in X:
+
             x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
                 self.ivarmap, x, "direct", csemap=self._csemap
             )
@@ -386,32 +387,40 @@ class CPM_gurobi(SolverInterface):
                     SNK = 'snk'
 
                 class Lookup:
-                    def __init__(self, mdd_id):
-                        self.mdd_id = mdd_id
+
+                    def __repr__(self):
+                        return f"Lookup(mdd_id={self.node_id}, counter={self.counter})"
+
+                    def __init__(self, node_id, counter=1):
+                        self.node_id = node_id
+                        self.counter = counter
+
+                    def incr(self):
+                        return Lookup(self.node_id, self.counter + 1)
 
                     def __eq__(self, other):
                         if not isinstance(other, Lookup):
                             return False
                         else:
-                            return reduced_key(self.mdd_id) == reduced_key(other.mdd_id)
+                            return self.node_id == other.node_id and self.counter == other.counter
 
-                    __hash__ = object.__hash__
+                    def __hash__(self):
+                        # Hash based on mdd_id and counter to match __eq__
+                        # Convert mdd_id to a hashable form if it's a tuple or other collection
+                        try:
+                            mdd_id_hash = hash(self.node_id)
+                        except TypeError:
+                            # If mdd_id is unhashable (like a list/dict), convert to tuple
+                            mdd_id_hash = hash(
+                                tuple(self.node_id) if isinstance(self.node_id, (list, tuple)) else self.node_id)
+                        return hash((mdd_id_hash, self.counter))
 
-                class MultiLookup:
-                    def __init__(self, mdd_id1, mdd_id2):
-                        self.mdd_id1 = mdd_id1
-                        self.mdd_id2 = mdd_id2
-
-                    def __eq__(self, other):
-                        if not isinstance(other, MultiLookup):
-                            return False
-                        else:
-                            return (reduced_key(self.mdd_id1) == reduced_key(other.mdd_id1)
-                                    and reduced_key(self.mdd_id2) == reduced_key(other.mdd_id2))
+                    def __deepcopy__(self):
+                        return Lookup(self.node_id, self.counter)
 
                 class MDD_node:
                     def __init__(self, mdd_id, level, transition):
-                        self.mdd_id = mdd_id
+                        self.node_id = mdd_id
                         self.level = level
                         self.transition = transition
 
@@ -435,16 +444,11 @@ class CPM_gurobi(SolverInterface):
                             if isinstance(v1, Lookup) and isinstance(v2, Lookup):
                                 if v1 != v2:
                                     return False
-                            if isinstance(v1, MultiLookup) and isinstance(v2, MultiLookup):
-                                if v1 != v2:
-                                    return False
                             if isinstance(v1, TerminatingState) and isinstance(v2, TerminatingState):
                                 return True
                             return False
 
                         return True
-
-                    __hash__ = object.__hash__
 
                     def deepcopy(self, memo=None):
                         if memo is None:
@@ -453,105 +457,84 @@ class CPM_gurobi(SolverInterface):
                         if self in memo:
                             return memo[self]
 
-                        new_node = MDD_node(self.mdd_id, self.level, {})
+                        new_node = MDD_node(self.node_id, self.level, {})
                         memo[self] = new_node
 
                         for key, value in self.transition.items():
                             if isinstance(value, MDD_node):
                                 new_node.transition[key] = value.deepcopy(memo)
+                            if isinstance(value, Lookup):
+                                new_node.transition[key] = value.__deepcopy__()
                             else:
                                 new_node.transition[key] = value
 
                         return new_node
 
-                def lookup_mdd(mdd, cache, current_id):
+                    __hash__ = object.__hash__
 
-                    while isinstance(mdd, Lookup) or isinstance(mdd, MultiLookup):
-                        if isinstance(mdd, Lookup):
-                            mdd = cache[mdd.mdd_id]
-                        elif isinstance(mdd, MultiLookup):
-                            if current_id == mdd.mdd_id2[0][:len(current_id)]:
-                                mdd = cache[mdd.mdd_id2]
-                            else:
-                                mdd = cache[mdd.mdd_id1]
-                    return mdd
+                def lookup_mdd(mdd_node, cache):
+                    while isinstance(mdd_node, Lookup):
+                        mdd_node = cache[mdd_node]
+                    return mdd_node
 
-                def reduced_key(t):
-                    current = t
+                def reduce_mdd(row, mdd_node, mdd, level):
+                    if isinstance(mdd_node, TerminatingState):
+                        return mdd_node
 
-                    while (
-                            isinstance(current, tuple)
-                            and len(current) > 0
-                            and isinstance(current[0], tuple)
-                    ):
-                        current = current[0]
-
-                    return current
-
-
-                def reduce_mdd(row, mdd, mdd_obj, level):
-                    if isinstance(mdd, TerminatingState):
-                        return mdd
-
-                    mdd = lookup_mdd(mdd, mdd_obj.MDD_cache, tuple(row[:level]))
+                    mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
 
                     B = {}
 
-                    for key in mdd.transition.keys():
-                        reduced_mdd = reduce_mdd(row, mdd.transition[key], mdd_obj, level + 1)
+                    for key in mdd_node.transition.keys():
+                        reduced_mdd = reduce_mdd(row, mdd_node.transition[key], mdd, level + 1)
                         if reduced_mdd != False:
                             B[key] = reduced_mdd
 
                     if len(B.keys()) == 0:
                         return False
 
-                    G = MDD_node(mdd.mdd_id, level, B)
-                    for (G_key, G_elem) in mdd_obj.MDD_cache.items():
-
-                        if reduced_key(G_key) != mdd.mdd_id:
-
+                    G = MDD_node(mdd_node.node_id, level, B)
+                    for (G_key, G_elem) in mdd.MDD_cache.items():
+                        if G_key.node_id != mdd_node.node_id:
                             if G_elem == G:
-
-                                mdd_obj.MDD_cache[G.mdd_id] = Lookup(G_elem.mdd_id)
-                                mdd_obj.repeated_keys.add(G_elem.mdd_id)
-                                return Lookup(G_elem.mdd_id)
+                                mdd.repeated_keys.add(G_elem.node_id)
+                                return Lookup(G_elem.node_id).__deepcopy__()
                     else:
-                        mdd_obj.MDD_cache[mdd.mdd_id] = G
-                        return Lookup(mdd.mdd_id)
+                        mdd.MDD_cache[Lookup(mdd_node.node_id)] = G
+                        return Lookup(mdd_node.node_id)
 
-                def add_row_to_mdd(row, mdd, mdd_obj, level=0, diff_level=None):
-                    mdd = lookup_mdd(mdd, mdd_obj.MDD_cache, tuple(row[:level]))
-                    tuple_key = tuple(row[:level])
-                    if isinstance(mdd, MDD_node):
-                        if mdd.mdd_id in mdd_obj.repeated_keys:
-                            mdd_obj.MDD_cache[mdd.mdd_id] = MultiLookup((mdd.mdd_id, 0), (mdd.mdd_id, 1))
-                            mdd_obj.MDD_cache[(mdd.mdd_id, 0)] = mdd.deepcopy()
-                            mdd_obj.MDD_cache[(mdd.mdd_id, 1)] = mdd
-                            tuple_key = (mdd.mdd_id, 1)
+                def add_row_to_mdd(row, mdd_node, mdd, level=0, diff_level=None):
+                    mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
+                    tuple_key = Lookup(tuple(row[:level]))
+                    if isinstance(mdd_node, MDD_node):
+                        if mdd_node.node_id in mdd.repeated_keys:
+                            mdd.MDD_cache[tuple_key] = mdd.MDD_cache[tuple_key].deepcopy()
+                            tuple_key = tuple_key.incr()
 
                     if level == len(row):
                         return TerminatingState.SNK
 
                     value = row[level]
 
-                    if value not in mdd.transition:
-                        mdd.transition[value] = add_row_to_mdd(row, MDD_node(tuple(row[:(level + 1)]), level + 1, {}),
-                                                               mdd_obj, level + 1, diff_level)
-                        mdd_obj.MDD_cache[tuple_key] = mdd
+                    if value not in mdd_node.transition:
+                        mdd_node.transition[value] = add_row_to_mdd(row,
+                                                                    MDD_node(tuple(row[:(level + 1)]), level + 1, {}),
+                                                                    mdd, level + 1, diff_level)
+                        mdd.MDD_cache[tuple_key] = mdd_node
 
                         if reduce:
                             if level == diff_level:
-                                for key in mdd.transition:
+                                for key in mdd_node.transition:
                                     if key < value:
-                                        reduced_mdd = reduce_mdd(row, mdd.transition[key], mdd_obj, level + 1)
-                                        mdd.transition[key] = reduced_mdd
+                                        reduced_mdd = reduce_mdd(row, mdd_node.transition[key], mdd, level + 1)
+                                        mdd_node.transition[key] = reduced_mdd
 
                     else:
-                        mdd.transition[value] = add_row_to_mdd(row, mdd.transition[value], mdd_obj, level + 1,
-                                                               diff_level)
-                        mdd_obj.MDD_cache[tuple(row[:level])] = mdd
+                        mdd_node.transition[value] = add_row_to_mdd(row, mdd_node.transition[value], mdd, level + 1,
+                                                                    diff_level)
+                        mdd.MDD_cache[tuple_key] = mdd_node
 
-                    return Lookup(tuple_key)
+                    return tuple_key
 
                 def find_different_level(row1, row2):
                     mask = row1 < row2
@@ -563,11 +546,11 @@ class CPM_gurobi(SolverInterface):
                     if table.size == 0:
                         return
 
-                    mdd_obj = MDD()
+                    mdd = MDD()
 
-                    mdd = MDD_node(tuple(), 0, {})
+                    mdd_node = MDD_node(tuple(), 0, {})
 
-                    mdd = add_row_to_mdd(table[0], mdd, mdd_obj, 0, None)
+                    mdd_node = add_row_to_mdd(table[0], mdd_node, mdd, 0, None)
                     for i in range(1, table.shape[0]):
                         row = table[i]
                         prev_row = table[i - 1]
@@ -575,10 +558,9 @@ class CPM_gurobi(SolverInterface):
                         diff_level = find_different_level(prev_row, row)
 
                         if diff_level != -1:
-                            mdd = add_row_to_mdd(row, mdd, mdd_obj, 0, diff_level)
+                            mdd_node = add_row_to_mdd(row, mdd_node, mdd, 0, diff_level)
 
-                    return mdd_obj.MDD_cache
-
+                    return mdd.MDD_cache
 
                 class Flow:
                     def __init__(self):
@@ -620,7 +602,7 @@ class CPM_gurobi(SolverInterface):
 
                     for key in cache.keys():
 
-                        val = lookup_mdd(cache[key], cache, key)
+                        val = lookup_mdd(cache[key], cache)
 
                         for (k,v) in val.transition.items():
                             column = sum(domains[:val.level]) + k - lb[val.level]
@@ -631,7 +613,7 @@ class CPM_gurobi(SolverInterface):
                             column_counter[column] += 1
                             flow[key].add_flow_out((column, column_counter[column]))
                             if isinstance(v, Lookup):
-                                flow[v.mdd_id].add_flow_in((column, column_counter[column]))
+                                flow[v].add_flow_in((column, column_counter[column]))
                             if isinstance(v, TerminatingState):
                                 flow['snk'].add_flow_in((column, column_counter[column]))
 
@@ -651,11 +633,11 @@ class CPM_gurobi(SolverInterface):
                                 substitution[(key, n)] = bvs[n - 1]
 
 
-                    for key in flow.keys() - {tuple(), "snk"}:
+                    for key in flow.keys() - {Lookup(tuple(), 1), "snk"}:
                         cons += [cp.sum([substitution[(c,m)] for (c,m) in flow[key].flow_in]) == cp.sum([substitution[(c, m)] for (c, m) in flow[key].flow_out])]
 
                     cons += [cp.sum([substitution[(c,m)] for (c,m) in flow['snk'].flow_in]) == 1]
-                    cons += [cp.sum([substitution[(c,m)] for (c,m) in flow[tuple()].flow_out]) == 1]
+                    cons += [cp.sum([substitution[(c,m)] for (c,m) in flow[Lookup(tuple(), 1)].flow_out]) == 1]
 
                     return cons
 
