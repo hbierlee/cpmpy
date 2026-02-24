@@ -245,7 +245,7 @@ class CPM_gurobi(SolverInterface):
             parts += [i] * len(xs)
 
         X_enc = np.array(X_enc)
-        parts = np.array(parts)
+        parts = np.array(parts, dtype=int)
 
         # Remove constant columns (all True or all False)
         for polarity in (True, False):

@@ -18,7 +18,7 @@ from cpmpy.expressions.utils import argvals
 from cpmpy.transformations.get_variables import get_variables, get_variables_model
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.expressions.utils import show_assignment, dom_size
-from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic, Coverlift
+from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic, Coverlift, TableData
 from cpmpy.solvers.ortools import CPM_ortools
 from cpmpy.tools.xcsp3.experiments import get_solvers
 
@@ -567,7 +567,8 @@ class TestTables:
                 X_enc = X_enc[COLS]
 
             print(" ", np.array(X_enc))
-            explanation = slv.explain(A_enc, T_enc, parts, frm=frm)
+            tbl = TableData(X_enc, T_enc, parts, None, slv)
+            explanation = tbl.explain(A_enc, frm=frm)
             if explanation is None:
                 print("Infeasible")
             else:
@@ -797,7 +798,7 @@ class TestTables:
                     k = 0
                     explanation = (C_enc != 0, C_enc, k)
                 else:
-                    explanation = slv.explain(A_enc, T_enc, parts, frm=frm)
+                    explanation = tbl.explain(A_enc, frm=frm)
 
                 e = slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
                 print(e)

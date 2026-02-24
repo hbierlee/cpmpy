@@ -155,13 +155,48 @@ class TableData:
         self.cpm_expr = cpm_expr  # the original CPMpy table constraint expression
         self.solver = solver  # reference to the solver instance
 
+        if self.env["negatives"]:
+            self.T_enc = np.concatenate([self.T_enc, ~self.T_enc], axis=1, dtype=bool)
+            assert np.issubdtype(self.T_enc.dtype, np.bool), self.T_enc.dtype
+            # TODO !!
+            # self.parts = np.concatenate([self.parts, self.parts])
+            assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
+            self.parts = (
+                np.concatenate([self.parts, np.arange(max(self.parts + 1), max(self.parts + 1) + len(self.parts))], dtype=int)
+                if self.parts.size
+                else self.parts
+            )
+            assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
 
     @property
     def env(self):
         return self.solver.env
 
     def is_feasible(self, A_enc):
-        return (self.T_enc == A_enc).all(1).any()
+        T_enc = self.T_enc[:, : len(self.X_enc)] if self.env["negatives"] else self.T_enc
+        return (T_enc == A_enc).all(1).any()
+
+    def cols(self):
+        return (len(self.T_enc.T) // 2) if self.env["negatives"] else len(self.T_enc.T)
+
+    def get_expr(self, X, C_enc, k):
+        return cp.sum(C_enc[X] * self.X_enc[X]) <= k
+
+    def show_cut(self, X, C_enc, k, verbosity=2):
+        if self.solver.env["verbosity"]:
+            terms = []
+            for i, c in enumerate(C_enc):
+                if c:
+                    if self.solver.env["negatives"] and i >= self.cols():
+                        terms.append(f"{c} * (1 - b_{show(i - self.cols())})")
+                    else:
+                        terms.append(f"{c} * b_{show(i)}")
+            cut_str = " + ".join(terms)
+            self.solver.log(
+                f"cut == {cut_str} <= {k}",
+                indent=2,
+                verbosity=verbosity,
+            )
 
     def explain(self, A_enc, frm=None):
         """The `explain_frac2` alg."""
@@ -169,6 +204,9 @@ class TableData:
         parts = self.parts
         X_enc = self.X_enc
         solver = self.solver
+
+        if self.env["negatives"]:
+            A_enc = np.concatenate([A_enc, ~A_enc])
 
         def assert_example(A, B):
             assert (A.nonzero()[0] == [i - 1 for i in B]).all(), A.nonzero()[0]
@@ -181,16 +219,16 @@ class TableData:
             solver.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
             solver.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
 
-        assert len(A_enc) == len(T_enc.T)
+        # assert len(A_enc) == len(T_enc.T)
 
         C_enc = np.zeros(len(A_enc), dtype=int)
-        A_enc_pos = solver.is_gt(A_enc, 0.0)
 
         self.env["cuts"].append({"from": frm})
 
         m = len(T_enc)  # number of cols
         W = solver.is_ge(A_enc, 1.0)
 
+        A_enc_pos = solver.is_gt(A_enc, 0.0)
         F = (~W) & A_enc_pos
 
         if self.env["verbosity"]:
@@ -217,7 +255,7 @@ class TableData:
                 return True
             else:
                 R = np.ones(m, dtype=bool)
-                choice = solver.choose(U, T_enc, R, parts, A_enc, C_enc, heuristic=self.env["heuristic"])
+                choice = solver.choose(U & A_enc_pos, T_enc, R, parts, A_enc, C_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
@@ -243,10 +281,6 @@ class TableData:
 
                 if self.env["verbosity"]:
                     solver.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=solver.indent + 2)
-                    solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
-                    solver.log(f"R ({R.sum()}) = {show_nz(R)}", verbosity=3, indent=solver.indent + 2)
-                    solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
-                    solver.log(f"C_enc {C_enc}", verbosity=3, indent=solver.indent + 2)
 
         else:
             R = np.ones(m, dtype=bool)
@@ -256,44 +290,45 @@ class TableData:
 
         if self.env["verbosity"]:
             solver.log(f"R ({R.sum()})", verbosity=2, indent=solver.indent + 2)
+            solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
+            solver.log(f"C_enc {C_enc}", verbosity=3, indent=solver.indent + 2)
+            solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
 
         for iteration in itertools.count():
             if none(R):
                 break
 
-            neg_choices = choices & ~A_enc_pos
-            make_pos_choice = R.sum() >= self.env["negatives"] or not neg_choices.any()
-            choice = solver.choose(
-                (choices & A_enc_pos) if make_pos_choice else neg_choices,
-                T_enc,
-                R,
-                parts if make_pos_choice else np.arange(len(T_enc.T)),
-                A_enc,
-                C_enc,
-                heuristic=self.env["heuristic"],
-                make_pos_choice=make_pos_choice,
-            )
-            is_pos = A_enc_pos[choice]
+            choice = solver.choose(choices & A_enc_pos, T_enc, R, parts, A_enc, C_enc, heuristic=self.env["heuristic"])
 
             if choice is None:
                 # this can happen only if assignment is feasible
                 raise Exception("No choices left for ", frm)
 
+            is_pos = choice < self.cols()
+
             l_parts = parts[choice] == parts
             assert not C_enc[choice], f"chosen {choice}"
-            if is_pos:
-                C_ = l_parts & A_enc_pos
-                choices[l_parts] = False
-                R = R & T_enc[:, C_].any(1)
-                X |= C_
-                C_enc[X] = 1
-                k += 1
-            else:
-                C_ = choice
-                choices[choice] = False
-                R = R & (~T_enc[:, choice])
-                X[choice] = True
-                C_enc[choice] = -1
+
+            C_ = l_parts & A_enc_pos
+            choices[l_parts] = False
+            R = R & T_enc[:, C_].any(1)
+            X |= C_
+            C_enc[X] = 1
+            k += 1
+
+            # if is_pos:
+            #     C_ = l_parts & A_enc_pos
+            #     choices[l_parts] = False
+            #     R = R & T_enc[:, C_].any(1)
+            #     X |= C_
+            #     C_enc[X] = 1
+            #     k += 1
+            # else:
+            #     C_ = choice
+            #     choices[choice] = False
+            #     R = R & (~T_enc[:, choice])
+            #     X[choice] = True
+            #     C_enc[choice] = -1
 
             solver.check_max_iterations(iteration)
 
@@ -321,39 +356,169 @@ class TableData:
             solver.log("C_enc", C_enc, verbosity=3)
             assert C_enc[X].all()
 
-        solver.show_cut(X, C_enc, k)
-        if self.env["debug"] and X_enc is not None:
-            expr = cp.sum(C_enc[X] * X_enc[X]) <= k
-            solver.show_cut(X, C_enc, k)
-            solver.check_explanation(expr, X_enc, A_enc, T_enc, frm)
+        self.show_cut(X, C_enc, k)
+
+        # if self.env["debug"] and X_enc is not None:
+        #     expr = self.get_expr(X, C_enc, k)
+        #     solver.show_cut(X, C_enc, k)
+        #     solver.check_explanation(expr, X_enc, A_enc, T_enc, frm)
 
         if self.env["coverlift"]:
             if self.env["verbosity"]:
                 Xl = X.sum()
-            X, C_enc, k = solver.gencoverlift(
-                X,
-                C_enc,
-                k,
-                T_enc,
-                A_enc,
-                parts,
-                X_enc=X_enc,
-                heuristic=self.env["coverlift"],
-                frm=frm,
-            )
+            X, C_enc, k = self.gencoverlift(X, C_enc, k, A_enc, heuristic=self.env["coverlift"], frm=frm)
             if self.env["verbosity"]:
                 solver.log("coverlift added ", X.sum() - Xl, "of", Xl, verbosity=2)
 
-            solver.show_cut(X, C_enc, k)
+            self.show_cut(X, C_enc, k)
 
         if self.env["shrink"]:
             C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
 
-        solver.show_cut(X, C_enc, k, verbosity=1)
+        self.show_cut(X, C_enc, k, verbosity=1)
 
         self.env["cuts"][-1]["size"] = len(X)
 
         return X, C_enc, k
+
+    def gencoverlift(self, S, C_enc, k, A_enc, heuristic=Coverlift.INPUT, frm=None):
+        solver = self.solver
+        T_enc, parts = self.T_enc, self.parts
+
+        if self.env["verbosity"]:
+            solver.log("gencoverlift", verbosity=2)
+            solver.log("T_enc", T_enc.shape)
+            solver.log(show_table(T_enc, full=self.env["verbosity"] == 3), verbosity=3)
+            solver.log(f"parts = {show_table(parts)}", verbosity=3)
+
+        R = np.ones(len(T_enc), dtype=bool)
+
+        def tight(R, RS):
+            return R & (RS == k)
+
+        # Compute the upper bound for each row
+        RS = (C_enc * T_enc).sum(axis=1)
+
+        # All rows where upper bound == k are tight
+        R_tight = tight(R, RS)
+
+        # We cannot select a column if it has a 1 in any tight row
+        X = T_enc[R_tight, :].any(0)
+
+        if self.env["verbosity"]:
+            solver.log(f"Coverlift from {show_nz(~X)}", verbosity=3)
+            solver.log(show_table(T_enc[R, :]), verbosity=3)
+            solver.log("", show_table(C_enc), "C_enc <=", k, verbosity=3)
+
+            solver.log("RS (row slack?)", show_table(RS), verbosity=3)
+            solver.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
+            solver.log(f"X = {show_nz(X)}", verbosity=3)
+            solver.log(f"S_ = {show_nz(S)}", verbosity=3)
+            solver.log(f"k_ = {k}", verbosity=3)
+
+        # centre of mass heuristic
+        if heuristic in (Coverlift.COM_MIN, Coverlift.COM_MAX):
+            com = T_enc.sum(axis=0) / len(T_enc)
+            if self.env["verbosity"]:
+                solver.log("COM", T_enc.sum(axis=0), verbosity=3)
+                solver.log("COM", com, verbosity=2)
+
+        for iteration in itertools.count(1):
+            if self.env["verbosity"]:
+                solver.log(f"coverlift #{iteration}", verbosity=3)
+            if X.all():
+                break
+
+            assert (
+                not self.env["example2"]
+                or (
+                    R_tight
+                    == [
+                        [False, True, False, False, True],
+                        [False, True, True, False, True],
+                        [True, True, True, False, True],
+                    ][iteration]
+                ).all()
+            ), f"{iteration}; {R_tight}"
+
+            assert (
+                not self.env["example2"]
+                or (
+                    X
+                    == [
+                        [False, True, True, False, True, True, False, False, True, False],
+                        [False, True, True, True, True, True, True, False, True, True],
+                        [False, True, True, True, True, True, True, True, True, True],
+                        # [i in s for i in range(len(T_enc.T))]
+                        # for s in [{2, 3, 5, 6, 9}, {2, 3, 4, 5, 6, 7, 9, 10}, {2, 3, 4, 5, 6, 7, 8, 9, 10}]
+                    ][iteration]
+                ).all()
+            ), f"{iteration}; {[i + 1 for i in X.nonzero()[0]]}"
+
+            # The choices are the unselected columns
+            choices = np.where(X, np.nan, X)
+
+            match heuristic:
+                case _ if self.env["example2"]:
+                    j = [3, 7, 0][iteration]
+                case Coverlift.INPUT:
+                    j = np.nanargmax(choices)
+                case Coverlift.INPUT_LAST:
+                    j = len(choices) - 1 - np.nanargmax(choices[::-1])
+                case Coverlift.COM_MIN:
+                    direction = com - np.where(X, np.nan, A_enc)
+                    j = np.nanargmin(direction)
+                case Coverlift.COM_MAX:
+                    direction = com - np.where(X, np.nan, A_enc)
+                    if self.env["verbosity"]:
+                        solver.log("direction", direction, verbosity=2)
+                    j = np.nanargmax(direction)
+
+            assert not X[j]
+
+            # any pure 0/1 columns have been filtered out, a min always exists
+            a_j = np.min(k - RS[(~R_tight) & T_enc[:, j]])
+
+            if self.env["verbosity"]:
+                solver.log(f"Lift j={j} : {a_j}*b_{show(j)}", verbosity=2)
+
+            # assert C_enc[j] == 0
+            # Calculate new row upper bounds just for the added column
+            RS = RS + a_j * T_enc[:, j]
+
+            # Find and update newly tight rows
+            N_tight = tight(~R_tight, RS)
+            R_tight |= N_tight
+
+            # Add var and coefficient to cut
+            S[j] = True
+            C_enc[j] = a_j
+
+            X |= T_enc[N_tight, :].any(0)
+
+            if self.env["verbosity"]:
+                solver.log(f"S = {show_nz(S)}", verbosity=3)
+                solver.log("", show_table(C_enc), "C_enc <=", k, verbosity=3)
+                solver.log("a_j", a_j, verbosity=3)
+                solver.log("RS (row slack?)", show_table(RS), verbosity=3)
+                # solver.log(f"N_tight = {show_nz(N_tight)}", verbosity=3)
+                solver.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
+                solver.log(f"X = {show_nz(X)}", verbosity=3)
+                solver.log(f"choices = {show_nz(~X)}", verbosity=3)
+                # solver.log("A", a_j * T_enc_.T[j], verbosity=3)
+
+            assert not self.env["example2"] or a_j == [2, 1, 1][iteration]
+
+            assert (
+                not self.env["example2"] or (RS == [[1.0, 2.0, 0.0, 1.0, 2.0], [1.0, 2.0, 2.0, 1.0, 2.0], RS][iteration]).all()
+            ), f"{iteration}; {RS}"
+
+            solver.check_max_iterations(iteration)
+
+            assert X[j], f"{show(j)} not chosen in {X}"
+            self.show_cut(S, C_enc, k)
+
+        return solver.revert_cut(S, C_enc, k)
 
 
 def normalize_table(table):
@@ -501,7 +666,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "avg_power": (sum(s["power"] for s in cuts) / len(cuts)) if cuts and self.env["checked"] else None,
         }
 
-    def choose(self, choices, T_enc, R, parts, A_enc, C_enc, heuristic=Heuristic.GREEDY, make_pos_choice=True):
+    def choose(self, choices, T_enc, R, parts, A_enc, C_enc, heuristic=Heuristic.GREEDY):
+
+        if R.sum() <= self.env["negatives"]:
+            choices[: (len(T_enc.T) // 2)] = False
+
         if self.env["verbosity"]:
             self.log(f"Choose from {show_nz(choices)} to allow remaining rows R=\n{show_nz(R)}", verbosity=3)
             self.log(show_table(T_enc[R, :]), verbosity=3)
@@ -516,7 +685,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             case Heuristic.INPUT:
                 return np.argmax(choices)
             case Heuristic.GREEDY:
-                T_enc = T_enc if make_pos_choice else ~T_enc
+                # T_enc = T_enc if make_pos_choice else ~T_enc
                 parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
                 parts_ -= parts_[0]
                 # map back to the right part index
@@ -570,178 +739,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["verbosity"] and shrunk:
             self.log(f"shrunk by {shrunk}", verbosity=1)
         return C_enc, k
-
-    def gencoverlift(self, S, C_enc, k, T_enc, A_enc, parts, X_enc=None, heuristic=Coverlift.INPUT, frm=None):
-        if self.env["debug"] and X_enc is not None:
-            expr = cp.sum(C_enc[S] * X_enc[S]) <= k
-            self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
-
-        if self.env["negatives"]:
-            T_enc = np.concatenate([T_enc, ~T_enc], axis=1)
-            S = C_enc != 0
-            S = np.concatenate([S, S])
-            k = k + np.maximum(-C_enc, 0).sum()
-            C_enc = np.concatenate([np.maximum(C_enc, 0), np.maximum(-C_enc, 0)])
-
-        # else:
-        #     T_enc = T_enc
-        #     S = S
-        #     C_enc = C_enc
-        #     k = k
-
-        if self.env["verbosity"]:
-            self.log("gencoverlift", verbosity=2)
-            self.log("T_enc", T_enc.shape)
-            self.log(show_table(T_enc, full=self.env["verbosity"] == 3), verbosity=3)
-            self.log(f"parts = {show_table(parts)}", verbosity=3)
-
-            print("CUT")
-            S_, C_enc_, k_ = self.revert_cut(S, C_enc, k)
-            expr = cp.sum(C_enc_[S_] * X_enc[S_]) <= k_
-            self.show_cut(S_, C_enc_, k_)
-
-        R = np.ones(len(T_enc), dtype=bool)
-
-        def tight(R, RS):
-            return R & (RS == k)
-
-        # Compute the upper bound for each row
-        RS = (C_enc * T_enc).sum(axis=1)
-
-        # All rows where upper bound == k are tight
-        R_tight = tight(R, RS)
-
-        # We cannot select a column if it has a 1 in any tight row
-        X = T_enc[R_tight, :].any(0)
-
-        if self.env["verbosity"]:
-            self.log(f"Coverlift from {show_nz(~X)}", verbosity=3)
-            self.log(show_table(T_enc[R, :]), verbosity=3)
-            self.log("", show_table(C_enc), "C_enc <=", k, verbosity=3)
-
-            self.log("RS (row slack?)", show_table(RS), verbosity=3)
-            self.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
-            self.log(f"X = {show_nz(X)}", verbosity=3)
-            self.log(f"S_ = {show_nz(S)}", verbosity=3)
-            self.log(f"k_ = {k}", verbosity=3)
-
-        # centre of mass heuristic
-        if heuristic in (Coverlift.COM_MIN, Coverlift.COM_MAX):
-            com = T_enc.sum(axis=0) / len(T_enc)
-            if self.env["verbosity"]:
-                self.log("COM", T_enc.sum(axis=0), verbosity=3)
-                self.log("COM", com, verbosity=2)
-
-        for iteration in itertools.count(1):
-            if self.env["verbosity"]:
-                self.log(f"coverlift #{iteration}", verbosity=3)
-            if X.all():
-                break
-
-            assert (
-                not self.env["example2"]
-                or (
-                    R_tight
-                    == [
-                        [False, True, False, False, True],
-                        [False, True, True, False, True],
-                        [True, True, True, False, True],
-                    ][iteration]
-                ).all()
-            ), f"{iteration}; {R_tight}"
-
-            assert (
-                not self.env["example2"]
-                or (
-                    X
-                    == [
-                        [False, True, True, False, True, True, False, False, True, False],
-                        [False, True, True, True, True, True, True, False, True, True],
-                        [False, True, True, True, True, True, True, True, True, True],
-                        # [i in s for i in range(len(T_enc.T))]
-                        # for s in [{2, 3, 5, 6, 9}, {2, 3, 4, 5, 6, 7, 9, 10}, {2, 3, 4, 5, 6, 7, 8, 9, 10}]
-                    ][iteration]
-                ).all()
-            ), f"{iteration}; {[i + 1 for i in X.nonzero()[0]]}"
-
-            # The choices are the unselected columns
-            choices = np.where(X, np.nan, X)
-
-            match heuristic:
-                case _ if self.env["example2"]:
-                    j = [3, 7, 0][iteration]
-                case Coverlift.INPUT:
-                    j = np.nanargmax(choices)
-                case Coverlift.INPUT_LAST:
-                    j = len(choices) - 1 - np.nanargmax(choices[::-1])
-                case Coverlift.COM_MIN:
-                    direction = com - np.where(X, np.nan, A_enc)
-                    j = np.nanargmin(direction)
-                case Coverlift.COM_MAX:
-                    direction = com - np.where(X, np.nan, A_enc)
-                    if self.env["verbosity"]:
-                        self.log("direction", direction, verbosity=2)
-                    j = np.nanargmax(direction)
-
-            assert not X[j]
-
-            # any pure 0/1 columns have been filtered out, a min always exists
-            a_j = np.min(k - RS[(~R_tight) & T_enc[:, j]])
-
-            if self.env["verbosity"]:
-                self.log(f"Lift j={j} : {a_j}*b_{show(j)}", verbosity=2)
-
-            # assert C_enc[j] == 0
-            # Calculate new row upper bounds just for the added column
-            RS = RS + a_j * T_enc[:, j]
-
-            # Find and update newly tight rows
-            N_tight = tight(~R_tight, RS)
-            R_tight |= N_tight
-
-            # Add var and coefficient to cut
-            S[j] = True
-            C_enc[j] = a_j
-
-            X |= T_enc[N_tight, :].any(0)
-
-            if self.env["verbosity"]:
-                self.log(f"S = {show_nz(S)}", verbosity=3)
-                self.log("", show_table(C_enc), "C_enc <=", k, verbosity=3)
-                self.log("a_j", a_j, verbosity=3)
-                self.log("RS (row slack?)", show_table(RS), verbosity=3)
-                # self.log(f"N_tight = {show_nz(N_tight)}", verbosity=3)
-                self.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
-                self.log(f"X = {show_nz(X)}", verbosity=3)
-                self.log(f"choices = {show_nz(~X)}", verbosity=3)
-                # self.log("A", a_j * T_enc_.T[j], verbosity=3)
-
-            assert not self.env["example2"] or a_j == [2, 1, 1][iteration]
-
-            assert (
-                not self.env["example2"] or (RS == [[1.0, 2.0, 0.0, 1.0, 2.0], [1.0, 2.0, 2.0, 1.0, 2.0], RS][iteration]).all()
-            ), f"{iteration}; {RS}"
-
-            self.check_max_iterations(iteration)
-
-            assert X[j], f"{show(j)} not chosen in {X}"
-            self.show_cut(S, C_enc, k)
-
-            if self.env["debug"] and X_enc is not None:
-                S_, C_enc_, k_ = self.revert_cut(S, C_enc, k)
-                expr = cp.sum(C_enc_[S_] * X_enc[S_]) <= k_
-                self.show_cut(S_, C_enc_, k_)
-                self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
-
-        return self.revert_cut(S, C_enc, k)
-
-    def show_cut(self, X, C_enc, k, verbosity=2):
-        if self.env["verbosity"]:
-            self.log(
-                f"cut == {' + '.join(f'{c} * b_{show(i)}' for i, c in enumerate(C_enc) if c)} <= {k}",
-                indent=2,
-                verbosity=verbosity,
-            )
 
     def check_max_iterations(self, i):
         # Loop termination for debug purposes
@@ -835,7 +832,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             (X, C_enc, k) = explanation
             expr = cp.sum(C_enc[X] * X_enc[X]) <= k
             if self.env["verbosity"]:
-                self.show_cut(X, C_enc, k)
                 self.log(f"  == {expr}", indent=2, verbosity=2)
 
         if isinstance(expr, (bool, np.bool_)):
@@ -880,11 +876,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if is_integer and tbl.is_feasible(A_enc):
                 if self.env["verbosity"]:
                     self.log(
-                        f"table {i}/{len(self.tables)} feasible: ({show_nz((T_enc == A_enc).all(1))})",
+                        f"table {i}/{len(self.tables)} feasible:",
                         verbosity=4,
                     )
                     self.log(
-                        f"by {show_table(A_enc)}\n\n{np.astype(T_enc, int)}",
+                        f"by {show_table(A_enc)}\n\n{show_table(T_enc)}",
                         verbosity=4,
                         indent=2,
                     )
