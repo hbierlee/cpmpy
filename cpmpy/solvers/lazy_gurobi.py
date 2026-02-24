@@ -148,11 +148,212 @@ class Coverlift(Feature):
 class TableData:
     """Data structure for an encoded table constraint."""
 
-    def __init__(self, X_enc, T_enc, parts, cpm_expr):
-        self.X_enc = X_enc      # numpy array of encoded boolean variables
-        self.T_enc = T_enc      # numpy array of the encoded table (boolean matrix)
-        self.parts = parts      # numpy array: which original variable each encoded var corresponds to
+    def __init__(self, X_enc, T_enc, parts, cpm_expr, solver):
+        self.X_enc = X_enc  # numpy array of encoded boolean variables
+        self.T_enc = T_enc  # numpy array of the encoded table (boolean matrix)
+        self.parts = parts  # numpy array: which original variable each encoded var corresponds to
         self.cpm_expr = cpm_expr  # the original CPMpy table constraint expression
+        self.solver = solver  # reference to the solver instance
+
+
+    @property
+    def env(self):
+        return self.solver.env
+
+    def is_feasible(self, A_enc):
+        return (self.T_enc == A_enc).all(1).any()
+
+    def explain(self, A_enc, frm=None):
+        """The `explain_frac2` alg."""
+        T_enc = self.T_enc
+        parts = self.parts
+        X_enc = self.X_enc
+        solver = self.solver
+
+        def assert_example(A, B):
+            assert (A.nonzero()[0] == [i - 1 for i in B]).all(), A.nonzero()[0]
+
+        # TODO convert T_enc to set of tuples?
+
+        if self.env["verbosity"]:
+            solver.log(f"Explain frm={frm}", end="\n", verbosity=2)
+            solver.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc, "A_enc", verbosity=3, indent=0)
+            solver.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
+            solver.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
+
+        assert len(A_enc) == len(T_enc.T)
+
+        C_enc = np.zeros(len(A_enc), dtype=int)
+        A_enc_pos = solver.is_gt(A_enc, 0.0)
+
+        self.env["cuts"].append({"from": frm})
+
+        m = len(T_enc)  # number of cols
+        W = solver.is_ge(A_enc, 1.0)
+
+        F = (~W) & A_enc_pos
+
+        if self.env["verbosity"]:
+            solver.log(f"W = {show_nz(W)}", verbosity=3)
+            solver.log(f"F = {show_nz(F)}", verbosity=3)
+
+        if F.any():
+            # D are the difficult rows which only contains 1s for each W/F columns
+            if self.env["verbosity"]:
+                solver.log(show_table((W | F) >= T_enc))
+            D = ((W | F) >= T_enc).all(1)
+
+            if self.env["verbosity"]:
+                solver.log(f"D = {show_nz(D)}", verbosity=3)
+            # then U are rows fractional columns which are not in D
+            U = F > ~((~T_enc[D, :]).all(0))  # tricky
+
+            if self.env["verbosity"]:
+                solver.log(f"U = {show_nz(U)}", verbosity=3)
+
+            if none(U):
+                if self.env["verbosity"]:
+                    solver.log("unexplainable, because U is empty", indent=2, verbosity=3)
+                return True
+            else:
+                R = np.ones(m, dtype=bool)
+                choice = solver.choose(U, T_enc, R, parts, A_enc, C_enc, heuristic=self.env["heuristic"])
+
+                if self.env["example_frac"]:
+                    assert_example(W, [6])
+                    assert_example(F, [2, 3, 8, 9])
+                    assert_example(D, [2])
+                    assert_example(U, [2, 8])
+                    choice = 2 - 1
+
+                # TODO [peter] should be T_hat[choice]?
+                choices = np.ones(len(T_enc.T), dtype=bool)
+                choices[parts[choice] == parts] = False
+                X = np.zeros(len(T_enc.T), dtype=bool)
+                X[choice] = True
+                C_enc[choice] = 1
+                R = T_enc[:, choice]
+                k = 0
+
+                if self.env["example_frac"]:
+                    assert_example(X, [2])
+                    assert k == 0
+                    assert_example(R, [1, 5])
+                    assert parts[choice] == 1 - 1
+
+                if self.env["verbosity"]:
+                    solver.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"R ({R.sum()}) = {show_nz(R)}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"C_enc {C_enc}", verbosity=3, indent=solver.indent + 2)
+
+        else:
+            R = np.ones(m, dtype=bool)
+            X = np.zeros(len(T_enc.T), dtype=bool)
+            choices = np.ones(len(T_enc.T), dtype=bool)
+            k = -1
+
+        if self.env["verbosity"]:
+            solver.log(f"R ({R.sum()})", verbosity=2, indent=solver.indent + 2)
+
+        for iteration in itertools.count():
+            if none(R):
+                break
+
+            neg_choices = choices & ~A_enc_pos
+            make_pos_choice = R.sum() >= self.env["negatives"] or not neg_choices.any()
+            choice = solver.choose(
+                (choices & A_enc_pos) if make_pos_choice else neg_choices,
+                T_enc,
+                R,
+                parts if make_pos_choice else np.arange(len(T_enc.T)),
+                A_enc,
+                C_enc,
+                heuristic=self.env["heuristic"],
+                make_pos_choice=make_pos_choice,
+            )
+            is_pos = A_enc_pos[choice]
+
+            if choice is None:
+                # this can happen only if assignment is feasible
+                raise Exception("No choices left for ", frm)
+
+            l_parts = parts[choice] == parts
+            assert not C_enc[choice], f"chosen {choice}"
+            if is_pos:
+                C_ = l_parts & A_enc_pos
+                choices[l_parts] = False
+                R = R & T_enc[:, C_].any(1)
+                X |= C_
+                C_enc[X] = 1
+                k += 1
+            else:
+                C_ = choice
+                choices[choice] = False
+                R = R & (~T_enc[:, choice])
+                X[choice] = True
+                C_enc[choice] = -1
+
+            solver.check_max_iterations(iteration)
+
+            if self.env["verbosity"]:
+                solver.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
+                solver.log(
+                    f"chosen {'pos' if is_pos else 'neg'} col. {show_ind(choice)} of part {parts[choice]}",
+                    verbosity=3,
+                    indent=solver.indent + 2,
+                )
+                solver.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
+                solver.log(f"C_ {show_nz(C_)}", verbosity=3, indent=solver.indent + 2)
+                if F.any():
+                    solver.log("FRAC", frm, verbosity=2, indent=solver.indent + 2)
+                solver.log(
+                    f"R choice = {'+' if is_pos else '-'}b_{show(choice)} -> ({R.sum()})", verbosity=2, indent=solver.indent + 2
+                )
+                solver.log(f"= {show_nz(R)}", verbosity=3, indent=solver.indent + 3)
+                solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
+                solver.log(f"C_enc {C_enc}", verbosity=3, indent=solver.indent + 2)
+
+        if self.env["verbosity"]:
+            solver.log(f"by explanation of size ({sum(X)})", verbosity=2)
+            solver.log(show_nz(X), verbosity=3)
+            solver.log("C_enc", C_enc, verbosity=3)
+            assert C_enc[X].all()
+
+        solver.show_cut(X, C_enc, k)
+        if self.env["debug"] and X_enc is not None:
+            expr = cp.sum(C_enc[X] * X_enc[X]) <= k
+            solver.show_cut(X, C_enc, k)
+            solver.check_explanation(expr, X_enc, A_enc, T_enc, frm)
+
+        if self.env["coverlift"]:
+            if self.env["verbosity"]:
+                Xl = X.sum()
+            X, C_enc, k = solver.gencoverlift(
+                X,
+                C_enc,
+                k,
+                T_enc,
+                A_enc,
+                parts,
+                X_enc=X_enc,
+                heuristic=self.env["coverlift"],
+                frm=frm,
+            )
+            if self.env["verbosity"]:
+                solver.log("coverlift added ", X.sum() - Xl, "of", Xl, verbosity=2)
+
+            solver.show_cut(X, C_enc, k)
+
+        if self.env["shrink"]:
+            C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
+
+        solver.show_cut(X, C_enc, k, verbosity=1)
+
+        self.env["cuts"][-1]["size"] = len(X)
+
+        return X, C_enc, k
 
 
 def normalize_table(table):
@@ -399,7 +600,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             expr = cp.sum(C_enc_[S_] * X_enc[S_]) <= k_
             self.show_cut(S_, C_enc_, k_)
 
-
         R = np.ones(len(T_enc), dtype=bool)
 
         def tight(R, RS):
@@ -543,249 +743,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 verbosity=verbosity,
             )
 
-    def explain(self, A_enc, T_enc, parts, frm=None, X_enc=None):
-        """The `explain_frac2` alg."""
-
-        def assert_example(A, B):
-            assert (A.nonzero()[0] == [i - 1 for i in B]).all(), A.nonzero()[0]
-
-        # TODO convert T_enc to set of tuples?
-
-        if self.env["verbosity"]:
-            self.log(f"Explain frm={frm}", end="\n", verbosity=2)
-            self.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc, "A_enc", verbosity=3, indent=0)
-            # self.log("", A_enc, verbosity=2, indent=0)
-            # if frm == "MIPSOL":
-            #     self.log("", np.array(assign_mipsol(A_enc)), verbosity=2, indent=0)
-            self.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
-            self.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
-            # self.log(
-            #     "",
-            #     np.array(
-            #         [
-            #             i + 1
-            #             for i, p in enumerate([0] + parts_)
-            #             for _ in range(p, parts_[i] if i < len(parts_) else p)
-            #         ]
-            #     ),
-            #     verbosity=2,
-            #     indent=0,
-            # )
-            # self.log(np.array(parts_), verbosity=2, indent=0)
-
-        assert len(A_enc) == len(T_enc.T)
-
-        C_enc = np.zeros(len(A_enc), dtype=int)
-        A_enc_pos = self.is_gt(A_enc, 0.0)
-
-        self.env["cuts"].append({"from": frm})
-
-        m = len(T_enc)  # number of cols
-        # W = np.argwhere(self.is_ge(A_enc, 1.0))  # find a == 1.0
-        W = self.is_ge(A_enc, 1.0)
-
-        # W = set(i for i, a in enumerate(A_enc) if is_ge(a, 1.0))  # find a == 1.0
-        # W = set(i for i, a in enumerate(A_enc) if is_eq(a, 1.0))  # find a == 1.0
-
-        # F = set(i for i, a in enumerate(A_enc) if not is_integral(a))
-        # W = set(W.flatten())
-        # F = set(i for i in set(range(len(A_enc))) - W if is_gt(A_enc[i], 0.0))  # find 0 < a < 1
-        # TODO check only if MIPNODE-OPT
-        F = (~W) & A_enc_pos
-
-        # F = set(np.argwhere(is_gt(np.delete(A_enc, W), 0.0)).flatten())  # much slower
-        # F = set(np.argwhere(is_gt(A_enc, 0.0) & is_lt(A_enc, 1.0)).flatten())  # slightly slower
-
-        # # assert not is_integer_solution(A_enc[i] for i in F), f"F should hold only fractional, but was: {F}"
-        # X = set()  # columns added to cut
-        # R = set(range(m))  # remaining columns
-
-        # D = set(r for r in range(m) if cols(T_enc, r) <= W.union(F))  # difficult rows; either frac/whole
-        # [   2 3   4     ]
-        # [ 0 1 1 0 1 0 0 ]  Y
-        # [ 0 0 1 0 1 0 0 ]  Y
-        # [ 0 0 1 0 1 1 0 ]  N
-        # WF = np.zeros(len(T_enc.T), dtype=bool)
-        if self.env["verbosity"]:
-            self.log(f"W = {show_nz(W)}", verbosity=3)
-            self.log(f"F = {show_nz(F)}", verbosity=3)
-
-        if F.any():
-            # D are the difficult rows which only contains 1s for each W/F columns
-            if self.env["verbosity"]:
-                self.log(show_table((W | F) >= T_enc))
-            D = ((W | F) >= T_enc).all(1)
-
-            if self.env["verbosity"]:
-                self.log(f"D = {show_nz(D)}", verbosity=3)
-            # then U are rows fractional columns which are not in D
-            U = F > ~((~T_enc[D, :]).all(0))  # tricky
-
-            if self.env["verbosity"]:
-                self.log(f"U = {show_nz(U)}", verbosity=3)
-
-            if none(U):
-                if self.env["verbosity"]:
-                    self.log("unexplainable, because U is empty", indent=2, verbosity=3)
-                return True
-            else:
-                R = np.ones(m, dtype=bool)
-                choice = self.choose(U, T_enc, R, parts, A_enc, C_enc, heuristic=self.env["heuristic"])
-
-                if self.env["example_frac"]:
-                    assert_example(W, [6])
-                    assert_example(F, [2, 3, 8, 9])
-                    assert_example(D, [2])
-                    assert_example(U, [2, 8])
-                    choice = 2 - 1
-
-                # TODO [peter] should be T_hat[choice]?
-                choices = np.ones(len(T_enc.T), dtype=bool)
-                choices[parts[choice] == parts] = False
-                X = np.zeros(len(T_enc.T), dtype=bool)
-                X[choice] = True
-                C_enc[choice] = 1
-                R = T_enc[:, choice]
-                k = 0
-
-                if self.env["example_frac"]:
-                    assert_example(X, [2])
-                    assert k == 0
-                    assert_example(R, [1, 5])
-                    assert parts[choice] == 1 - 1
-
-                if self.env["verbosity"]:
-                    self.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=self.indent + 2)
-                    self.log(f"choices = {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
-                    self.log(f"R ({R.sum()}) = {show_nz(R)}", verbosity=3, indent=self.indent + 2)
-                    self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
-                    self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
-
-        else:
-            R = np.ones(m, dtype=bool)
-            X = np.zeros(len(T_enc.T), dtype=bool)
-            choices = np.ones(len(T_enc.T), dtype=bool)
-            k = -1
-
-        if self.env["verbosity"]:
-            self.log(f"R ({R.sum()})", verbosity=2, indent=self.indent + 2)
-
-        for iteration in itertools.count():
-            if none(R):
-                break
-
-            neg_choices = choices & ~A_enc_pos
-            # make_pos_choice = frm == "MIPNODE-OPT" or R.sum() >= self.env["negatives"] or not neg_choices.any()
-            make_pos_choice = R.sum() >= self.env["negatives"] or not neg_choices.any()
-            choice = self.choose(
-                # neg_choices if neg_choices.any() else choices,
-                (choices & A_enc_pos) if make_pos_choice else neg_choices,
-                T_enc,
-                R,
-                parts if make_pos_choice else np.arange(len(T_enc.T)),
-                A_enc,
-                C_enc,
-                # heuristic=self.env["heuristic"] if make_pos_choice else Heuristic.INPUT,
-                heuristic=self.env["heuristic"],
-                make_pos_choice=make_pos_choice,
-            )
-            # choice, is_pos = [(1, True), (4, False)][iteration]
-            is_pos = A_enc_pos[choice]
-
-            if choice is None:
-                # this can happen only if assignment is feasible
-                raise Exception("No choices left for ", frm)
-
-            l_parts = parts[choice] == parts
-            assert not C_enc[choice], f"chosen {choice}"
-            if is_pos:
-                C_ = l_parts & A_enc_pos
-                choices[l_parts] = False
-                R = R & T_enc[:, C_].any(1)
-                X |= C_
-                C_enc[X] = 1
-                k += 1
-            else:
-                C_ = choice
-                choices[choice] = False
-                R = R & (~T_enc[:, choice])
-                X[choice] = True
-                C_enc[choice] = -1
-
-            self.check_max_iterations(iteration)
-
-            if self.env["verbosity"]:
-                self.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
-                self.log(
-                    f"chosen {'pos' if is_pos else 'neg'} col. {show_ind(choice)} of part {parts[choice]}",
-                    verbosity=3,
-                    indent=self.indent + 2,
-                )
-                self.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=self.indent + 2)
-                self.log(f"C_ {show_nz(C_)}", verbosity=3, indent=self.indent + 2)
-                # self.log(f"is_pos {is_pos} {choice}", verbosity=3, indent=self.indent + 2)
-                if F.any():
-                    self.log("FRAC", frm, verbosity=2, indent=self.indent + 2)
-                self.log(
-                    f"R choice = {'+' if is_pos else '-'}b_{show(choice)} -> ({R.sum()})", verbosity=2, indent=self.indent + 2
-                )
-                self.log(f"= {show_nz(R)}", verbosity=3, indent=self.indent + 3)
-                self.log(f"X {show_nz(X)}", verbosity=3, indent=self.indent + 2)
-                self.log(f"C_enc {C_enc}", verbosity=3, indent=self.indent + 2)
-            # [     1   1     ]
-            # [ 0 1 1 0 0 0 0 ]  Y
-            # [ 0 0 0 0 1 0 0 ]  Y
-            # [ 0 0 0 0 1 1 0 ]  Y
-            # [ 0 0 0 1 0 1 0 ]  N
-            # [ 0 0 0 0 0 1 0 ]  N
-            #       -   -
-            # [     1   0     ]  Y
-            # [     0   1     ]  Y
-            # [     0   1     ]  Y
-            # [     0   0     ]  N
-            # [     0   0     ]  N
-            # keep only rows which are in R and which have an 1 where A_enc has a 1
-
-        if self.env["verbosity"]:
-            self.log(f"by explanation of size ({sum(X)})", verbosity=2)
-            self.log(show_nz(X), verbosity=3)
-            self.log("C_enc", C_enc, verbosity=3)
-            assert C_enc[X].all()
-
-        self.show_cut(X, C_enc, k)
-        if self.env["debug"] and X_enc is not None:
-            expr = cp.sum(C_enc[X] * X_enc[X]) <= k
-            self.show_cut(X, C_enc, k)
-            self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
-
-        if self.env["coverlift"]:
-            if self.env["verbosity"]:
-                Xl = X.sum()
-            X, C_enc, k = self.gencoverlift(
-                X,
-                C_enc,
-                k,
-                T_enc,
-                A_enc,
-                parts,
-                X_enc=X_enc,
-                heuristic=self.env["coverlift"],
-                frm=frm,
-            )
-            if self.env["verbosity"]:
-                self.log("coverlift added ", X.sum() - Xl, "of", Xl, verbosity=2)
-
-            self.show_cut(X, C_enc, k)
-
-        if self.env["shrink"]:
-            C_enc, k = self.shrink(X, C_enc, k, T_enc, A_enc, parts)
-
-        self.show_cut(X, C_enc, k, verbosity=1)
-
-        self.env["cuts"][-1]["size"] = len(X)
-
-        return X, C_enc, k
-
     def check_max_iterations(self, i):
         # Loop termination for debug purposes
         if self.env["max_iterations"] is not None:
@@ -920,7 +877,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     is_integer = True
 
             # TODO figure out when can be skipped
-            if is_integer and (T_enc == A_enc).all(1).any():
+            if is_integer and tbl.is_feasible(A_enc):
                 if self.env["verbosity"]:
                     self.log(
                         f"table {i}/{len(self.tables)} feasible: ({show_nz((T_enc == A_enc).all(1))})",
@@ -947,7 +904,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 # encode assignment
                 if self.env["verbosity"]:
                     self.log(" ", np.array(X_enc), verbosity=3, indent=0)
-                explanation = self.explain(A_enc, T_enc, parts, frm=frm, X_enc=X_enc)
+                explanation = tbl.explain(A_enc, frm=frm)
 
                 if self.env["verbosity"]:
                     # self.check_explanation(explanation, X_enc, A_enc, T_enc)
@@ -1225,9 +1182,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             X_enc, T_enc, cons, parts = self.encode_table_constraint(X, T)
 
-            # if self.env["negatives"]:
-            #     T_enc = np.concatenate([T_enc, ~T_enc], axis=1)
-
             if self.env["verbosity"]:
                 self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
                 self.log("T =", verbosity=3)
@@ -1236,7 +1190,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(np.astype(T_enc, int), verbosity=3)
                 self.log("X_enc =", X_enc, verbosity=3)
             assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
-            self.tables.append(TableData(X_enc, T_enc, parts, cpm_expr))
+            self.tables.append(TableData(X_enc, T_enc, parts, cpm_expr, self))
 
         if self.env["checked"]:
             for c in cons:
