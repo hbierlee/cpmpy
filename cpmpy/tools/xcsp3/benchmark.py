@@ -582,7 +582,7 @@ def main(args):
     args_ = {
         k: v
         for k, v in vars(args).items()
-        if v is not None and k not in ("analyze", "glob_alias", "dry", "reverse_experiments", "debug")
+        if v is not None and k not in ("analyze", "glob_alias", "dry", "reverse_experiments", "debug", "host")
     }
 
     if not args_["verbose"]:
