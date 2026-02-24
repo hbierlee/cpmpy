@@ -580,7 +580,8 @@ class TestTables:
             cpm_model=cp.Model(generate_table_from_example().constraints),
             env={**env, **{"shrink": False, "debug": True, "example2": True}},
         )
-        X_enc, T_enc, parts, table = slv.tables[0]
+        tbl = slv.tables[0]
+        X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
 
         # example 2 / 11
         S = {1, 5, 8}
@@ -773,14 +774,16 @@ class TestTables:
                 slv.stats()
                 print(slv.env["cuts"])
                 slv.print_cuts()
-                X_enc, T_enc, parts, table = slv.tables[0]
+                tbl = slv.tables[0]
+                X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
 
                 def list_to_A_enc(A_enc):
                     return dict(zip(X_enc, A_enc))
 
                 # A_enc = list_to_A_enc(A_enc)
             else:
-                X_enc, T_enc, parts, table = slv.tables[0]
+                tbl = slv.tables[0]
+                X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
                 # explanations = list(slv._explain_assignment(A_enc, frm="MIPSOL"))
                 frm = "MIPSOL"
                 frm = "MIPNODE-OPT"

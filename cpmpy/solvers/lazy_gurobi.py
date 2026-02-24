@@ -145,6 +145,16 @@ class Coverlift(Feature):
         return self is not Coverlift.No
 
 
+class TableData:
+    """Data structure for an encoded table constraint."""
+
+    def __init__(self, X_enc, T_enc, parts, cpm_expr):
+        self.X_enc = X_enc      # numpy array of encoded boolean variables
+        self.T_enc = T_enc      # numpy array of the encoded table (boolean matrix)
+        self.parts = parts      # numpy array: which original variable each encoded var corresponds to
+        self.cpm_expr = cpm_expr  # the original CPMpy table constraint expression
+
+
 def normalize_table(table):
     """Merge columns with duplicate variables (removing rows where values are different)"""
     X, T = table.args
@@ -810,7 +820,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def get_solution_callback(self):
         from gurobipy import GRB
 
-        all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
+        all_xs = {x_enc_i for table in self.tables for x_enc_i in table.X_enc}
 
         def solution_callback(what, where):
             time_cb = time.time()
@@ -895,7 +905,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("EXPLAIN", frm, verbosity=2)
             self.log("Full sol", x_enc_a, verbosity=4)
 
-        for i, (X_enc, T_enc, parts, table) in enumerate(self.tables, start=INDEX):
+        for i, tbl in enumerate(self.tables, start=INDEX):
+            X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
             # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
             if frm == "MIPSOL":
                 A_enc = np.fromiter((x_enc_a[x_enc_i] > 0.5 for x_enc_i in X_enc), dtype=bool)
@@ -1144,7 +1155,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     for x, v in zip(self.env["user_vars"], sol):
                         x._value = v
 
-                    all_xs = {x_enc_i for x_enc, _, _, _ in self.tables for x_enc_i in x_enc}
+                    all_xs = {x_enc_i for tbl in self.tables for x_enc_i in tbl.X_enc}
                     for expr, lit in self._csemap.items():
                         lit._value = expr.value()
                     x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
@@ -1225,7 +1236,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(np.astype(T_enc, int), verbosity=3)
                 self.log("X_enc =", X_enc, verbosity=3)
             assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
-            self.tables.append((X_enc, T_enc, parts, cpm_expr))
+            self.tables.append(TableData(X_enc, T_enc, parts, cpm_expr))
 
         if self.env["checked"]:
             for c in cons:
