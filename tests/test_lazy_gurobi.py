@@ -6,6 +6,7 @@ import pathlib
 import pickle
 import random
 import traceback
+import tracemalloc
 
 import numpy as np
 import pandas as pd
@@ -967,7 +968,7 @@ FILTER_PRESETS = {
 }
 
 
-def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None, max_iterations=None):
+def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None, max_iterations=None, track_memory=False):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
     Args:
@@ -1057,6 +1058,8 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
 
             try:
                 # Create solver with the environment
+                if track_memory:
+                    tracemalloc.start()
                 dt = time.time()
                 slv = env["solver"](cpm_model=model, **env["solver_kwargs"], time_limit=time_limit)
                 dt = time.time() - dt
@@ -1069,14 +1072,33 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
                 sat = slv.solve(time_limit=time_limit - dt)
                 sdt = time.time() - solve_start
 
+                # Get peak memory usage
+                peak_mem_mb = None
+                grb_mem_mb = None
+                if track_memory:
+                    _, peak_mem = tracemalloc.get_traced_memory()
+                    tracemalloc.stop()
+                    peak_mem_mb = peak_mem / (1024 * 1024)
+
+                    # Get Gurobi's peak memory if available
+                    if hasattr(slv, 'grb_model'):
+                        grb_mem_mb = slv.grb_model.getAttr('MaxMemUsed')
+
                 if sat is None:
                     print(f"  TIMEOUT after {dt:.2f}s")
                     raise TimeoutError
                 else:
-                    print("SOLVED IN", sdt)
+                    if track_memory:
+                        print(f"SOLVED IN {sdt:.2f}s | Mem: {peak_mem_mb:.1f}MB (Python) {grb_mem_mb:.1f}MB (Gurobi)" if grb_mem_mb else f"SOLVED IN {sdt:.2f}s | Mem: {peak_mem_mb:.1f}MB")
+                    else:
+                        print(f"SOLVED IN {sdt:.2f}s")
 
                 # Get stats
                 stats = slv.stats()
+                if track_memory:
+                    stats["mem_python_mb"] = peak_mem_mb
+                    if grb_mem_mb is not None:
+                        stats["mem_gurobi_mb"] = grb_mem_mb
 
                 # Add test case info and environment to stats
                 timeout = sat is None
@@ -1091,6 +1113,8 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
                 results.append(result)
 
             except Exception as e:
+                if tracemalloc.is_tracing():
+                    tracemalloc.stop()
                 print(f"  ERROR: {e}")
                 traceback.print_exc()
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
@@ -1142,7 +1166,9 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
             values += ["avg_power"]
 
         if not checked and verbosity == 0:
-            values += "time_solve"
+            values += ["time_solve"]
+            values += ["mem_python_mb"]
+            # values += ["mem_gurobi_mb"]
 
         comparison = df.pivot_table(
             index="name",
@@ -1239,6 +1265,12 @@ if __name__ == "__main__":
         default=None,
         help="Maximum iterations for lazy solver (default: auto based on hardness)",
     )
+    parser.add_argument(
+        "--track-memory",
+        action="store_true",
+        default=False,
+        help="Track memory usage during solve (adds overhead)",
+    )
 
     args = parser.parse_args()
 
@@ -1247,6 +1279,7 @@ if __name__ == "__main__":
     print(f"  Filter preset: {args.filter_preset}")
     print(f"  Verbosity: {args.verbosity}")
     print(f"  Max iterations: {args.max_iterations}")
+    print(f"  Track memory: {args.track_memory}")
     if args.glob:
         print(f"  Glob: {args.glob}")
 
@@ -1256,6 +1289,7 @@ if __name__ == "__main__":
         glob=args.glob,
         verbosity=args.verbosity,
         max_iterations=args.max_iterations,
+        track_memory=args.track_memory,
     )
 
     df.to_csv(args.output, index=False)
