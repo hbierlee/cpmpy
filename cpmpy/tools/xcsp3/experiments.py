@@ -80,8 +80,8 @@ FEATURES = [
     (
         "negatives",
         (
-            0,
-            3,
+            False,
+            True,
         ),
     ),
 ]

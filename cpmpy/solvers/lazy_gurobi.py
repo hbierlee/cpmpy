@@ -167,6 +167,8 @@ class TableData:
                 else self.parts
             )
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
+            # TODO concat
+            self.densities = self.T_enc.mean(axis=0)
 
     @property
     def env(self):
@@ -197,6 +199,86 @@ class TableData:
                 indent=2,
                 verbosity=verbosity,
             )
+
+    def choose(self, choices, R, A_enc, C_enc, heuristic=Heuristic.GREEDY):
+        T_enc = self.T_enc
+        parts = self.parts
+
+        # if R.sum() <= self.env["negatives"]:
+        #     choices[: (len(T_enc.T) // 2)] = False
+
+        # print(show_table(densities), "dens")
+
+        if self.solver.env["verbosity"]:
+            self.solver.log(f"Choose from {show_nz(choices)} to allow remaining rows R=\n{show_nz(R)}", verbosity=3)
+            self.solver.log(show_table(T_enc[R, :]), "T_enc[R,:]", verbosity=3)
+            self.solver.log("", parts, "parts", verbosity=3)
+            self.solver.log("", show_table(A_enc), "A_enc", verbosity=3)
+            self.solver.log("", choices.astype(int), "choices", verbosity=3)
+            self.solver.log("", C_enc, "C_enc", verbosity=3)
+
+        if none(choices):
+            return None
+        match heuristic:
+            case Heuristic.INPUT:
+                return np.argmax(choices)
+            case Heuristic.GREEDY:
+                parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
+                parts_ -= parts_[0]
+                # map back to the right part index
+                if self.solver.env["verbosity"]:
+                    self.solver.log(show_table(T_enc[np.ix_(R, choices)]), "T_enc[R,choices]", verbosity=3)
+                # print(show_table(parts_), "parts_")
+
+                # heur = np.bitwise_or.reduceat(
+                #     # get only the relevant rows and columns
+                #     T_enc[np.ix_(R, choices)],
+                #     # for the columns of each part
+                #     parts_,
+                #     # see if there is any 1 in the row
+                #     axis=1,
+                # )
+
+                # how many additional rows will be removed (high is good)
+                H = (~T_enc[np.ix_(R, choices)]).sum(0)
+                if self.solver.env["negatives"]:
+                    densities = self.densities
+                    # upper bound on how many additional non-rows will be allowd (high is bad)
+                    # B = (1 - densities[choices]) * np.pow(2, len(C_enc) - 1 - (C_enc != 0).sum())
+
+                    # the pos cols will have low density, the neg cols have high density
+                    B = densities[choices]
+                    if self.solver.env["verbosity"]:
+                        self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
+                        self.solver.log("HHH", H, verbosity=2)
+                        self.solver.log("B", B, verbosity=2)
+                        self.solver.log("H", H, verbosity=2)
+                        self.solver.log("H", H * (B.max() + 1) + B, verbosity=2)
+                    # TODO native?
+                    h = np.argmax(H * (B.max() + 1) + B)
+
+                    # # upper bound on how many additional non-rows will be allowd (high is bad)
+                    # B = (1 - densities[choices]) * np.pow(2, len(C_enc) - 1 - (C_enc != 0).sum())
+                    # if self.solver.env["verbosity"]:
+                    #     self.solver.log("H", H, verbosity=3)
+                    #     self.solver.log("B", B, verbosity=3)
+
+                else:
+                    h = np.argmax(H)
+
+                if self.solver.env["verbosity"]:
+                    self.solver.log("H", H, verbosity=3)
+
+                return choices.nonzero()[0][h]
+
+            case Heuristic.REDUCE:
+                assert False
+                # choice = min(
+                #     (i for i in A if R.intersection(rows(T_enc, i)) != R),
+                #     key=lambda i: len(rows(T_enc, i)),
+                #     default=None,  # TODO [?] check this edge-case
+                # )
+                # return choice if choice is not None else self.solver.choose(A, T_enc, R, heuristic=Heuristic.GREEDY)
 
     def explain(self, A_enc, frm=None):
         """The `explain_frac2` alg."""
@@ -255,7 +337,7 @@ class TableData:
                 return True
             else:
                 R = np.ones(m, dtype=bool)
-                choice = solver.choose(U & A_enc_pos, T_enc, R, parts, A_enc, C_enc, heuristic=self.env["heuristic"])
+                choice = self.choose(U & A_enc_pos, R, A_enc, C_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
@@ -298,7 +380,7 @@ class TableData:
             if none(R):
                 break
 
-            choice = solver.choose(choices & A_enc_pos, T_enc, R, parts, A_enc, C_enc, heuristic=self.env["heuristic"])
+            choice = self.choose(choices & A_enc_pos, R, A_enc, C_enc, heuristic=self.env["heuristic"])
 
             if choice is None:
                 # this can happen only if assignment is feasible
@@ -666,53 +748,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "avg_power": (sum(s["power"] for s in cuts) / len(cuts)) if cuts and self.env["checked"] else None,
         }
 
-    def choose(self, choices, T_enc, R, parts, A_enc, C_enc, heuristic=Heuristic.GREEDY):
-
-        if R.sum() <= self.env["negatives"]:
-            choices[: (len(T_enc.T) // 2)] = False
-
-        if self.env["verbosity"]:
-            self.log(f"Choose from {show_nz(choices)} to allow remaining rows R=\n{show_nz(R)}", verbosity=3)
-            self.log(show_table(T_enc[R, :]), verbosity=3)
-            self.log("", parts, "parts", verbosity=3)
-            self.log("", show_table(A_enc), "A_enc", verbosity=3)
-            self.log("", choices.astype(int), "choices", verbosity=3)
-            self.log("", C_enc, "C_enc", verbosity=3)
-
-        if none(choices):
-            return None
-        match heuristic:
-            case Heuristic.INPUT:
-                return np.argmax(choices)
-            case Heuristic.GREEDY:
-                # T_enc = T_enc if make_pos_choice else ~T_enc
-                parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
-                parts_ -= parts_[0]
-                # map back to the right part index
-                return choices.nonzero()[0][
-                    np.bitwise_or.reduceat(
-                        # get only the relevant rows and columns
-                        T_enc[np.ix_(R, choices)],
-                        # for the columns of each part
-                        parts_,
-                        # see if there is any 1 in the row
-                        axis=1,
-                    )
-                    # sum the number of 1s for each part
-                    .sum(0)
-                    # find the sm
-                    .argmin()
-                ]
-
-            case Heuristic.REDUCE:
-                assert False
-                # choice = min(
-                #     (i for i in A if R.intersection(rows(T_enc, i)) != R),
-                #     key=lambda i: len(rows(T_enc, i)),
-                #     default=None,  # TODO [?] check this edge-case
-                # )
-                # return choice if choice is not None else self.choose(A, T_enc, R, heuristic=Heuristic.GREEDY)
-
     def shrink(self, X, C_enc, k, T_enc, A_enc, parts):
         if self.env["verbosity"]:
             self.log(f"start shrink for X={show_nz(X)}, k={k}", verbosity=2)
@@ -1026,7 +1061,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["cuts"][-1]["power"] = strength / len(self.env["cuts"][-1]["cut"][0].args)
             self.env["remain"] = remaining
             if self.env["verbosity"]:
-                self.log(f"Remaining non-solutions to cut ({len(remaining)}, STR={strength})", verbosity=1)
+                self.log(
+                    f"Remaining non-solutions to cut ({len(remaining)}, STR={self.env['cuts'][-1]['strength']}, PWR={self.env['cuts'][-1]['power']})",
+                    verbosity=1,
+                )
                 self.log(remaining, verbosity=3)
                 self.log(self.env["checker"], verbosity=4)
                 self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
@@ -1035,7 +1073,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(actual_solutions, verbosity=3, indent=2)
                 self.log(f"TO REMOVE ({len(remaining)})", verbosity=2)
                 self.log(remaining, verbosity=3)
-                self.log(f"STRENGTH == {strength}", verbosity=2)
 
             # assert repeated or strength
             assert strength or len(self.tables) > 1

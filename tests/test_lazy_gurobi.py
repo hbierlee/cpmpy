@@ -917,15 +917,21 @@ FILTER_PRESETS = {
     "dev": [
         (
             "alias",
-            (
-                "bool",
-                "coverlift_input",
-            ),
+            ("negatives",),
         )
     ],
     "all": [],
     "none": [("alias", ("none",))],
-    "bool": [("alias", ("bool", "coverlift_input"))],
+    "bool": [
+        (
+            "alias",
+            (
+                "bool",
+                "none",
+                "negatives",
+            ),
+        )
+    ],
     "mdd-reduce": [
         (
             "alias",
@@ -1046,8 +1052,6 @@ def benchmark_table_constraints(
         checked = True
         debug = True
         track_memory = True
-        if max_iterations is None:
-            max_iterations = 100
     else:
         checked = False
         debug = False
