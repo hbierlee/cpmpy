@@ -177,7 +177,7 @@ class CPM_gurobi(SolverInterface):
     @staticmethod
     def installed():
         try:
-            import gurobipy as gp
+            import gurobipy as _
             return True
         except ModuleNotFoundError:
             return False
@@ -214,23 +214,18 @@ class CPM_gurobi(SolverInterface):
 
     def encode_table_constraint(self, X, T):
 
-        def encode(X, T):
-            dom_sizes = [dom_size(x) for x in X]
-            width = sum(dom_sizes)
-            T_enc = np.zeros((len(T), width), dtype=np.bool)
+        dom_sizes = [dom_size(x) for x in X]
+        width = sum(dom_sizes)
+        T_enc = np.zeros((len(T), width), dtype=np.bool)
 
-            for i, row in enumerate(T):
-                offset = 0
-                for x, x_width, a in zip(X, dom_sizes, row):
-                    if x.lb <= a <= x.ub:
-                        T_enc[i, offset + a - x.lb] = True
-                    else:  # i is not in domain of x -> delete row
-                        np.delete(T_enc, i)
-                    offset += x_width
-            return T_enc
-
-        T_enc = encode(X, T)
-
+        for i, row in enumerate(T):
+            offset = 0
+            for x, x_width, a in zip(X, dom_sizes, row):
+                if x.lb <= a <= x.ub:
+                    T_enc[i, offset + a - x.lb] = True
+                else:  # i is not in domain of x -> delete row
+                    np.delete(T_enc, i)
+                offset += x_width
 
         X_enc = []
         cons = []
@@ -252,7 +247,7 @@ class CPM_gurobi(SolverInterface):
         X_enc = np.array(X_enc)
         parts = np.array(parts)
 
-        # Remove constant columns (all True or all False) from T_enc and parts
+        # Remove constant columns (all True or all False)
         for polarity in (True, False):
             cols = T_enc.all(axis=0) if polarity else (~T_enc).all(axis=0)
             if polarity:
