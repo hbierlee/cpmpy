@@ -590,7 +590,7 @@ def main(args):
     
     experiments = get_experiments(
         overrides=args_,
-        filters=[("alias", args.glob_alias)] if args.glob_alias else []
+        filters=[("alias", args.glob_alias)] if args.glob_alias else [],
         host=args.host,
     )
 
