@@ -464,7 +464,14 @@ class TableData:
 
         self.env["cuts"][-1]["size"] = len(X)
 
-        return X, C_enc, k
+        return self.revert_cut(X, C_enc, k)
+
+    def revert_cut(self, S, C_enc, k):
+        if self.solver.env["negatives"]:
+            n = len(S) // 2
+            return S[:n] | S[n:], C_enc[:n] - C_enc[n:], k - sum(C_enc[n:])
+        else:
+            return S, C_enc, k
 
     def gencoverlift(self, S, C_enc, k, A_enc, heuristic=Coverlift.INPUT, frm=None):
         solver = self.solver
@@ -603,7 +610,7 @@ class TableData:
             assert X[j], f"{show(j)} not chosen in {X}"
             self.show_cut(S, C_enc, k)
 
-        return solver.revert_cut(S, C_enc, k)
+        return S, C_enc, k
 
 
 def normalize_table(table):
@@ -1233,13 +1240,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.env["checker"] += c
 
         return cons
-
-    def revert_cut(self, S, C_enc, k):
-        if self.env["negatives"]:
-            n = len(S) // 2
-            return S[:n] | S[n:], C_enc[:n] - C_enc[n:], k - sum(C_enc[n:])
-        else:
-            return S, C_enc, k
 
     def transform(self, cpm_expressions):
         return [cpm_con for cpm_expr in cpm_expressions for cpm_con in self.transform_(cpm_expr)]
