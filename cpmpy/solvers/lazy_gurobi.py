@@ -366,63 +366,60 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
 
         if self.env["negatives"]:
-            T_enc_ = np.concatenate([T_enc, ~T_enc], axis=1)
-            S_ = C_enc != 0
-            S_ = np.concatenate([S_, S_])
-            C_enc_ = np.concatenate([np.maximum(C_enc, 0), np.maximum(-C_enc, 0)])
-            k_ = k + np.maximum(-C_enc, 0).sum()
-        else:
-            T_enc_ = T_enc
-            S_ = S
-            C_enc_ = S
-            k_ = k
+            T_enc = np.concatenate([T_enc, ~T_enc], axis=1)
+            S = C_enc != 0
+            S = np.concatenate([S, S])
+            k = k + np.maximum(-C_enc, 0).sum()
+            C_enc = np.concatenate([np.maximum(C_enc, 0), np.maximum(-C_enc, 0)])
 
-        def revert_cut():
-            if self.env["negatives"]:
-                n = len(S_) // 2
-                S = S_[:n] | S_[n:]
-                C_enc = C_enc_[:n] - C_enc_[n:]
-                k = k_ - sum(C_enc_[n:])
-                return S, C_enc, k
-            else:
-                return S_, C_enc_, k_
+        # else:
+        #     T_enc = T_enc
+        #     S = S
+        #     C_enc = C_enc
+        #     k = k
 
         if self.env["verbosity"]:
             self.log("gencoverlift", verbosity=2)
-            self.log("T_enc", T_enc_.shape)
-            self.log(show_table(T_enc_, full=self.env["verbosity"] == 3), verbosity=3)
+            self.log("T_enc", T_enc.shape)
+            self.log(show_table(T_enc, full=self.env["verbosity"] == 3), verbosity=3)
             self.log(f"parts = {show_table(parts)}", verbosity=3)
 
-        R = np.ones(len(T_enc_), dtype=bool)
+            print("CUT")
+            S_, C_enc_, k_ = self.revert_cut(S, C_enc, k)
+            expr = cp.sum(C_enc_[S_] * X_enc[S_]) <= k_
+            self.show_cut(S_, C_enc_, k_)
+
+
+        R = np.ones(len(T_enc), dtype=bool)
 
         def tight(R, RS):
-            return R & (RS == k_)
+            return R & (RS == k)
 
         # Compute the upper bound for each row
-        RS = (C_enc_ * T_enc_).sum(axis=1)
+        RS = (C_enc * T_enc).sum(axis=1)
 
         # All rows where upper bound == k are tight
         R_tight = tight(R, RS)
 
         # We cannot select a column if it has a 1 in any tight row
-        X = T_enc_[R_tight, :].any(0)
+        X = T_enc[R_tight, :].any(0)
 
         if self.env["verbosity"]:
             self.log(f"Coverlift from {show_nz(~X)}", verbosity=3)
-            self.log(show_table(T_enc_[R, :]), verbosity=3)
-            self.log("", show_table(C_enc_), "C_enc <=", k_, verbosity=3)
+            self.log(show_table(T_enc[R, :]), verbosity=3)
+            self.log("", show_table(C_enc), "C_enc <=", k, verbosity=3)
 
             self.log("RS (row slack?)", show_table(RS), verbosity=3)
             self.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
             self.log(f"X = {show_nz(X)}", verbosity=3)
-            self.log(f"S_ = {show_nz(S_)}", verbosity=3)
-            self.log(f"k_ = {k_}", verbosity=3)
+            self.log(f"S_ = {show_nz(S)}", verbosity=3)
+            self.log(f"k_ = {k}", verbosity=3)
 
         # centre of mass heuristic
         if heuristic in (Coverlift.COM_MIN, Coverlift.COM_MAX):
-            com = T_enc_.sum(axis=0) / len(T_enc_)
+            com = T_enc.sum(axis=0) / len(T_enc)
             if self.env["verbosity"]:
-                self.log("COM", T_enc_.sum(axis=0), verbosity=3)
+                self.log("COM", T_enc.sum(axis=0), verbosity=3)
                 self.log("COM", com, verbosity=2)
 
         for iteration in itertools.count(1):
@@ -479,28 +476,28 @@ class CPM_lazy_gurobi(CPM_gurobi):
             assert not X[j]
 
             # any pure 0/1 columns have been filtered out, a min always exists
-            a_j = np.min(k_ - RS[(~R_tight) & T_enc_[:, j]])
+            a_j = np.min(k - RS[(~R_tight) & T_enc[:, j]])
 
             if self.env["verbosity"]:
                 self.log(f"Lift j={j} : {a_j}*b_{show(j)}", verbosity=2)
 
-            assert C_enc_[j] == 0
+            # assert C_enc[j] == 0
             # Calculate new row upper bounds just for the added column
-            RS = RS + a_j * T_enc_[:, j]
+            RS = RS + a_j * T_enc[:, j]
 
             # Find and update newly tight rows
             N_tight = tight(~R_tight, RS)
             R_tight |= N_tight
 
             # Add var and coefficient to cut
-            S_[j] = True
-            C_enc_[j] = a_j
+            S[j] = True
+            C_enc[j] = a_j
 
-            X |= T_enc_[N_tight, :].any(0)
+            X |= T_enc[N_tight, :].any(0)
 
             if self.env["verbosity"]:
-                self.log(f"S = {show_nz(S_)}", verbosity=3)
-                self.log("", show_table(C_enc_), "C_enc <=", k_, verbosity=3)
+                self.log(f"S = {show_nz(S)}", verbosity=3)
+                self.log("", show_table(C_enc), "C_enc <=", k, verbosity=3)
                 self.log("a_j", a_j, verbosity=3)
                 self.log("RS (row slack?)", show_table(RS), verbosity=3)
                 # self.log(f"N_tight = {show_nz(N_tight)}", verbosity=3)
@@ -518,21 +515,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.check_max_iterations(iteration)
 
             assert X[j], f"{show(j)} not chosen in {X}"
-            self.show_cut(S_, C_enc_, k_)
+            self.show_cut(S, C_enc, k)
 
             if self.env["debug"] and X_enc is not None:
-                S, C_enc, k = revert_cut()
-                expr = cp.sum(C_enc[S] * X_enc[S]) <= k
-                self.show_cut(S, C_enc, k)
+                S_, C_enc_, k_ = self.revert_cut(S, C_enc, k)
+                expr = cp.sum(C_enc_[S_] * X_enc[S_]) <= k_
+                self.show_cut(S_, C_enc_, k_)
                 self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
 
-        if self.env["negatives"]:
-            # Merge each half back together (positive and negative parts)
-            n = len(S_) // 2
-            S = S_[:n] | S_[n:]
-            C_enc = C_enc_[:n] + C_enc_[n:]
-
-        return revert_cut()
+        return self.revert_cut(S, C_enc, k)
 
     def show_cut(self, X, C_enc, k, verbosity=2):
         if self.env["verbosity"]:
@@ -1223,6 +1214,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             X_enc, T_enc, cons, parts = self.encode_table_constraint(X, T)
 
+            # if self.env["negatives"]:
+            #     T_enc = np.concatenate([T_enc, ~T_enc], axis=1)
+
             if self.env["verbosity"]:
                 self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
                 self.log("T =", verbosity=3)
@@ -1238,6 +1232,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.env["checker"] += c
 
         return cons
+
+    def revert_cut(self, S, C_enc, k):
+        if self.env["negatives"]:
+            n = len(S) // 2
+            return S[:n] | S[n:], C_enc[:n] - C_enc[n:], k - sum(C_enc[n:])
+        else:
+            return S, C_enc, k
 
     def transform(self, cpm_expressions):
         return [cpm_con for cpm_expr in cpm_expressions for cpm_con in self.transform_(cpm_expr)]
