@@ -58,6 +58,7 @@ FEATURES = [
             Coverlift.COM_MIN,
             Coverlift.COM_MAX,
             Coverlift.INPUT,
+            Coverlift.INPUT_LAST,
         ),
     ),
     (
@@ -76,7 +77,13 @@ FEATURES = [
             100,
         ),
     ),
-    # ("negatives", (0,3)),
+    (
+        "negatives",
+        (
+            0,
+            3,
+        ),
+    ),
 ]
 
 
