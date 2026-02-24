@@ -9,7 +9,7 @@ PINAC_42_MEM_LIMIT = 64
 PINAC_42_WORKERS = 12
 
 MACHINES = {
-    None: {"mem": 8, "cores": 1},
+    None: {"mem": 64, "cores": 8},
     "pinac42": {"mem": 64, "cores": 12},
     "himec03": {"mem": 128, "cores": 16},
     "himec04": {"mem": 128, "cores": 16},
@@ -18,8 +18,8 @@ MACHINES = {
 }
 
 
-def calculate_workers(mem_limit, pinac_mem_limit, pinac_workers):
-    workers = min(math.floor((pinac_mem_limit - 0.1) / 8), pinac_workers - 2)
+def calculate_workers(mem_limit, host_mem, host_workers):
+    workers = min(math.floor((host_mem - 0.1) / 8), host_workers - 2)
     assert workers > 0
     return workers
 
@@ -157,12 +157,13 @@ def get_experiments(features=None, overrides={}, filters=[], host=None):
         experiment(
             get_solvers(features=features, overrides=overrides),
             overrides=overrides,
+            host=host,
         ),
         filters,
-    ) | {"workers": calculate_workers(MEM_LIMIT, MACHINES[host]["mem"], MACHINES[host]["cores"])}
+    )
 
 
-def experiment(experiments, overrides={}, filters=None):
+def experiment(experiments, overrides={}, filters=None, host=None):
     # Filter DEFAULTS to avoid duplicates when overrides specify a value
     # (e.g., when --track is specified, don't create experiments for both tracks)
     filtered_defaults = [
@@ -174,6 +175,7 @@ def experiment(experiments, overrides={}, filters=None):
         experiment
         for experiment in [
             {
+                **{"workers": calculate_workers(MEM_LIMIT, MACHINES[host]["mem"], MACHINES[host]["cores"])},
                 **dict(it for di in experiment_ for it in di.items()),
                 **overrides,
             }
