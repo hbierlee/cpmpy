@@ -8,6 +8,15 @@ MEM_LIMIT = 8
 PINAC_42_MEM_LIMIT = 64
 PINAC_42_WORKERS = 12
 
+MACHINES = {
+    None: {"mem": 8, "cores": 1},
+    "pinac42": {"mem": 64, "cores": 12},
+    "himec03": {"mem": 128, "cores": 16},
+    "himec04": {"mem": 128, "cores": 16},
+    "himec06": {"mem": 128, "cores": 24},
+    "himec07": {"mem": 128, "cores": 24},
+}
+
 
 def calculate_workers(mem_limit, pinac_mem_limit, pinac_workers):
     workers = min(math.floor((pinac_mem_limit - 0.1) / 8), pinac_workers - 2)
@@ -22,8 +31,6 @@ DEFAULTS = [
             "time_limit": 1 * 60,
             "first": False,
             "mem_limit": MEM_LIMIT * 1024,
-            # pinac42: 1-12-20, 64Gb
-            "workers": calculate_workers(MEM_LIMIT, PINAC_42_MEM_LIMIT, PINAC_42_WORKERS),
             "check_time_limit": 2 * 60,
             "output_dir": "results/dev",
             "no_timestamp": True,
@@ -144,14 +151,15 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
     )
 
 
-def get_experiments(features=None, overrides={}, filters=[]):
+def get_experiments(features=None, overrides={}, filters=[], host=None):
+
     return glob_filter(
         experiment(
             get_solvers(features=features, overrides=overrides),
             overrides=overrides,
         ),
         filters,
-    )
+    ) | {"workers": calculate_workers(MEM_LIMIT, MACHINES[host]["mem"], MACHINES[host]["cores"])}
 
 
 def experiment(experiments, overrides={}, filters=None):

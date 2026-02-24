@@ -61,7 +61,7 @@ from concurrent.futures import ThreadPoolExecutor
 import gurobipy
 
 import cpmpy as cp
-from cpmpy.tools.xcsp3.experiments import get_experiments
+from cpmpy.tools.xcsp3.experiments import get_experiments, MACHINES
 from cpmpy.tools.xcsp3.dataset import XCSP3Dataset
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.tools.xcsp3.xcsp3_cpmpy import xcsp3_cpmpy, init_signal_handlers, ExitStatus, TIME_BUFFER, CheckError
@@ -591,6 +591,7 @@ def main(args):
     experiments = get_experiments(
         overrides=args_,
         filters=[("alias", args.glob_alias)] if args.glob_alias else []
+        host=args.host,
     )
 
     for e in experiments:
@@ -664,5 +665,6 @@ if __name__ == "__main__":
     parser.add_argument('--results', type=str, nargs='+', help='CSV files/directories with previous benchmark results for filtering')
     parser.add_argument('--filter-feasible', action='store_true', help='When used with --results, filter to only run instances found feasible')
     parser.add_argument('--filter-easy', type=float, help='When used with --results, only keep instances solved in at most this many seconds by any solver')
+    parser.add_argument('--host', choices=list(MACHINES.keys()), help='Which machine')
 
     main(parser.parse_args())
