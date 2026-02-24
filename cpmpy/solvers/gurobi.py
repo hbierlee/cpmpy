@@ -285,7 +285,7 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], cons
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, order=Order.INPUT, named=False, output_stats=False, time_limit=None, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, order=Order.INPUT, named=False, output_stats=False, **kwargs):
         """
         Constructor of the native solver object
 
