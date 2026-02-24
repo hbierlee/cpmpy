@@ -92,9 +92,6 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                 "alldiff_min",
                 with_constraints(generate_table_from_data([[1, 2], [2, 1]], ub=3), with_alldiff=True, with_min=True),
             )
-            yield ("example.", generate_table_from_example())
-            yield ("example_alldiff.", with_constraints(generate_table_from_example(), with_alldiff=True))
-            yield ("com.", generate_table_from_data([[2, 2], [2, 4], [4, 4], [4, 6]], ub=6))
             yield (
                 "issue_9_mix_bool_and_intvar.",
                 cp.Model(
@@ -104,7 +101,9 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                     )
                 ),
             )
-
+            yield ("example", generate_table_from_example())
+            yield ("example_alldiff", with_constraints(generate_table_from_example(), with_alldiff=True))
+            yield ("COM", generate_table_from_data([[2, 2], [2, 4], [4, 4], [4, 6]], ub=6))
             # Edge cases
             yield ("single_column", cp.Model(cp.Table([cp.intvar(1, 5, name="x")], [[2], [4]])))
             yield (
@@ -141,8 +140,29 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             yield ("fixed_infeasible", cp.Model(cp.Table([cp.intvar(3, 3, name="a"), cp.intvar(1, 3, name="y")], [[4, 2]])))
             yield ("bool_vars", cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 3, name="y")], [[0, 2], [1, 3]])))
             x = cp.intvar(0, 3, name="x", shape=2)
+
+            #   0 0 0 1 1 1
+            # [[1 0 0 0 0 1]
+            #  [0 1 0 0 1 0]
+            #  [0 0 1 1 0 0]]
             yield ("soccer_table", cp.Model(*[cp.InDomain(x_i, [0, 1, 3]) for x_i in x], cp.Table(x, [[0, 3], [1, 1], [3, 0]])))
+            # p <-> q
             yield ("hcpizza_table", cp.Model(cp.Table([cp.boolvar(name="p"), cp.intvar(1, 6)], [[0, 1], [1, 6]])))
+
+            airland = (3, 5)
+            # T_enc =
+            # [[1 0 0 0 1 0 0 0 1 0 0 0]
+            #  [0 1 0 0 0 1 0 0 0 1 0 0]
+            #  [0 0 1 0 0 0 1 0 0 0 1 0]
+            #  [0 0 0 1 0 0 0 1 0 0 0 1]]
+            yield (
+                "airland_table",
+                cp.Model(
+                    cp.Table(
+                        cp.intvar(1, airland[1], shape=airland[0], name="x"), [[i] * airland[0] for i in range(1, airland[1])]
+                    )
+                ),
+            )
 
             # yield ("random_gaps", generate_table(5, 10, 10, k=1, gaps=0.5))
             yield ("random_gaps", generate_table(5, 5, 3, k=1, gaps=0.5))
@@ -828,13 +848,13 @@ def idfn(a):
 ALLSOLS = True
 SOLVE_EXPECTED = True  # Set to False to skip solving for expected values
 TIME_LIMIT = 30
-REPEAT = 1
+REPEAT = 3
 
 
 def _generate_cases_with_expected():
     """Generate test cases and precompute expected feasibility/objective once per model."""
     for name, model in generate_models_w_tables():
-        print("Get expected", name)
+        # print("Get expected", name)
         # Solve once to get expected values (if enabled)
         if SOLVE_EXPECTED:
             model_ = model.deepcopy()
@@ -859,7 +879,7 @@ class TestModels:
     def setup_class(cls):
         """Cache test cases with expected values to avoid re-solving for each env."""
         if cls._cached_cases is None:
-            print("Generating expected vals")
+            # print("Generating expected vals")
             cls._cached_cases = list(_generate_cases_with_expected())
 
     @classmethod
@@ -968,7 +988,9 @@ FILTER_PRESETS = {
 }
 
 
-def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None, max_iterations=None, track_memory=False):
+def benchmark_table_constraints(
+    envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None, max_iterations=None, track_memory=False
+):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
     Args:
@@ -1019,6 +1041,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
     if hardness[1] <= 1:
         checked = True
         debug = True
+        track_memory = True
         if max_iterations is None:
             max_iterations = 100
     else:
@@ -1026,7 +1049,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
         debug = False
         # max_iterations stays as provided (or None)
         if hardness[1] >= 3:
-            time_limit = 120
+            time_limit = 60
 
     # Generate all test cases once (to ensure same cases for all envs)
     test_cases = list(generate_models_w_tables(hardness=hardness, glob=glob))
@@ -1081,17 +1104,23 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
                     peak_mem_mb = peak_mem / (1024 * 1024)
 
                     # Get Gurobi's peak memory if available
-                    if hasattr(slv, 'grb_model'):
-                        grb_mem_mb = slv.grb_model.getAttr('MaxMemUsed')
+                    if hasattr(slv, "grb_model"):
+                        grb_mem_mb = slv.grb_model.getAttr("MaxMemUsed")
 
+                obj = slv.objective_value() if model.has_objective() else None
                 if sat is None:
                     print(f"  TIMEOUT after {dt:.2f}s")
                     raise TimeoutError
                 else:
+                    obj_str = f" | obj={obj}" if obj is not None else ""
                     if track_memory:
-                        print(f"SOLVED IN {sdt:.2f}s | Mem: {peak_mem_mb:.1f}MB (Python) {grb_mem_mb:.1f}MB (Gurobi)" if grb_mem_mb else f"SOLVED IN {sdt:.2f}s | Mem: {peak_mem_mb:.1f}MB")
+                        print(
+                            f"SOLVED IN {sdt:.2f}s{obj_str} | Mem: {peak_mem_mb:.1f}MB (Python) {grb_mem_mb:.1f}MB (Gurobi)"
+                            if grb_mem_mb
+                            else f"SOLVED IN {sdt:.2f}s{obj_str} | Mem: {peak_mem_mb:.1f}MB"
+                        )
                     else:
-                        print(f"SOLVED IN {sdt:.2f}s")
+                        print(f"SOLVED IN {sdt:.2f}s{obj_str}")
 
                 # Get stats
                 stats = slv.stats()
@@ -1106,6 +1135,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
                     "env": env_alias,
                     "name": name,
                     "satisfiable": sat,
+                    "obj": obj,
                     "timeout": timeout,
                     "time_solve": sdt,
                     **stats,
@@ -1115,6 +1145,7 @@ def benchmark_table_constraints(envs=None, glob=None, hardness=None, filter_pres
             except Exception as e:
                 if tracemalloc.is_tracing():
                     tracemalloc.stop()
+                raise e
                 print(f"  ERROR: {e}")
                 traceback.print_exc()
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
