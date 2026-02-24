@@ -288,7 +288,10 @@ class TableData:
         solver = self.solver
 
         if self.env["negatives"]:
-            A_enc = np.concatenate([A_enc, ~A_enc])
+            if np.issubdtype(A_enc.dtype, np.bool):
+                A_enc = np.concatenate([A_enc, ~A_enc], dtype=A_enc.dtype)
+            else:
+                A_enc = np.concatenate([A_enc, 1.0 - A_enc], dtype=A_enc.dtype)
 
         def assert_example(A, B):
             assert (A.nonzero()[0] == [i - 1 for i in B]).all(), A.nonzero()[0]
