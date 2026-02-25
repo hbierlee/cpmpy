@@ -68,7 +68,7 @@ from ..transformations.safening import no_partial_functions, safen_objective
 from cpmpy.expressions.globalconstraints import Table
 from cpmpy.expressions.utils import dom_size
 import numpy as np
-from collections import Counter
+from collections import Counter, defaultdict
 from itertools import product
 import enum
 
@@ -375,6 +375,7 @@ class CPM_gurobi(SolverInterface):
                 class MDD:
                     def __init__(self):
                         self.MDD_cache = {}
+                        self.MDD_cache_reverse = defaultdict(list)
                         self.repeated_keys = set()
 
                 class TerminatingState(enum.Enum):
@@ -384,7 +385,7 @@ class CPM_gurobi(SolverInterface):
                 class Lookup:
 
                     def __repr__(self):
-                        return f"Lookup(mdd_id={self.node_id}, counter={self.counter})"
+                        return f"Lookup(node_id={self.node_id}, counter={self.counter})"
 
                     def __init__(self, node_id, counter=1):
                         self.node_id = node_id
@@ -403,23 +404,24 @@ class CPM_gurobi(SolverInterface):
                         # Hash based on mdd_id and counter to match __eq__
                         # Convert mdd_id to a hashable form if it's a tuple or other collection
                         try:
-                            mdd_id_hash = hash(self.node_id)
+                            node_id_hash = hash(self.node_id)
                         except TypeError:
                             # If mdd_id is unhashable (like a list/dict), convert to tuple
-                            mdd_id_hash = hash(
+                            node_id_hash = hash(
                                 tuple(self.node_id) if isinstance(self.node_id, (list, tuple)) else self.node_id)
-                        return hash((mdd_id_hash, self.counter))
+                        return hash((node_id_hash, self.counter))
 
                     def __deepcopy__(self):
                         return Lookup(self.node_id, self.counter)
 
                 class MDD_node:
-                    def __init__(self, mdd_id, level, transition):
-                        self.node_id = mdd_id
+                    def __init__(self, node_id, level, transition):
+                        self.node_id = node_id
                         self.level = level
                         self.transition = transition
 
                     def __eq__(self, other):
+
                         if not isinstance(other, MDD_node):
                             return False
 
@@ -465,7 +467,16 @@ class CPM_gurobi(SolverInterface):
 
                         return new_node
 
-                    __hash__ = object.__hash__
+                    def _canonical_transition(self):
+                        items = []
+                        for key in sorted(self.transition.keys()):
+                            v = self.transition[key]
+                            items.append((key, hash(v)))
+
+                        return tuple(items)
+
+                    def __hash__(self):
+                        return hash((self.level, self._canonical_transition()))
 
                 def lookup_mdd(mdd_node, cache):
                     while isinstance(mdd_node, Lookup):
@@ -489,21 +500,26 @@ class CPM_gurobi(SolverInterface):
                         return False
 
                     G = MDD_node(mdd_node.node_id, level, B)
-                    for (G_key, G_elem) in mdd.MDD_cache.items():
-                        if G_key.node_id != mdd_node.node_id:
-                            if G_elem == G:
-                                mdd.repeated_keys.add(G_elem.node_id)
-                                return Lookup(G_elem.node_id).__deepcopy__()
-                    else:
-                        mdd.MDD_cache[Lookup(mdd_node.node_id)] = G
-                        return Lookup(mdd_node.node_id)
+                    lookups = mdd.MDD_cache_reverse[G]
+
+                    for lookup in lookups:
+                        if lookup.node_id != mdd_node.node_id:
+                            mdd.repeated_keys.add(lookup.node_id)
+                            return lookup.__deepcopy__()
+
+                    mdd.MDD_cache[Lookup(mdd_node.node_id)] = G
+
+                    mdd.MDD_cache_reverse[G].append(Lookup(mdd_node.node_id))
+                    return Lookup(mdd_node.node_id)
 
                 def add_row_to_mdd(row, mdd_node, mdd, level=0, diff_level=None):
                     mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
                     tuple_key = Lookup(tuple(row[:level]))
                     if isinstance(mdd_node, MDD_node):
                         if mdd_node.node_id in mdd.repeated_keys:
-                            mdd.MDD_cache[tuple_key] = mdd.MDD_cache[tuple_key].deepcopy()
+                            prev_node = mdd.MDD_cache[tuple_key].deepcopy()
+                            mdd.MDD_cache[tuple_key] = prev_node
+                            mdd.MDD_cache_reverse[prev_node].append(tuple_key)
                             tuple_key = tuple_key.incr()
 
                     if level == len(row):
@@ -516,6 +532,7 @@ class CPM_gurobi(SolverInterface):
                                                                     MDD_node(tuple(row[:(level + 1)]), level + 1, {}),
                                                                     mdd, level + 1, diff_level)
                         mdd.MDD_cache[tuple_key] = mdd_node
+                        mdd.MDD_cache_reverse[mdd_node].append(tuple_key)
 
                         if reduce:
                             if level == diff_level:
@@ -528,6 +545,7 @@ class CPM_gurobi(SolverInterface):
                         mdd_node.transition[value] = add_row_to_mdd(row, mdd_node.transition[value], mdd, level + 1,
                                                                     diff_level)
                         mdd.MDD_cache[tuple_key] = mdd_node
+                        mdd.MDD_cache_reverse[mdd_node].append(tuple_key)
 
                     return tuple_key
 
@@ -583,7 +601,6 @@ class CPM_gurobi(SolverInterface):
 
                     return None
 
-
                 def mdd_to_flow(cache, X, X_enc):
                     """Convert MDD cache to flow constraints, accounting for column reordering"""
                     domains = np.array([dom_size(x) for x in X])
@@ -591,7 +608,7 @@ class CPM_gurobi(SolverInterface):
 
                     no_columns = sum(domains)
 
-                    column_counter = {k : 0 for k in range(no_columns)}
+                    column_counter = {k: 0 for k in range(no_columns)}
                     flow = {k: Flow() for k in cache.keys()}
                     flow['snk'] = Flow()
 
@@ -599,7 +616,7 @@ class CPM_gurobi(SolverInterface):
 
                         val = lookup_mdd(cache[key], cache)
 
-                        for (k,v) in val.transition.items():
+                        for (k, v) in val.transition.items():
                             column = sum(domains[:val.level]) + k - lb[val.level]
 
                             if column < 0 or column >= len(column_counter):
@@ -612,7 +629,6 @@ class CPM_gurobi(SolverInterface):
                             if isinstance(v, TerminatingState):
                                 flow['snk'].add_flow_in((column, column_counter[column]))
 
-
                     cons = []
                     substitution = {}
                     for key in column_counter.keys():
@@ -622,20 +638,33 @@ class CPM_gurobi(SolverInterface):
                             substitution[(key, 1)] = get_correct_bv(key, X, X_enc)
                         else:
                             bvs = self.boolvar(shape=column_counter[key], name=f"e_{key}")
-                            bv = get_correct_bv(key, X, X_enc)
-                            cons += [cp.sum(bvs) == bv]
+
                             for n in range(1, column_counter[key] + 1):
                                 substitution[(key, n)] = bvs[n - 1]
 
+                    excluded = {Lookup(tuple(), 1), "snk"}
+                    for key in sorted(
+                            (k for k in flow if k not in excluded),
+                            key=lambda k: len(k.node_id)
+                    ):
+                        if (len(flow[key].flow_in) == 1 and len(flow[key].flow_out) == 1
+                                and column_counter[flow[key].flow_in[0][0]] > 1 and column_counter[
+                                    flow[key].flow_out[0][0]] > 1):
+                            substitution[flow[key].flow_out[0]] = substitution[flow[key].flow_in[0]]
+                        else:
+                            cons += [cp.sum([substitution[(c, m)] for (c, m) in flow[key].flow_in]) == cp.sum(
+                                [substitution[(c, m)] for (c, m) in flow[key].flow_out])]
 
-                    for key in flow.keys() - {Lookup(tuple(), 1), "snk"}:
-                        cons += [cp.sum([substitution[(c,m)] for (c,m) in flow[key].flow_in]) == cp.sum([substitution[(c, m)] for (c, m) in flow[key].flow_out])]
+                    cons += [cp.sum([substitution[(c, m)] for (c, m) in flow['snk'].flow_in]) == 1]
+                    cons += [cp.sum([substitution[(c, m)] for (c, m) in flow[Lookup(tuple(), 1)].flow_out]) == 1]
 
-                    cons += [cp.sum([substitution[(c,m)] for (c,m) in flow['snk'].flow_in]) == 1]
-                    cons += [cp.sum([substitution[(c,m)] for (c,m) in flow[Lookup(tuple(), 1)].flow_out]) == 1]
+                    for key in column_counter.keys():
+                        if column_counter[key] > 1:
+                            cons += [
+                                cp.sum([substitution[(key, n)] for n in range(1, column_counter[key] + 1)]) == get_correct_bv(
+                                    key, X, X_enc)]
 
                     return cons
-
 
                 def mdd_decompose(self_):
                     X, Tb = self_.args
@@ -670,9 +699,8 @@ class CPM_gurobi(SolverInterface):
                     flow_cons = mdd_to_flow(mdd_cache, X_reordered, X_enc)
 
                     return cons + flow_cons, []
+
                 Table.decompose = mdd_decompose
-
-
 
             case _:
                     raise Exception(f"TODO: {encoding}")
