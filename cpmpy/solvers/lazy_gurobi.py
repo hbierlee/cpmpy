@@ -475,23 +475,17 @@ class TableData:
             solver.log(show_table(T_enc, full=self.env["verbosity"] == 3), verbosity=3)
             solver.log("", show_table(parts), "parts", verbosity=3)
 
-        R = np.ones(len(T_enc), dtype=bool)
-
-        def tight(R, RS):
-            return R & (RS == k)
-
         # Compute the upper bound for each row
         RS = (C_enc * T_enc).sum(axis=1)
 
         # All rows where upper bound == k are tight
-        R_tight = tight(R, RS)
+        R_tight = RS == k
 
         # We cannot select a column if it has a 1 in any tight row
         X = T_enc[R_tight, :].any(0)
 
         if self.env["verbosity"]:
             solver.log(f"Coverlift from {show_nz(~X)}", verbosity=3)
-            solver.log(show_table(T_enc[R, :]), verbosity=3)
             solver.log("", show_table(C_enc), "C_enc <=", k, verbosity=3)
             solver.log("", show_table(parts), "parts", verbosity=3)
 
@@ -575,7 +569,7 @@ class TableData:
             RS = RS + a_j * T_enc[:, j]
 
             # Find and update newly tight rows
-            N_tight = tight(~R_tight, RS)
+            N_tight = ~R_tight & (RS == k)
             R_tight |= N_tight
 
             # Add var and coefficient to cut
