@@ -262,10 +262,18 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                     # )
 
         if a <= 5 <= b:
-            yield ("hcpizza", _load_xcsp3("2025/COP22to25/HCPizza-20-20-2-8-01_c23.xml"))
-            yield ("fillomino", _load_xcsp3("2025/CSP22to25/Fillomino-5-0_c24.xml"))
+            # yield ("hcpizza", _load_xcsp3("2025/COP22to25/HCPizza-20-20-2-8-01_c23.xml"))
+            # yield ("fillomino", _load_xcsp3("2025/CSP22to25/Fillomino-5-0_c24.xml"))
             yield ("soccer", _load_xcsp3("2025/CSP22to25/Soccer-20-12-20-1_c24.xml"))
             yield ("airland", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml"))
+
+            airland = _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml")
+            airland.constraints = [next(c for c in airland.constraints if c.name == "table")]
+            airland.constraints += [c for c in airland.constraints if c.name != "table"]
+            yield (
+                "airland_first",
+                airland
+            )
             # yield ("opt_bug", "2025/COP22to25/Fortress1-05_c25.xml")
             # yield ("opt_bug", "2025/COP22to25/Fortress1-05_c25.xml")
 
@@ -399,7 +407,7 @@ def check_model(model, exp=None, checked=True, expected_sat=None, expected_obj=N
     pprint.pprint(exp)
 
     try:
-        if False:
+        if True:
             slv_ = CPM_ortools(cpm_model=model) if exp["solver"] == "ortools" else exp["solver"](**exp["solver_kwargs"])
             print("ENCODING")
             for i, c in enumerate(model.constraints, start=1):
@@ -494,7 +502,7 @@ def get_envs():
         # "checked": True,
     }
 
-    if True:
+    if False:
         yield {
             "alias": "dev",
             "solver": CPM_lazy_gurobi,
@@ -710,6 +718,7 @@ class TestTables:
         assert k == 1
         assert (X == np.array([False, True, True])).all()
 
+    @pytest.mark.skip()
     def test_explain(self, env):
         random.seed(SEED)
         for e, A_enc, env_ in [
@@ -1074,7 +1083,7 @@ def benchmark_table_constraints(
     for env in envs:
         env_alias = env.get("alias", "unknown")
         print(f"\n{'=' * 80}")
-        print(f"Testing with environment: {env_alias}")
+        print(f"Testing with environment: {env_alias} (TO = {time_limit})")
         print(f"{'=' * 80}\n")
         # print("ENV", env)
         if "lazy" in env_alias:

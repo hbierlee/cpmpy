@@ -84,8 +84,7 @@ def show_table(T_enc, index=INDEX, full=False):
 
 
 def show_nz(A, index=INDEX):
-    nz = np.atleast_1d(A).nonzero()[0] + 1
-    return nz[:10]
+    return np.flatnonzero(np.atleast_1d(A)) + 1
 
 
 def show_ind(a, index=INDEX):
@@ -242,14 +241,16 @@ class TableData:
 
                     # the pos cols will have low density, the neg cols have high density
                     B = densities[choices]
+                    h = np.argmax(H * (B.max() + 1) + B)
                     if self.solver.env["verbosity"]:
                         self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
                         self.solver.log("HHH", H, verbosity=2)
                         self.solver.log("B", B, verbosity=2)
                         self.solver.log("H", H, verbosity=2)
                         self.solver.log("H", H * (B.max() + 1) + B, verbosity=2)
+                        self.solver.log("C", show_nz(choices), verbosity=2)
+                        self.solver.log("h", h, np.flatnonzero(choices), np.flatnonzero(choices)[h], verbosity=2)
                     # TODO native?
-                    h = np.argmax(H * (B.max() + 1) + B)
 
                     # # upper bound on how many additional non-rows will be allowd (high is bad)
                     # B = (1 - densities[choices]) * np.pow(2, len(C_enc) - 1 - (C_enc != 0).sum())
@@ -260,10 +261,19 @@ class TableData:
                 else:
                     h = np.argmax(H)
 
-                if self.solver.env["verbosity"]:
-                    self.solver.log("H", H, verbosity=3)
+                    if self.solver.env["verbosity"]:
+                        self.solver.log("H", H, verbosity=3)
 
-                return choices.nonzero()[0][h]
+                # H = (
+                #     # sum the number of 0s for each choice (how mnay it will remove)
+                #     (~T_enc[np.ix_(R, choices)]).sum(0)
+                # )
+                # self.solver.log("H", H, verbosity=3)
+                # H = H * (densities[choices])
+                # self.solver.log("H", H, verbosity=3)
+                # h = H.argmax()
+
+                return np.flatnonzero(choices)[h]
 
             case Heuristic.REDUCE:
                 assert False
@@ -292,6 +302,32 @@ class TableData:
 
         # TODO convert T_enc to set of tuples?
 
+        # ```
+        # [[1 0 0 0 1 0 0 0 1 0 0 0 0 1 1 1 0 1 1 1 0 1 1 1]
+        #  [0 1 0 0 0 1 0 0 0 1 0 0 1 0 1 1 1 0 1 1 1 0 1 1]
+        #  [0 0 1 0 0 0 1 0 0 0 1 0 1 1 0 1 1 1 0 1 1 1 0 1]
+        #  [0 0 0 1 0 0 0 1 0 0 0 1 1 1 1 0 1 1 1 0 1 1 1 0]]
+        #  [0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0] C_enc <= 1
+        #  [0 1 0 0 _ 0 _ _ _ _ _ _ _ _ _ _ _ 1 _ _ _ _ _ _] C_enc <= 1
+        #  [0 1 0 0 _ 0 _ _ _ 1 _ _ _ _ _ _ _ 1 _ _ _ _ _ _] C_enc <= 1
+        #  [1 1 1 1 2 2 2 2 3 3 3 3-1-1-1-1-2-2-2-2-3-3-3-3] parts
+        # ```
+        # cut == 1 * b_2 + 1 * (1 - b_6) <= 1
+        # == sum([1, -1] * [BV[x[0] == 2], BV[x[1] == 2]]) <= 0
+        # x[0] = 2 -> x[1] = 2
+        # cut == 2 * b_2 + 1 * (1 - b_6) + 1 * (1 - b_10) <= 2 ?
+
+        # cut == 1 * b_2 + 1 * b_9 <= 1
+        # cut == 1 * b_2 + 1 * b_3 + 1 * b_4 + 1 * b_9 <= 1
+        # cut == 1 * b_2 + 1 * b_3 + 1 * b_4 + 1 * b_9 <= 1
+        #   == sum([BV[x[0] == 2], BV[x[0] == 3], BV[x[0] == 4], BV[x[2] == 1]]) <= 1
+        # diffs ; took x[2] i/o x[1]
+        # diffs ; sets x[2]!= 1 (WEAKER???)
+        # diffs ; adds all x!=2 \/ x!=3 \/ x!=4
+        # (x[0]!=2 /\ x[0]!=3 /\ x[0]!=4) -> x[2] != 1
+        # x[0]=1 -> x[2] != 1
+        # x[0]=1 + x[0]=2 + x[0]=2 + x[0]=2 == 1
+
         if self.env["verbosity"]:
             solver.log(f"Explain frm={frm}", end="\n", verbosity=2)
             solver.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc, "A_enc", verbosity=3, indent=0)
@@ -299,7 +335,6 @@ class TableData:
             solver.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
 
         # assert len(A_enc) == len(T_enc.T)
-
 
         self.env["cuts"].append({"from": frm})
 
@@ -316,7 +351,7 @@ class TableData:
         if F.any():
             # D are the difficult rows which only contains 1s for each W/F columns
             if self.env["verbosity"]:
-                solver.log(show_table((W | F) >= T_enc))
+                solver.log(show_table((W | F) >= T_enc), verbosity=3)
             D = ((W | F) >= T_enc).all(1)
 
             if self.env["verbosity"]:
@@ -445,8 +480,10 @@ class TableData:
                 Xl = X.sum()
             X, C_enc, k = self.gencoverlift(X, C_enc, k, A_enc, heuristic=self.env["coverlift"], frm=frm)
             if self.env["verbosity"]:
-                solver.log("coverlift added ", X.sum() - Xl, "of", Xl, verbosity=2)
-                self.show_cut(X, C_enc, k)
+                add = X.sum() - Xl
+                solver.log("coverlift added ", add, "of", Xl, verbosity=2)
+                if add:
+                    self.show_cut(X, C_enc, k)
 
         if self.env["shrink"]:
             C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
@@ -480,6 +517,8 @@ class TableData:
 
         # All rows where upper bound == k are tight
         R_tight = RS == k
+
+        # TODO earlier return
 
         # We cannot select a column if it has a 1 in any tight row
         X = T_enc[R_tight, :].any(0)
@@ -545,8 +584,6 @@ class TableData:
                     j = [3, 7, 0][iteration]
                 case Coverlift.INPUT:
                     j = np.nanargmax(choices)
-                case Coverlift.INPUT_LAST:
-                    j = len(choices) - 1 - np.nanargmax(choices[::-1])
                 case Coverlift.COM_MIN:
                     direction = com - np.where(X, np.nan, A_enc)
                     j = np.nanargmin(direction)
