@@ -393,7 +393,7 @@ def allsols(slv, model, solution_limit=100, max_search=None, time_limit=None):
     dt = time.time()
     slv.solveAll(display=display, solution_limit=solution_limit)
     actual_sat = bool(sols)
-    # assert len(sols) < 1000, "increase sol limit"
+    assert len(sols) < solution_limit, "increase sol limit"
     return sols if len(sols) < solution_limit else None
 
 
@@ -429,7 +429,7 @@ def check_model(model, exp=None, checked=True, expected_sat=None, expected_obj=N
         print("solving for actual feasibility", slv)
         if expected_sols is not None:
             print("allsols")
-            actual_sols = allsols(slv, model, time_limit=TIME_LIMIT)
+            actual_sols = allsols(slv, model, time_limit=TIME_LIMIT, solution_limit=SOL_LIMIT)
             assert frozenset(actual_sols) == frozenset(expected_sols)
             actual_sat = len(actual_sols) > 0
         else:
@@ -862,6 +862,7 @@ ALLSOLS = True
 SOLVE_EXPECTED = True  # Set to False to skip solving for expected values
 TIME_LIMIT = 30
 REPEAT = 3
+SOL_LIMIT = 10e5
 
 
 def _generate_cases_with_expected():
@@ -873,7 +874,7 @@ def _generate_cases_with_expected():
             model_ = model.deepcopy()
             expected_sat = model_.solve()
             expected_obj = model_.objective_value() if model.has_objective() else None
-            expected_sols = allsols(CPM_ortools(cpm_model=model), model, max_search=10e4) if ALLSOLS else None
+            expected_sols = allsols(CPM_ortools(cpm_model=model), model, max_search=10e4, solution_limit=SOL_LIMIT) if ALLSOLS else None
         else:
             expected_sat = None
             expected_obj = None

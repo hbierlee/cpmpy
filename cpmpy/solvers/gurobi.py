@@ -856,6 +856,17 @@ class CPM_gurobi(SolverInterface):
                     cpm_var._value = solver_val >= 0.5
                 else:
                     cpm_var._value = round(solver_val)
+
+            # Overwrite
+            if self.ivarmap is not None:
+                for enc in self.ivarmap.values():
+                    for x_enc_i in enc._xs:
+                        if isinstance(x_enc_i, NegBoolView):
+                            x_enc_i._value = self.solver_var(~x_enc_i).X <= 0.5
+                        else:
+                            x_enc_i._value = self.solver_var(x_enc_i).X >= 0.5
+                    enc._x._value = enc.decode()
+
             # set _objective_value
             if self.has_objective():
                 # assume integer obj
@@ -1222,6 +1233,16 @@ class CPM_gurobi(SolverInterface):
                     cpm_var._value = solver_val >= 0.5
                 else:
                     cpm_var._value = round(solver_val)
+
+            # Overwrite
+            if self.ivarmap is not None:
+                for enc in self.ivarmap.values():
+                    for x_enc_i in enc._xs:
+                        if isinstance(x_enc_i, NegBoolView):
+                            x_enc_i._value = self.solver_var(~x_enc_i).Xn <= 0.5
+                        else:
+                            x_enc_i._value = self.solver_var(x_enc_i).Xn >= 0.5
+                    enc._x._value = enc.decode()
 
             # Translate objective
             if self.has_objective():
