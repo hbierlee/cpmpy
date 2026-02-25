@@ -938,10 +938,28 @@ class CPM_gurobi(SolverInterface):
                                                       csemap=self._csemap)
         obj, flat_cons = flatten_objective(obj, csemap=self._csemap)
         obj = only_positive_bv_wsum(obj)  # remove negboolviews
+        channelling = self.handle_channelling(safe_cons + decomp_cons + flat_cons)
 
-        channelling = self.handle_channelling(obj)
+        weights, xs = ([1] * len(obj.args), obj.args) if obj.name == "sum" else obj.args
 
-        self.add(safe_cons + decomp_cons + flat_cons + channelling)
+        # partition based on whether variables already occur in the model
+        occurring = [(w, x) for w, x in zip(weights, xs) if x._occurs]
+        non_occurring = [(w, x) for w, x in zip(weights, xs) if not x._occurs]
+
+        # only encode non-occurring terms
+        terms, bool_cons, k = cp.transformations.int2bool._encode_lin_expr(
+            self.ivarmap,
+            [x for w, x in non_occurring],
+            [w for w, x in non_occurring],
+            "direct",
+            csemap=self._csemap,
+        )
+
+        # combine: occurring terms stay as-is, non-occurring get encoded
+        obj = cp.sum(x * w for x, w in occurring + terms) + k
+
+
+        self.add(bool_cons + channelling)
 
         # make objective function or variable and post
         grb_obj = self._make_numexpr(obj)
@@ -1028,7 +1046,6 @@ class CPM_gurobi(SolverInterface):
                 # TODO is int var
                 x_enc = self.ivarmap.get(x.name, None)
                 if x_enc and x._occurs is False:
-                    print("CHANNN", x)
                     cpm_cons += x_enc.encode_channelling_constraint(csemap=self._csemap)
                 x._occurs = True
         return cpm_cons
