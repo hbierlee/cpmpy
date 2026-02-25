@@ -161,11 +161,7 @@ class TableData:
             # TODO !!
             # self.parts = np.concatenate([self.parts, self.parts])
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
-            self.parts = (
-                np.concatenate([self.parts, np.arange(max(self.parts + 1), max(self.parts + 1) + len(self.parts))], dtype=int)
-                if self.parts.size
-                else self.parts
-            )
+            self.parts = np.concatenate([self.parts, -self.parts], dtype=int) if self.parts.size else self.parts
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
             # TODO concat
             self.densities = self.T_enc.mean(axis=0)
@@ -185,22 +181,21 @@ class TableData:
         return cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
     def show_cut(self, X, C_enc, k, verbosity=2):
-        if self.solver.env["verbosity"]:
-            terms = []
-            for i, c in enumerate(C_enc):
-                if c:
-                    if self.solver.env["negatives"] and i >= self.cols():
-                        terms.append(f"{c} * (1 - b_{show(i - self.cols())})")
-                    else:
-                        terms.append(f"{c} * b_{show(i)}")
-            cut_str = " + ".join(terms)
-            self.solver.log(
-                f"cut == {cut_str} <= {k}",
-                indent=2,
-                verbosity=verbosity,
-            )
+        terms = []
+        for i, c in enumerate(C_enc):
+            if c:
+                if self.solver.env["negatives"] and i >= self.cols():
+                    terms.append(f"{c} * (1 - b_{show(i - self.cols())})")
+                else:
+                    terms.append(f"{c} * b_{show(i)}")
+        cut_str = " + ".join(terms)
+        self.solver.log(
+            f"cut == {cut_str} <= {k}",
+            indent=2,
+            verbosity=verbosity,
+        )
 
-    def choose(self, choices, R, A_enc, C_enc, heuristic=Heuristic.GREEDY):
+    def choose(self, choices, R, A_enc, heuristic=Heuristic.GREEDY):
         T_enc = self.T_enc
         parts = self.parts
 
@@ -215,7 +210,6 @@ class TableData:
             self.solver.log("", parts, "parts", verbosity=3)
             self.solver.log("", show_table(A_enc), "A_enc", verbosity=3)
             self.solver.log("", choices.astype(int), "choices", verbosity=3)
-            self.solver.log("", C_enc, "C_enc", verbosity=3)
 
         if none(choices):
             return None
@@ -306,7 +300,6 @@ class TableData:
 
         # assert len(A_enc) == len(T_enc.T)
 
-        C_enc = np.zeros(len(A_enc), dtype=int)
 
         self.env["cuts"].append({"from": frm})
 
@@ -340,7 +333,7 @@ class TableData:
                 return True
             else:
                 R = np.ones(m, dtype=bool)
-                choice = self.choose(U & A_enc_pos, R, A_enc, C_enc, heuristic=self.env["heuristic"])
+                choice = self.choose(U & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
@@ -354,7 +347,6 @@ class TableData:
                 choices[parts[choice] == parts] = False
                 X = np.zeros(len(T_enc.T), dtype=bool)
                 X[choice] = True
-                C_enc[choice] = 1
                 R = T_enc[:, choice]
                 k = 0
 
@@ -362,7 +354,7 @@ class TableData:
                     assert_example(X, [2])
                     assert k == 0
                     assert_example(R, [1, 5])
-                    assert parts[choice] == 1 - 1
+                    assert parts[choice] == 1
 
                 if self.env["verbosity"]:
                     solver.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=solver.indent + 2)
@@ -376,14 +368,14 @@ class TableData:
         if self.env["verbosity"]:
             solver.log(f"R ({R.sum()})", verbosity=2, indent=solver.indent + 2)
             solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
-            solver.log(f"C_enc {C_enc}", verbosity=3, indent=solver.indent + 2)
             solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
 
         for iteration in itertools.count():
             if none(R):
                 break
 
-            choice = self.choose(choices & A_enc_pos, R, A_enc, C_enc, heuristic=self.env["heuristic"])
+            choice = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
+            assert not X[choice]
 
             if choice is None:
                 # this can happen only if assignment is feasible
@@ -391,29 +383,30 @@ class TableData:
 
             is_pos = choice < self.cols()
 
-            l_parts = parts[choice] == parts
-            assert not C_enc[choice], f"chosen {choice}"
+            part = parts[choice]
 
-            C_ = l_parts & A_enc_pos
-            choices[l_parts] = False
-            R = R & T_enc[:, C_].any(1)
-            X |= C_
-            C_enc[X] = 1
+            choice_parts = part == parts
+            R = R & T_enc[:, choice]
+            X[choice] = 1
             k += 1
 
-            # if is_pos:
-            #     C_ = l_parts & A_enc_pos
-            #     choices[l_parts] = False
-            #     R = R & T_enc[:, C_].any(1)
-            #     X |= C_
-            #     C_enc[X] = 1
-            #     k += 1
-            # else:
-            #     C_ = choice
-            #     choices[choice] = False
-            #     R = R & (~T_enc[:, choice])
-            #     X[choice] = True
-            #     C_enc[choice] = -1
+            # remove from choices
+            if self.solver.env["negatives"]:
+                if part > 0:
+                    chosen = choice_parts | (parts == -part)
+                    # self.solver.log("rm from choices", show_nz(chosen))
+                    choices[chosen] = False
+                else:
+                    choices[choice] = False
+                    choices[choice - self.cols()] = False
+                    # if only one choice remains in this part, remove it too
+                    remaining = np.flatnonzero(choices & choice_parts)
+                    if len(remaining) == 1:
+                        self.log("ONE REMAIN")
+                        choices[remaining[0]] = False
+                        choices[remaining[0] - self.cols()] = False
+            else:
+                choices[choice_parts] = False
 
             solver.check_max_iterations(iteration)
 
@@ -425,7 +418,6 @@ class TableData:
                     indent=solver.indent + 2,
                 )
                 solver.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
-                solver.log(f"C_ {show_nz(C_)}", verbosity=3, indent=solver.indent + 2)
                 if F.any():
                     solver.log("FRAC", frm, verbosity=2, indent=solver.indent + 2)
                 solver.log(
@@ -433,15 +425,15 @@ class TableData:
                 )
                 solver.log(f"= {show_nz(R)}", verbosity=3, indent=solver.indent + 3)
                 solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
-                solver.log(f"C_enc {C_enc}", verbosity=3, indent=solver.indent + 2)
+
+        C_enc = np.zeros(len(X), dtype=int)
+        C_enc[X] = 1
 
         if self.env["verbosity"]:
             solver.log(f"by explanation of size ({sum(X)})", verbosity=2)
             solver.log(show_nz(X), verbosity=3)
             solver.log("C_enc", C_enc, verbosity=3)
-            assert C_enc[X].all()
-
-        self.show_cut(X, C_enc, k)
+            self.show_cut(X, C_enc, k, verbosity=1)
 
         # if self.env["debug"] and X_enc is not None:
         #     expr = self.get_expr(X, C_enc, k)
@@ -454,13 +446,13 @@ class TableData:
             X, C_enc, k = self.gencoverlift(X, C_enc, k, A_enc, heuristic=self.env["coverlift"], frm=frm)
             if self.env["verbosity"]:
                 solver.log("coverlift added ", X.sum() - Xl, "of", Xl, verbosity=2)
-
-            self.show_cut(X, C_enc, k)
+                self.show_cut(X, C_enc, k)
 
         if self.env["shrink"]:
             C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
 
-        self.show_cut(X, C_enc, k, verbosity=1)
+        if self.env["verbosity"]:
+            self.show_cut(X, C_enc, k, verbosity=1)
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -479,9 +471,9 @@ class TableData:
 
         if self.env["verbosity"]:
             solver.log("gencoverlift", verbosity=2)
-            solver.log("T_enc", T_enc.shape)
+            solver.log("T_enc", T_enc.shape, verbosity=2)
             solver.log(show_table(T_enc, full=self.env["verbosity"] == 3), verbosity=3)
-            solver.log(f"parts = {show_table(parts)}", verbosity=3)
+            solver.log("", show_table(parts), "parts", verbosity=3)
 
         R = np.ones(len(T_enc), dtype=bool)
 
@@ -501,8 +493,12 @@ class TableData:
             solver.log(f"Coverlift from {show_nz(~X)}", verbosity=3)
             solver.log(show_table(T_enc[R, :]), verbosity=3)
             solver.log("", show_table(C_enc), "C_enc <=", k, verbosity=3)
+            solver.log("", show_table(parts), "parts", verbosity=3)
 
             solver.log("RS (row slack?)", show_table(RS), verbosity=3)
+            solver.log(show_table(T_enc[:, C_enc != 0]), verbosity=3)
+            solver.log("", show_table(C_enc[C_enc != 0]), verbosity=3)
+            solver.log("", show_table(parts[C_enc != 0]), "parts", verbosity=3)
             solver.log(f"R_tight = {show_nz(R_tight)}", verbosity=3)
             solver.log(f"X = {show_nz(X)}", verbosity=3)
             solver.log(f"S_ = {show_nz(S)}", verbosity=3)
@@ -608,7 +604,8 @@ class TableData:
             solver.check_max_iterations(iteration)
 
             assert X[j], f"{show(j)} not chosen in {X}"
-            self.show_cut(S, C_enc, k)
+            if self.env["verbosity"]:
+                self.show_cut(S, C_enc, k)
 
         return S, C_enc, k
 
@@ -877,7 +874,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             (X, C_enc, k) = explanation
             expr = cp.sum(C_enc[X] * X_enc[X]) <= k
             if self.env["verbosity"]:
-                self.log(f"  == {expr}", indent=2, verbosity=2)
+                self.log(f"  == {expr}", indent=2, verbosity=1)
 
         if isinstance(expr, (bool, np.bool_)):
             expr = cp.BoolVal(expr)
@@ -1230,8 +1227,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log("T =", verbosity=3)
                 self.log(T, verbosity=3)
                 self.log("T_enc =", verbosity=3)
-                self.log(np.astype(T_enc, int), verbosity=3)
-                self.log("X_enc =", X_enc, verbosity=3)
+                self.log(show_table(T_enc), verbosity=3)
+                self.log("X_enc =", show_table(X_enc), verbosity=3)
             assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
             self.tables.append(TableData(X_enc, T_enc, parts, cpm_expr, self))
 

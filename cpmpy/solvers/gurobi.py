@@ -230,7 +230,7 @@ class CPM_gurobi(SolverInterface):
         X_enc = []
         cons = []
         parts = []
-        for i, x in enumerate(X):
+        for i, x in enumerate(X, 1):
             x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
                 self.ivarmap, x, "direct", csemap=self._csemap
             )
