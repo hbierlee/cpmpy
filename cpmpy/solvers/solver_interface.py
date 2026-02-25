@@ -119,6 +119,7 @@ class SolverInterface(object):
                     self.minimize(cpm_model.objective_)
                 else:
                     self.maximize(cpm_model.objective_)
+                self.objective_ = cpm_model.objective_
 
     @property
     def native_model(self):

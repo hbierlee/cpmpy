@@ -102,6 +102,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                 ),
             )
             yield ("example", generate_table_from_example())
+            yield ("example_min", with_constraints(generate_table_from_example(), with_min=True))
             yield ("example_alldiff", with_constraints(generate_table_from_example(), with_alldiff=True))
             yield ("COM", generate_table_from_data([[2, 2], [2, 4], [4, 4], [4, 6]], ub=6))
             # Edge cases
@@ -270,10 +271,8 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             airland = _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml")
             airland.constraints = [next(c for c in airland.constraints if c.name == "table")]
             airland.constraints += [c for c in airland.constraints if c.name != "table"]
-            yield (
-                "airland_first",
-                airland
-            )
+            yield ("airland_first", airland)
+
             # yield ("opt_bug", "2025/COP22to25/Fortress1-05_c25.xml")
             # yield ("opt_bug", "2025/COP22to25/Fortress1-05_c25.xml")
 
@@ -391,6 +390,7 @@ def allsols(slv, model, solution_limit=100, max_search=None, time_limit=None):
             assert c.value(), f"Constraint {c} failed for assignment\n\n{show_assignment(get_variables(c))}"
 
     dt = time.time()
+
     slv.solveAll(display=display, solution_limit=solution_limit)
     actual_sat = bool(sols)
     assert len(sols) < solution_limit, "increase sol limit"
@@ -435,8 +435,8 @@ def check_model(model, exp=None, checked=True, expected_sat=None, expected_obj=N
         else:
             print("onesol")
             actual_sat = slv.solve(time_limit=TIME_LIMIT)
-            print(slv.status())
-            print(slv.objective_value())
+            print("STATUS", slv.status())
+            print("OBJ", slv.objective_value())
             if actual_sat is None:
                 raise TimeoutError
         print("actual feasible", actual_sat)
@@ -486,7 +486,6 @@ def with_constraints(model, with_alldiff=False, with_min=True):
     X = cp.transformations.get_variables.get_variables_model(model)
     if with_alldiff:
         model += cp.AllDifferent(X)
-    with_min = False
     if with_min:
         model.minimize(sum(X))
     return model
@@ -874,7 +873,11 @@ def _generate_cases_with_expected():
             model_ = model.deepcopy()
             expected_sat = model_.solve()
             expected_obj = model_.objective_value() if model.has_objective() else None
-            expected_sols = allsols(CPM_ortools(cpm_model=model), model, max_search=10e4, solution_limit=SOL_LIMIT) if ALLSOLS else None
+            expected_sols = (
+                allsols(CPM_ortools(cpm_model=model), model, max_search=10e4, solution_limit=SOL_LIMIT)
+                if ALLSOLS and not model.has_objective()
+                else None
+            )
         else:
             expected_sat = None
             expected_obj = None

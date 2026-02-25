@@ -1239,9 +1239,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         return [x_enc_i for x in X for x_enc_i in self.ivarmap[x]._xs]
 
     def transform_(self, cpm_expr):
-        if is_bool(cpm_expr) or cpm_expr.name != "table" or len(cpm_expr.args[1]) <= self.env["cutoff"]:
-            cons = super().transform(cpm_expr)
-        else:
+        if not is_bool(cpm_expr) and cpm_expr.name == "table" and len(cpm_expr.args[1]) > self.env["cutoff"]:
             if len(set(cpm_expr.args[0])) < len(cpm_expr.args[0]):
                 cpm_expr = normalize_table(cpm_expr)
             X, T = cpm_expr.args
@@ -1262,12 +1260,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log("X_enc =", show_table(X_enc), verbosity=3)
             assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {cpm_expr}"
             self.tables.append(TableData(X_enc, T_enc, parts, cpm_expr, self))
+        else:
+            cons = cpm_expr
 
         if self.env["checked"]:
             for c in cons:
                 self.env["checker"] += c
 
-        return cons
+        return super().transform(cons)
+
 
     def transform(self, cpm_expressions):
         return [cpm_con for cpm_expr in cpm_expressions for cpm_con in self.transform_(cpm_expr)]

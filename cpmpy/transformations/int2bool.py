@@ -247,6 +247,10 @@ class IntVarEnc(ABC):
         """
         pass
 
+    def encode_channelling_constraint(self, csemap=None):
+        expr, k = self.encode_term()
+        return [cp.sum(c * b for c, b in expr) - self._x == -k]
+
     @abstractmethod
     def encode_comparison(self, op, rhs, csemap=None):
         """
@@ -302,7 +306,7 @@ class IntVarEncDirect(IntVarEnc):
         Variable x has exactly one value from domain,
         so only one of the Boolean variables can be True
         """
-        return [cp.sum(self._xs) == 1]
+        return [cp.sum(self._xs) == 1] + (self.encode_channelling_constraint(csemap=csemap) if self._x._occurs else [])
 
     def eq(self, d):
         """Return a literal whether x==d."""

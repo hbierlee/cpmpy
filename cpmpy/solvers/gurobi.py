@@ -237,7 +237,8 @@ class CPM_gurobi(SolverInterface):
             # TODO if only BV, then need to assign (but no need to assign if decoding constraint present)
             # Note: do not use self += [..] to avoid poluting user_vars (and transformation is not really necesary either)
             cons += exactly_one_con
-            cons += [cp.sum(c * b for c, b in expr) - x == -k]
+            if x._occurs:
+                cons += [cp.sum(c * b for c, b in expr) - x == -k]
 
             xs = list(x_enc._xs)
             X_enc += xs
@@ -870,7 +871,8 @@ class CPM_gurobi(SolverInterface):
             # set _objective_value
             if self.has_objective():
                 # assume integer obj
-                self.objective_value_ = round(grb_objective.getValue())
+                self.objective_value_ = self.objective_.value()
+
 
         else: # clear values of variables
             for cpm_var in self.user_vars:
@@ -937,7 +939,9 @@ class CPM_gurobi(SolverInterface):
         obj, flat_cons = flatten_objective(obj, csemap=self._csemap)
         obj = only_positive_bv_wsum(obj)  # remove negboolviews
 
-        self.add(safe_cons + decomp_cons + flat_cons)
+        channelling = self.handle_channelling(obj)
+
+        self.add(safe_cons + decomp_cons + flat_cons + channelling)
 
         # make objective function or variable and post
         grb_obj = self._make_numexpr(obj)
@@ -1003,13 +1007,32 @@ class CPM_gurobi(SolverInterface):
         cpm_cons = flatten_constraint(cpm_cons, csemap=self._csemap)  # flat normal form
         cpm_cons = reify_rewrite(cpm_cons, supported=frozenset(['sum', 'wsum']), csemap=self._csemap)  # constraints that support reification
         cpm_cons = only_numexpr_equality(cpm_cons, supported=frozenset(["sum", "wsum", "sub"]), csemap=self._csemap)  # supports >, <, !=
-        cpm_cons = linearize_reified_variables(cpm_cons, min_values=2, csemap=self._csemap)
+        cpm_cons = linearize_reified_variables(
+            cpm_cons,
+            min_values=2,
+            csemap=self._csemap,
+            ivarmap=self.ivarmap
+        )
         cpm_cons = only_bv_reifies(cpm_cons, csemap=self._csemap)
         cpm_cons = only_implies(cpm_cons, csemap=self._csemap)  # anything that can create full reif should go above...
         # gurobi does not round towards zero, so no 'div' in supported set: https://github.com/CPMpy/cpmpy/pull/593#issuecomment-2786707188
         cpm_cons = linearize_constraint(cpm_cons, supported=frozenset({"sum", "wsum","->","sub","min","max","mul","abs","pow"}), csemap=self._csemap)  # the core of the MIP-linearization
         cpm_cons = only_positive_bv(cpm_cons, csemap=self._csemap)  # after linearization, rewrite ~bv into 1-bv
+        cpm_cons += self.handle_channelling(cpm_cons)
         return cpm_cons
+
+    def handle_channelling(self, cpm_expr):
+        cpm_cons = []
+        if self.ivarmap is not None:
+            for x in get_variables(cpm_expr):
+                # TODO is int var
+                x_enc = self.ivarmap.get(x.name, None)
+                if x_enc and x._occurs is False:
+                    print("CHANNN", x)
+                    cpm_cons += x_enc.encode_channelling_constraint(csemap=self._csemap)
+                x._occurs = True
+        return cpm_cons
+            
 
     def add(self, cpm_expr_orig):
       """

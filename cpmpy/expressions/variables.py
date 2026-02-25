@@ -350,6 +350,7 @@ class _IntVarImpl(_NumVarImpl):
             name = f"{_IV_PREFIX}{_IntVarImpl.counter}"
             _IntVarImpl.counter = _IntVarImpl.counter + 1 # static counter
 
+        self._occurs = False
         super().__init__(int(lb), int(ub), name=name) # explicit cast: can be numpy
 
     # special casing for intvars (and boolvars)
