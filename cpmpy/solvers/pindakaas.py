@@ -45,11 +45,10 @@ from ..exceptions import NotSupportedError
 from ..expressions.core import BoolVal, Comparison
 from ..expressions.utils import eval_comparison
 from ..expressions.variables import NegBoolView, _BoolVarImpl, _IntVarImpl
-from ..transformations.decompose_global import decompose_in_tree
 from ..transformations.flatten_model import flatten_constraint
 from ..transformations.get_variables import get_variables
 from ..transformations.int2bool import _decide_encoding, _encode_int_var, int2bool
-from ..transformations.linearize import linearize_constraint
+from ..transformations.linearize import linearize_constraint, linearize_reified_variables, decompose_linear
 from ..transformations.normalize import simplify_boolean, toplevel_list
 from ..transformations.reification import only_bv_reifies, only_implies
 from ..transformations.safening import no_partial_functions
@@ -115,6 +114,8 @@ class CPM_pindakaas(SolverInterface):
         self.ivarmap = dict()  # for the integer to boolean encoders
         self.encoding = "auto"
         self.pdk_solver = pdk.solver.CaDiCaL()
+        # TODO workaround for upstream issue https://github.com/pindakaashq/pindakaas/issues/189
+        self.pdk_solver._set_option("factor", 0)
         self.unsatisfiable = False  # `pindakaas` might determine unsat before solving
         self.core = None  # latest UNSAT core
         super().__init__(name=name, cpm_model=cpm_model)
@@ -191,7 +192,7 @@ class CPM_pindakaas(SolverInterface):
                         )
                     value = result.value(lit)
                     assert value is not None, (
-                        "All user variables should have been assigned, but {cpm_var} (literal {lit}) was not."
+                        f"All user variables should have been assigned, but {cpm_var} (literal {lit}) was not."
                     )
                     cpm_var._value = value
                 self.core = None
@@ -229,21 +230,17 @@ class CPM_pindakaas(SolverInterface):
             raise TypeError(f"Unexpected type: {cpm_var}")
 
     def transform(self, cpm_expr):
-        cpm_cons = [cpm_expr]
-
-        # eagerly encode integer variables to maximize CSE
-        for x in get_variables(cpm_expr):
-            if (not isinstance(x, _BoolVarImpl)) and isinstance(x, _IntVarImpl):
-                _, cons = _encode_int_var(
-                    self.ivarmap, x, _decide_encoding(x, encoding=self.encoding), csemap=self._csemap
-                )
-                cpm_cons += cons
-
-        cpm_cons = toplevel_list(cpm_cons)
-        cpm_cons = no_partial_functions(cpm_cons)
-        cpm_cons = decompose_in_tree(cpm_cons, csemap=self._csemap)
+        cpm_cons = toplevel_list(cpm_expr)
+        cpm_cons = no_partial_functions(cpm_cons, safen_toplevel={"div", "mod", "element"})
+        cpm_cons = decompose_linear(
+            cpm_cons,
+            supported=self.supported_global_constraints,
+            supported_reified=self.supported_reified_global_constraints,
+            csemap=self._csemap,
+        )
         cpm_cons = simplify_boolean(cpm_cons)
         cpm_cons = flatten_constraint(cpm_cons, csemap=self._csemap)  # flat normal form
+        cpm_cons = linearize_reified_variables(cpm_cons, min_values=2, csemap=self._csemap, ivarmap=self.ivarmap)
         cpm_cons = only_bv_reifies(cpm_cons, csemap=self._csemap)
         cpm_cons = only_implies(cpm_cons, csemap=self._csemap)
         cpm_cons = linearize_constraint(cpm_cons, supported=frozenset({"sum", "wsum", "->", "and", "or"}), csemap=self._csemap)
@@ -318,10 +315,7 @@ class CPM_pindakaas(SolverInterface):
             # Create `pindakaas` Boolean linear expression object
             lhs = sum(c * l for c, l in zip(coefficients, self.solver_vars(literals)))
 
-            self.pdk_solver.add_encoding(
-                eval_comparison(cpm_expr.name, lhs, rhs),
-                conditions=self.solver_vars(conditions),
-            )
+            self.pdk_solver.add_encoding(eval_comparison(cpm_expr.name, lhs, rhs), conditions=self.solver_vars(conditions))
         else:
             raise NotSupportedError(f"{self.name}: Unsupported constraint {cpm_expr}")
 

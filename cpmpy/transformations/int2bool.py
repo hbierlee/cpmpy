@@ -1,11 +1,10 @@
 """Convert integer linear constraints to pseudo-boolean constraints."""
 
+import cpmpy as cp
 import itertools
 import math
 from abc import ABC, abstractmethod
 from typing import List
-
-import cpmpy as cp
 
 from ..expressions.core import BoolVal, Comparison, Expression, Operator
 from ..expressions.globalconstraints import DirectConstraint
@@ -18,7 +17,13 @@ UNKNOWN_COMPARATOR_ERROR = ValueError("Comparator is not known or should have be
 
 
 def int2bool(cpm_lst: List[Expression], ivarmap, encoding="auto", csemap=None):
-    """Convert integer linear constraints to pseudo-boolean constraints. Requires `linearize` transformation."""
+    """Convert integer linear constraints to pseudo-boolean constraints. Requires `linearize` transformation.
+
+    :param: cpm_lst: list of constraints to transform
+    :param: ivarmap: dictionary mapping integer variables to their encoding
+    :param: encoding: choice of encoding: "direct", "order", "binary", or "auto", which makes encoding choices based on constraint comparator and domain size
+    :param: csemap: To enable CSE
+    """
     assert encoding in (
         "auto",
         "direct",
@@ -59,7 +64,7 @@ def _encode_expr(ivarmap, expr, encoding, csemap=None):
         elif lhs.name == "sum":
             if len(lhs.args) == 1:
                 # even though it seems trivial (to call `_encode_comparison`), using recursion avoids bugs
-                return _encode_expr(ivarmap, Comparison(expr.name, lhs.args[0], rhs), encoding, csemap=csemap)  
+                return _encode_expr(ivarmap, Comparison(expr.name, lhs.args[0], rhs), encoding, csemap=csemap)
             else:
                 return _encode_linear(ivarmap, lhs.args, expr.name, rhs, encoding, csemap=csemap)
         elif lhs.name == "wsum":
@@ -198,24 +203,20 @@ def _decide_encoding(x, cmp=None, encoding="auto"):
         return "binary"
     elif cmp in ("==", "!="):
         return "direct"  # equalities suit the direct encoding
-    else:  # we use the order encoding for inequalities, en when we do not have `cmp`
+    else:  # we use the order encoding for inequalities, and as default when we do not have `cmp`
         return "order"
 
 
 class IntVarEnc(ABC):
     """Abstract base class for integer variable encodings."""
 
-    def __init__(self, x, x_enc, csemap=None):
-        """Create encoding of integer variable `x` over the given Boolean expressions, `x_enc`. E.g. the direct encoding for `x` should provide `x_enc = ( x == 1, x == 2, ..)`. Any literals created (e.g. b == ( x == 1 )`) are added to the `csemap` if provided."""
+    NAMED = False
+    """Enable to name the encoding variables semantically for debugging purposes (e.g. `BV[x == 42]` for a direct encoding variable of `x`)"""
+
+    def __init__(self, x, x_enc):
+        """Initialize encoding of integer variable `x` with encoding variables `x_enc`"""
         self._x = x  # the encoded integer variable
-        self._xs = []
-        for x_enc_i in x_enc:
-            lit, _ = get_or_make_var(x_enc_i, csemap=csemap)
-            # we can remove the definining constraints as the int var will be replaced
-            if lit.name != x_enc_i.name:
-                lit.name = f"BV[{x_enc_i}]"
-            self._xs.append(lit)
-        self._xs = cp.cpm_array(self._xs)
+        self._xs = cp.cpm_array(x_enc)  # the encoding variables
 
     def vars(self):
         """Return the Boolean variables in the encoding."""
@@ -282,8 +283,17 @@ class IntVarEncDirect(IntVarEnc):
 
     def __init__(self, x, csemap=None):
         """Create direct encoding of integer variable `x`."""
-        # Requires |dom(x)| Boolean equality variables
-        super().__init__(x, (x == d for d in _dom(x)), csemap=csemap)
+        x_enc = []
+        # the direct encoding requires |dom(x)| Boolean equality variables
+        for d in _dom(x):
+            expr = x == d
+            # we can omit the defining constraints as the int var will be replaced
+            lit, _ = get_or_make_var(expr, csemap=csemap)
+            # ensure that the original variable's name is never replaced. This can happen when a BV is encoded, which does occur.
+            if self.__class__.NAMED and lit.name != expr.name:
+                lit.name = f"BV[{expr}]"
+            x_enc.append(lit)
+        super().__init__(x, x_enc)
 
     def encode_domain_constraint(self, csemap=None):
         """
@@ -329,7 +339,17 @@ class IntVarEncOrder(IntVarEnc):
 
     def __init__(self, x, csemap=None):
         """Create order encoding of integer variable `x`."""
-        super().__init__(x, (x >= d for d in itertools.islice(_dom(x), 1, None)), csemap=csemap)
+        x_enc = []
+        # the order encoding requires |dom(x)|-1 Boolean inequality variables
+        for d in itertools.islice(_dom(x), 1, None):
+            expr = x >= d
+            # we can omit the defining constraints as the int var will be replaced
+            lit, _ = get_or_make_var(expr, csemap=csemap)
+            # ensure that the original variable's name is never replaced. This can happen when a BV is encoded, which does occur.
+            if self.__class__.NAMED and lit.name != expr.name:
+                lit.name = f"BV[{expr}]"
+            x_enc.append(lit)
+        super().__init__(x, x_enc)
 
     def encode_domain_constraint(self, csemap=None):
         """Return order encoding domain constraint (i.e. encoding variables are sorted in descending order e.g. `111000`)."""
@@ -384,9 +404,10 @@ class IntVarEncLog(IntVarEnc):
 
     def __init__(self, x, csemap=None):
         """Create binary encoding of integer variable `x`."""
+        # the binary encoding requires a logarithmic number of Boolean `bit`s
         bits = math.ceil(math.log2(_dom_size(x)))
-        super().__init__(x, (cp.boolvar(name=f"bit({x},{k})") for k in range(bits)), csemap=csemap)
-        # TODO possibly...: super().__init__(x,  ((( ((x - x.lb) ** k) % 2) == 0) for k in range(bits)), csemap=csemap)
+        super().__init__(x, [cp.boolvar(name=f"bit({x},{k})" if self.__class__.NAMED else None) for k in range(bits)])
+        # TODO possibly something like: super().__init__(x,  ((( ((x - x.lb) ** k) % 2) == 1) for k in range(bits)), csemap=csemap)
 
     def encode_domain_constraint(self, csemap=None):
         """Return binary encoding domain constraint (i.e. upper bound is respected with `self._x<=self._x.ub`. The lower bound is automatically enforced by offset binary which maps `000.. = self._x.lb`)."""
@@ -413,10 +434,7 @@ class IntVarEncLog(IntVarEnc):
             return [BoolVal(True)]
         elif self._x.lb <= d <= self._x.ub:
             # x_i = bit_i for every bit in the representation
-            return [
-                x if bit else (~x)
-                for bit, x in itertools.zip_longest(self._to_little_endian_offset_binary(d), self._xs)
-            ]
+            return [x if bit else (~x) for bit, x in itertools.zip_longest(self._to_little_endian_offset_binary(d), self._xs)]
         else:  # don't use try IndexError since negative values wrap
             return [BoolVal(False)]
 
