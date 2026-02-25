@@ -317,13 +317,13 @@ class CPM_gurobi(SolverInterface):
             case Encoding.CPMPY:
                 Table.decompose = cpmpy_decompose
             case Encoding.XCSP3:
-                def xcsp3_decompose(self):
-                    arr, tab = self.args
+                def xcsp3_decompose(self_):
+                    arr, tab = self_.args
 
                     if len(tab) < 2:
                         return trivial_decomposition(arr, tab)
 
-                    row_selected = self.new_boolvar("r", shape=len(tab))
+                    row_selected = self.boolvar("r", shape=len(tab))
 
                     cons = []
                     for i, row in enumerate(tab):
