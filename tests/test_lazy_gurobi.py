@@ -22,6 +22,7 @@ from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristi
 from cpmpy.solvers.ortools import CPM_ortools
 from cpmpy.tools.xcsp3.experiments import get_solvers
 
+INT_VAR_NAMES = list("xyzuvwprq")
 SEED = 42
 random.seed(SEED)
 
@@ -330,7 +331,7 @@ def generate_table(n, m, d, k=1, gaps=None, allow_duplicate_vars=True, ensure_fe
         ensure_feasible: If True, guarantee feasibility by including a random solution in each table
     """
     model = cp.Model()
-    X = cp.intvar(1, d, shape=(n,), name="x")
+    X = cp.intvar(1, d, shape=(n,), name=INT_VAR_NAMES[:n] if n < len(INT_VAR_NAMES) else "x")
 
     # Track actual domains for each variable
     domains = {x: list(range(1, d + 1)) for x in X}
@@ -1012,7 +1013,15 @@ FILTER_PRESETS = {
 
 
 def benchmark_table_constraints(
-    envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None, max_iterations=None, track_memory=False, checked=None
+    envs=None,
+    glob=None,
+    hardness=None,
+    filter_preset=None,
+    verbosity=None,
+    max_iterations=None,
+    track_memory=False,
+    checked=None,
+    time_limit=None,
 ):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
@@ -1059,11 +1068,12 @@ def benchmark_table_constraints(
 
     if verbosity is None:
         verbosity = 2
-    time_limit = 10
 
     if hardness[1] <= 1:
         if checked is None:
             checked = True
+        if time_limit is None:
+            time_limit = 10
         debug = True
         track_memory = True
     else:
@@ -1071,8 +1081,8 @@ def benchmark_table_constraints(
             checked = False
         debug = False
         # max_iterations stays as provided (or None)
-        if hardness[1] >= 3:
-            time_limit = 60
+        if time_limit is None:
+            time_limit = 60 if hardness[1] >= 3 else 10
 
     # Generate all test cases once (to ensure same cases for all envs)
     test_cases = list(generate_models_w_tables(hardness=hardness, glob=glob))
@@ -1105,6 +1115,8 @@ def benchmark_table_constraints(
 
             print(f"Running {name} with {env_alias}...")
             print(env)
+            if verbosity >= 2:
+                print(model)
 
             try:
                 # Create solver with the environment
@@ -1169,19 +1181,27 @@ def benchmark_table_constraints(
                 }
                 results.append(result)
 
+            except TimeoutError:
+                print("timeout")
+                pass
             except Exception as e:
-                if tracemalloc.is_tracing():
-                    tracemalloc.stop()
                 raise e
                 print(f"  ERROR: {e}")
                 traceback.print_exc()
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
+            finally:
+                if tracemalloc.is_tracing():
+                    tracemalloc.stop()
 
     # Create and print dataframe
     pd.set_option("display.float_format", "{:0.2f}".format)
     df = pd.DataFrame(results)
 
-    for col in ["constraints", "n_cuts", "time_solve"]:
+    cols = ["constraints", "n_cuts"]
+    if verbosity == 0:
+        cols += ["time_solve"]
+
+    for col in cols:
         if col not in df.columns:
             df[col] = 0
     df["constraints"] = df["constraints"].fillna(0).astype(int)
@@ -1331,9 +1351,17 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--checked",
+        "-c",
         action="store_true",
         default=False,
         help="Enable solution checking/verification",
+    )
+    parser.add_argument(
+        "--time-limit",
+        "-t",
+        type=int,
+        default=None,
+        help="Time limit in seconds for each solve (default: auto based on hardness)",
     )
 
     args = parser.parse_args()
@@ -1345,6 +1373,7 @@ if __name__ == "__main__":
     print(f"  Max iterations: {args.max_iterations}")
     print(f"  Track memory: {args.track_memory}")
     print(f"  Checked: {args.checked}")
+    print(f"  Time limit: {args.time_limit}")
     if args.glob:
         print(f"  Glob: {args.glob}")
 
@@ -1356,6 +1385,7 @@ if __name__ == "__main__":
         max_iterations=args.max_iterations,
         track_memory=args.track_memory,
         checked=args.checked if args.checked else None,
+        time_limit=args.time_limit,
     )
 
     df.to_csv(args.output, index=False)
