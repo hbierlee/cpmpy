@@ -193,6 +193,7 @@ class TableData:
             indent=2,
             verbosity=verbosity,
         )
+        self.solver.log(self.X_enc.value(), indent=2, verbosity=3)
 
     def choose(self, choices, R, A_enc, heuristic=Heuristic.GREEDY):
         T_enc = self.T_enc
@@ -203,6 +204,7 @@ class TableData:
 
         # print(show_table(densities), "dens")
 
+        assert choices.any()
         if self.solver.env["verbosity"]:
             self.solver.log(f"Choose from {show_nz(choices)} to allow remaining rows R=\n{show_nz(R)}", verbosity=3)
             self.solver.log(show_table(T_enc[R, :]), "T_enc[R,:]", verbosity=3)
@@ -216,8 +218,8 @@ class TableData:
             case Heuristic.INPUT:
                 return np.argmax(choices)
             case Heuristic.GREEDY:
-                parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
-                parts_ -= parts_[0]
+                # parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
+                # parts_ -= parts_[0]
                 # map back to the right part index
                 if self.solver.env["verbosity"]:
                     self.solver.log(show_table(T_enc[np.ix_(R, choices)]), "T_enc[R,choices]", verbosity=3)
@@ -234,9 +236,13 @@ class TableData:
 
                 # how many additional rows will be removed (high is good)
                 H = (~T_enc[np.ix_(R, choices)]).sum(0)
+                if self.solver.env["verbosity"]:
+                    self.solver.log("H", show_table(H), verbosity=2)
                 if self.solver.env["negatives"]:
                     densities = self.densities
                     B = densities[choices]
+                    if self.solver.env["verbosity"]:
+                        self.solver.log("HH", H * (B.max() + 1) + B, verbosity=2)
                     h = np.argmax(H * (B.max() + 1) + B)
 
                     # if self.solver._vary():
@@ -293,18 +299,11 @@ class TableData:
                 # )
                 # return choice if choice is not None else self.solver.choose(A, T_enc, R, heuristic=Heuristic.GREEDY)
 
-    def explain(self, A_enc, frm=None):
+    def explain(self, A_enc, frm=None, is_integer=None):
         """The `explain_frac2` alg."""
         T_enc = self.T_enc
         parts = self.parts
-        X_enc = self.X_enc
         solver = self.solver
-
-        if self.env["negatives"]:
-            if np.issubdtype(A_enc.dtype, np.bool):
-                A_enc = np.concatenate([A_enc, ~A_enc], dtype=A_enc.dtype)
-            else:
-                A_enc = np.concatenate([A_enc, 1.0 - A_enc], dtype=A_enc.dtype)
 
         def assert_example(A, B):
             assert (A.nonzero()[0] == [i - 1 for i in B]).all(), A.nonzero()[0]
@@ -338,7 +337,7 @@ class TableData:
         # x[0]=1 + x[0]=2 + x[0]=2 + x[0]=2 == 1
 
         if self.env["verbosity"]:
-            solver.log(f"Explain frm={frm}", end="\n", verbosity=2)
+            solver.log(f"Explain frm={frm}/is_integer={is_integer}", end="\n", verbosity=1)
             solver.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc, "A_enc", verbosity=3, indent=0)
             solver.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
             solver.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
@@ -390,8 +389,9 @@ class TableData:
                     choice = 2 - 1
 
                 # V <- {p(i)}
+                part = parts[choice] # p(i)
                 choices = np.zeros(len(T_enc.T), dtype=bool)
-                choices[parts[choice] == parts] = True  # only choose from current part
+                choices[parts == part] = True  # only choose from current part
                 choices[choice] = False  # except for i
 
                 # X <- {i}
@@ -399,6 +399,16 @@ class TableData:
                 X[choice] = True
                 R = T_enc[:, choice]
                 k = 0
+
+                if self.solver.env["negatives"]:
+                    is_pos = choice < self.cols()
+                    assert is_pos
+
+                    # # actually, the opposite part cannot be chosen?
+                    # # also allowed to choose from opposite part
+                    # choices[parts == -part] = True
+                    # choices[choice - self.cols()] = False
+                    # # X[-choice] = False  # TODO redundant
 
                 if self.env["example_frac"]:
                     assert_example(X, [2])
@@ -437,7 +447,7 @@ class TableData:
 
             part = parts[choice]
 
-            choice_parts = part == parts
+            choice_parts = parts == part
             R = R & T_enc[:, choice]
             X[choice] = 1
             k += 1
@@ -474,7 +484,7 @@ class TableData:
                 solver.log(
                     f"R choice = {'+' if is_pos else '-'}b_{show(choice)} -> ({R.sum()})", verbosity=2, indent=solver.indent + 2
                 )
-                solver.log(f"= {show_nz(R)}", verbosity=3, indent=solver.indent + 3)
+                solver.log(f"R = {show_nz(R)}", verbosity=3, indent=solver.indent + 3)
                 solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
 
         C_enc = np.zeros(len(X), dtype=int)
@@ -938,7 +948,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             expr = cp.sum(C_enc[X] * X_enc[X]) <= k
             if self.env["verbosity"]:
                 self.log(f"EXPR  == {expr}", indent=2, verbosity=1)
-                self.log(f" {X_enc[X]} == {X_enc[X].value()}", indent=2, verbosity=1)
+                self.log(show_table(X_enc[X]), indent=2, verbosity=3)
+                self.log(show_table(X_enc[X].value()), indent=2, verbosity=1)
 
         if isinstance(expr, (bool, np.bool_)):
             expr = cp.BoolVal(expr)
@@ -966,7 +977,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         for i, tbl in enumerate(self.tables, start=INDEX):
             X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
-            # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
             if frm == "MIPSOL":
                 A_enc = X_enc.value() > 0.5
                 assert A_enc.dtype == bool, A_enc.dtype
@@ -1004,11 +1014,17 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     indent=2,
                 )
 
+            if self.env["negatives"]:
+                if np.issubdtype(A_enc.dtype, np.bool):
+                    A_enc = np.concatenate([A_enc, ~A_enc], dtype=A_enc.dtype)
+                else:
+                    A_enc = np.concatenate([A_enc, 1.0 - A_enc], dtype=A_enc.dtype)
+
             try:
                 # encode assignment
                 if self.env["verbosity"]:
                     self.log(" ", np.array(X_enc), verbosity=3, indent=0)
-                explanation = tbl.explain(A_enc, frm=frm)
+                explanation = tbl.explain(A_enc, frm=frm, is_integer=is_integer)
 
                 if self.env["verbosity"]:
                     # self.check_explanation(explanation, X_enc, A_enc, T_enc)

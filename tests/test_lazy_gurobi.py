@@ -1120,6 +1120,7 @@ def benchmark_table_constraints(
             print(f"Running {name} with {env_alias}...")
             print(env)
             if verbosity >= 2:
+                print("== Model == ")
                 print(model)
 
             try:
