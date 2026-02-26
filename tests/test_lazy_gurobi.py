@@ -1012,7 +1012,7 @@ FILTER_PRESETS = {
 
 
 def benchmark_table_constraints(
-    envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None, max_iterations=None, track_memory=False
+    envs=None, glob=None, hardness=None, filter_preset=None, verbosity=None, max_iterations=None, track_memory=False, checked=None
 ):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
@@ -1062,11 +1062,13 @@ def benchmark_table_constraints(
     time_limit = 10
 
     if hardness[1] <= 1:
-        checked = True
+        if checked is None:
+            checked = True
         debug = True
         track_memory = True
     else:
-        checked = False
+        if checked is None:
+            checked = False
         debug = False
         # max_iterations stays as provided (or None)
         if hardness[1] >= 3:
@@ -1327,6 +1329,12 @@ if __name__ == "__main__":
         default=False,
         help="Track memory usage during solve (adds overhead)",
     )
+    parser.add_argument(
+        "--checked",
+        action="store_true",
+        default=False,
+        help="Enable solution checking/verification",
+    )
 
     args = parser.parse_args()
 
@@ -1336,6 +1344,7 @@ if __name__ == "__main__":
     print(f"  Verbosity: {args.verbosity}")
     print(f"  Max iterations: {args.max_iterations}")
     print(f"  Track memory: {args.track_memory}")
+    print(f"  Checked: {args.checked}")
     if args.glob:
         print(f"  Glob: {args.glob}")
 
@@ -1346,6 +1355,7 @@ if __name__ == "__main__":
         verbosity=args.verbosity,
         max_iterations=args.max_iterations,
         track_memory=args.track_memory,
+        checked=args.checked if args.checked else None,
     )
 
     df.to_csv(args.output, index=False)
