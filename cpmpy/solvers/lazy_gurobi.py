@@ -179,7 +179,7 @@ class TableData:
     def get_expr(self, X, C_enc, k):
         return cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
-    def show_cut(self, X, C_enc, k, verbosity=2):
+    def show_cut(self, X, C_enc, k, frm=None, verbosity=2):
         terms = []
         for i, c in enumerate(C_enc):
             if c:
@@ -189,7 +189,7 @@ class TableData:
                     terms.append(f"{c} * b_{show(i)}")
         cut_str = " + ".join(terms)
         self.solver.log(
-            f"cut == {cut_str} <= {k}",
+            f"cut {frm if frm is not None else ''}== {cut_str} <= {k}",
             indent=2,
             verbosity=verbosity,
         )
@@ -492,13 +492,13 @@ class TableData:
                 add = X.sum() - Xl
                 solver.log("coverlift added ", add, "of", Xl, verbosity=2)
                 if add:
-                    self.show_cut(X, C_enc, k)
+                    self.show_cut(X, C_enc, k, frm=frm)
 
         if self.env["shrink"]:
             C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
 
         if self.env["verbosity"]:
-            self.show_cut(X, C_enc, k, verbosity=1)
+            self.show_cut(X, C_enc, k, frm=frm, verbosity=1)
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -691,9 +691,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "example_frac": False,
             "feasible": None,
             "cbCut": False,
+            "short_channel": False,
             **({} if env is None else env),
         }
         self.indent = 0
+
 
         if self.env["verbosity"] >= 4:
             np.set_printoptions(**DEBUG_NP_PRINTOPTIONS)
@@ -725,6 +727,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.tables:
             self.native_model.Params.LazyConstraints = 1
         if self.env["verbosity"] >= 4:
+            if self.env["cbCut"]:
+                self.native_model.Params.PreCrush = 1
             self.native_model.Params.LogFile = "/tmp/gurobi.log"
             self.native_model.Params.OutputFlag = 1
             self.native_model.write("/tmp/gurobi.lp")
@@ -900,7 +904,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                 for expr, k in self.solution_callback_inner(x_enc_a, frm):
                     cut = self._make_numexpr(expr) <= k
-                    what.cbLazy(cut)
+                    if frm == "MIPSOL" or not self.env["cbCut"]:
+                        what.cbLazy(cut)
+                    else:
+                        what.cbCut(cut)
             except Exception as e:
                 self.native_model._callback_exception = e
                 what.terminate()
