@@ -61,7 +61,7 @@ FEATURES = [
     (
         "coverlift",
         (
-            # Coverlift.No,
+            Coverlift.No,
             # Coverlift.COM_MIN,
             # Coverlift.COM_MAX,
             Coverlift.INPUT,
@@ -71,7 +71,7 @@ FEATURES = [
         "shrink",
         (
             False,
-            True,
+            # True,
         ),
     ),
     (
@@ -87,7 +87,7 @@ FEATURES = [
         "negatives",
         (
             False,
-            True,
+            # True,
         ),
     ),
 ]
