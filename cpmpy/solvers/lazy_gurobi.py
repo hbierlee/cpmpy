@@ -236,20 +236,29 @@ class TableData:
                 H = (~T_enc[np.ix_(R, choices)]).sum(0)
                 if self.solver.env["negatives"]:
                     densities = self.densities
-                    # upper bound on how many additional non-rows will be allowd (high is bad)
-                    # B = (1 - densities[choices]) * np.pow(2, len(C_enc) - 1 - (C_enc != 0).sum())
-
-                    # the pos cols will have low density, the neg cols have high density
                     B = densities[choices]
                     h = np.argmax(H * (B.max() + 1) + B)
-                    if self.solver.env["verbosity"]:
-                        self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
-                        self.solver.log("HHH", H, verbosity=2)
-                        self.solver.log("B", B, verbosity=2)
-                        self.solver.log("H", H, verbosity=2)
-                        self.solver.log("H", H * (B.max() + 1) + B, verbosity=2)
-                        self.solver.log("C", show_nz(choices), verbosity=2)
-                        self.solver.log("h", h, np.flatnonzero(choices), np.flatnonzero(choices)[h], verbosity=2)
+
+                    # if self.solver._vary():
+                    #     # log(a) / (2^(C-1) * (1 - d))  == log₂(a) - (C-1) - log₂(1 - d)
+                    #     h = np.argmin(np.log2(H) - (len(A_enc) - 1) - np.log2(1 - self.densities[choices]))
+                    # else:
+                    #     densities = self.densities
+                    #     # upper bound on how many additional non-rows will be allowd (high is bad)
+                    #     # B = (1 - densities[choices]) * np.pow(2, len(C_enc) - 1 - (C_enc != 0).sum())
+                    #     # the pos cols will have low density, the neg cols have high density
+                    #     B = densities[choices]
+                    #     h = np.argmax(H * (B.max() + 1) + B)
+                    #     if self.solver.env["verbosity"]:
+                    #         self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
+                    #         self.solver.log("HHH", H, verbosity=2)
+                    #         self.solver.log("B", B, verbosity=2)
+                    #         self.solver.log("H", H, verbosity=2)
+                    #         self.solver.log("H", H * (B.max() + 1) + B, verbosity=2)
+                    #         self.solver.log("C", show_nz(choices), verbosity=2)
+                    #         self.solver.log("h", h, np.flatnonzero(choices), np.flatnonzero(choices)[h], verbosity=2)
+                    #         # a / (2^(C-1) * b)
+
                     # TODO native?
 
                     # # upper bound on how many additional non-rows will be allowd (high is bad)
