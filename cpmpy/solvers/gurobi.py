@@ -951,7 +951,7 @@ class CPM_gurobi(SolverInterface):
         non_occurring = [(w, x) for w, x in zip(weights, xs) if not x._occurs]
 
         # only encode non-occurring terms
-        terms, bool_cons, k = cp.transformations.int2bool._encode_lin_expr(
+        non_ocurring, bool_cons, k = cp.transformations.int2bool._encode_lin_expr(
             self.ivarmap,
             [x for w, x in non_occurring],
             [w for w, x in non_occurring],
@@ -960,13 +960,14 @@ class CPM_gurobi(SolverInterface):
         )
 
         # combine: occurring terms stay as-is, non-occurring get encoded
-        obj = cp.sum(x * w for x, w in occurring + terms)
+        obj = cp.sum(x * w for x, w in occurring + non_ocurring)
         self.obj = obj + k
 
 
-        self.add(bool_cons + channelling)
+        self.add(safe_cons + decomp_cons + flat_cons + bool_cons + channelling)
 
         # make objective function or variable and post
+        self.obj = obj
         grb_obj = self._make_numexpr(obj)
         if minimize:
             self.grb_model.setObjective(grb_obj, sense=GRB.MINIMIZE)
@@ -1085,6 +1086,7 @@ class CPM_gurobi(SolverInterface):
       get_variables(cpm_expr_orig, collect=self.user_vars)
 
       if self.verbose:
+        cp.transformations.int2bool.IntVarEnc.NAMED = True
         with open("/tmp/encoding.txt", "a") as f:
           print(f"C", cpm_expr_orig, file=f)
           print("X", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables(cpm_expr_orig)), file=f)
