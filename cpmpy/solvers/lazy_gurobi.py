@@ -148,11 +148,11 @@ class TableData:
     """Data structure for an encoded table constraint."""
 
     def __init__(self, X_enc, T_enc, parts, cpm_expr, solver):
-        self.X_enc = X_enc  # numpy array of encoded boolean variables
-        self.T_enc = T_enc  # numpy array of the encoded table (boolean matrix)
-        self.parts = parts  # numpy array: which original variable each encoded var corresponds to
-        self.cpm_expr = cpm_expr  # the original CPMpy table constraint expression
-        self.solver = solver  # reference to the solver instance
+        self.X_enc = cp.cpm_array(X_enc)
+        self.T_enc = T_enc
+        self.parts = parts
+        self.cpm_expr = cpm_expr
+        self.solver = solver
 
         if self.env["negatives"]:
             self.T_enc = np.concatenate([self.T_enc, ~self.T_enc], axis=1, dtype=bool)
@@ -358,14 +358,14 @@ class TableData:
             solver.log(f"F = {show_nz(F)}", verbosity=3)
 
         if F.any():
-            # D are the difficult rows which only contains 1s for each W/F columns
+            # D are the difficult rows which only contain 1s for each W/F columns
             if self.env["verbosity"]:
                 solver.log(show_table((W | F) >= T_enc), verbosity=3)
             D = ((W | F) >= T_enc).all(1)
 
             if self.env["verbosity"]:
                 solver.log(f"D = {show_nz(D)}", verbosity=3)
-            # then U are rows fractional columns which are not in D
+            # then U are fractional columns which are not in D
             U = F > ~((~T_enc[D, :]).all(0))  # tricky
 
             if self.env["verbosity"]:
@@ -376,7 +376,10 @@ class TableData:
                     solver.log("unexplainable, because U is empty", indent=2, verbosity=3)
                 return True
             else:
+                # TODO remove
                 R = np.ones(m, dtype=bool)
+
+                # i = choice
                 choice = self.choose(U & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
@@ -386,9 +389,12 @@ class TableData:
                     assert_example(U, [2, 8])
                     choice = 2 - 1
 
-                # TODO [peter] should be T_hat[choice]?
-                choices = np.ones(len(T_enc.T), dtype=bool)
-                choices[parts[choice] == parts] = False
+                # V <- {p(i)}
+                choices = np.zeros(len(T_enc.T), dtype=bool)
+                choices[parts[choice] == parts] = True  # only choose from current part
+                choices[choice] = False  # except for i
+
+                # X <- {i}
                 X = np.zeros(len(T_enc.T), dtype=bool)
                 X[choice] = True
                 R = T_enc[:, choice]
@@ -411,6 +417,8 @@ class TableData:
 
         if self.env["verbosity"]:
             solver.log(f"R ({R.sum()})", verbosity=2, indent=solver.indent + 2)
+            solver.log(show_nz(R), verbosity=3, indent=solver.indent + 2)
+            solver.log(show_table(T_enc[R, :]), verbosity=3, indent=solver.indent + 2)
             solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
             solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
 
@@ -419,7 +427,7 @@ class TableData:
                 break
 
             choice = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
-            assert not X[choice]
+            assert not X[choice], choice
 
             if choice is None:
                 # this can happen only if assignment is feasible
@@ -446,7 +454,6 @@ class TableData:
                     # if only one choice remains in this part, remove it too
                     remaining = np.flatnonzero(choices & choice_parts)
                     if len(remaining) == 1:
-                        self.log("ONE REMAIN")
                         choices[remaining[0]] = False
                         choices[remaining[0] - self.cols()] = False
             else:
@@ -833,10 +840,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["max_iterations"] is not None:
             assert i <= self.env["max_iterations"], "Out of iterations"
 
-    def solution_callback_inner(self, x_enc_a, frm):
+    def solution_callback_inner(self, frm):
         self.env["callbacks"] += 1
         feasible = True  # assume feasible
-        for expr in self._explain_assignment(x_enc_a, frm=frm):
+        for expr in self._explain_assignment(frm=frm):
             if isinstance(expr, Comparison) and expr.name == "<=":
                 feasible = False  # any expr means not feasible
                 assert isinstance(expr.args[0], Operator)
@@ -858,7 +865,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if feasible and frm == "MIPSOL":
             if self.env["verbosity"]:
                 self.log("found feasible", verbosity=2)
-                self.log(x_enc_a, verbosity=3)
+                # self.log(X_enc.value(), verbosity=3)
             self.env["found_feasible"] = feasible
             if self.env["debug"]:
                 self.check_max_iterations(self.env["callbacks"])
@@ -892,17 +899,19 @@ class CPM_lazy_gurobi(CPM_gurobi):
                             return
                         # Optimal solution to LP relaxation
                         if what.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
-                            x_enc_a = {x_enc_i: cbGetVal(x_enc_i, what.cbGetNodeRel) for x_enc_i in all_xs}
+                            for x_enc_i in all_xs:
+                                x_enc_i._value = cbGetVal(x_enc_i, what.cbGetNodeRel)
                             frm = "MIPNODE-OPT"
                         else:
                             return
                     case GRB.Callback.MIPSOL:  # Integer solution
-                        x_enc_a = {x_enc_i: cbGetVal(x_enc_i, what.cbGetSolution) for x_enc_i in all_xs}
+                        for x_enc_i in all_xs:
+                            x_enc_i._value = cbGetVal(x_enc_i, what.cbGetSolution)
                         frm = "MIPSOL"
                     case _:
                         return
 
-                for expr, k in self.solution_callback_inner(x_enc_a, frm):
+                for expr, k in self.solution_callback_inner(frm):
                     cut = self._make_numexpr(expr) <= k
                     if frm == "MIPSOL" or not self.env["cbCut"]:
                         what.cbLazy(cut)
@@ -927,7 +936,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
             (X, C_enc, k) = explanation
             expr = cp.sum(C_enc[X] * X_enc[X]) <= k
             if self.env["verbosity"]:
-                self.log(f"  == {expr}", indent=2, verbosity=1)
+                self.log(f"EXPR  == {expr}", indent=2, verbosity=1)
+                self.log(f" {X_enc[X]} == {X_enc[X].value()}", indent=2, verbosity=1)
 
         if isinstance(expr, (bool, np.bool_)):
             expr = cp.BoolVal(expr)
@@ -947,20 +957,22 @@ class CPM_lazy_gurobi(CPM_gurobi):
             b = lambda: True
         return a() if self.env.get("variant", 0) == 0 else b()
 
-    def _explain_assignment(self, x_enc_a, frm=None):
+    def _explain_assignment(self, frm=None):
         # If fully integer, we can check if the tables are feasible yet
         if self.env["verbosity"]:
             self.log("EXPLAIN", frm, verbosity=2)
-            self.log("Full sol", x_enc_a, verbosity=4)
+            self.log("Full sol", verbosity=4)
 
         for i, tbl in enumerate(self.tables, start=INDEX):
             X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
             # A_enc = np.array([x_enc_a[x_enc_i] for x_enc_i in X_enc])
             if frm == "MIPSOL":
-                A_enc = np.fromiter((x_enc_a[x_enc_i] > 0.5 for x_enc_i in X_enc), dtype=bool)
+                A_enc = X_enc.value() > 0.5
+                assert A_enc.dtype == bool, A_enc.dtype
                 is_integer = True
             else:
-                A_enc = np.fromiter((x_enc_a[x_enc_i] for x_enc_i in X_enc), dtype=float)
+                A_enc = X_enc.value()
+                assert A_enc.dtype == float
                 is_integer = False
                 if self.is_integral(A_enc).all():
                     A_enc = A_enc > 0.5
@@ -986,7 +998,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     verbosity=2,
                 )
                 self.log(
-                    f"by {show_table(A_enc)}\n\n{np.astype(A_enc, int)}",
+                    f"by {show_table(A_enc)}",
                     verbosity=2,
                     indent=2,
                 )
@@ -1018,7 +1030,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     expr = self.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
                     yield expr
                     if self.env["debug"] or self.env["checked"]:
-                        self.check_explanation(expr, X_enc, A_enc, T_enc, frm)
+                        self.check_explanation(expr, X_enc, A_enc, T_enc, parts, frm)
                 elif is_integer:  # unsat
                     raise Infeasible
             except Infeasible:
@@ -1048,28 +1060,28 @@ class CPM_lazy_gurobi(CPM_gurobi):
             sorted=True,
         )[1]
 
-    def check_explanation(self, expr, X_enc, A_enc, T_enc, frm):
-        # A_enc = A_enc > 0.5
-        for x, a in zip(X_enc, A_enc):
-            x._value = a
+    def check_explanation(self, expr, X_enc, A_enc, T_enc, parts, frm):
 
-        def value(expr):
-            if is_true_cst(expr):
-                return True
-            (expr,) = only_positive_bv([expr])
-            ws, xs, k = terms(expr)  # sum(ws*xs) <= k
-            lhs = sum(w * x.value() for w, x in zip(ws, xs))
-            return bool(self.is_le(lhs, k))  # np -> python bool
+        if frm == "MIPSOL":
 
-        case = f"The explanation\n\n{expr}\n== {value(expr)}\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
+            def value(expr):
+                # TODO account for parts
+                if is_true_cst(expr):
+                    return True
+                (expr,) = only_positive_bv([expr])
+                ws, xs, k = terms(expr)  # sum(ws*xs) <= k
+                lhs = sum(w * x.value() for w, x in zip(ws, xs))
+                return bool(self.is_le(lhs, k))  # np -> python bool
 
-        if not is_true_cst(expr):
-            assert value(expr) is False, f"Did not cut off assignment:\n\n{case}"
+            case = f"The explanation\n\n{expr}\n== {value(expr)}\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
 
-        for i, T_enc_i in enumerate(T_enc):
-            for x_i, a_i_j in zip(X_enc, T_enc_i):
-                x_i._value = a_i_j
-            assert value(expr) is True, f"Cut off row {show(i)} for case:\n\n{case}\n\n{show_table(T_enc_i)}"
+            if not is_true_cst(expr):
+                assert value(expr) is False, f"Did not cut off assignment:\n\n{case}"
+
+            for i, T_enc_i in enumerate(T_enc):
+                for x_i, a_i_j in zip(X_enc, T_enc_i):
+                    x_i._value = a_i_j
+                assert value(expr) is True, f"Cut off row {show(i)} for case:\n\n{case}\n\n{show_table(T_enc_i)}"
 
         if "cut" not in self.env["cuts"][-1]:
             return
