@@ -680,6 +680,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "coverlift": Coverlift.No,
             "negatives": 0,
             "cuts": [],
+            "callbacks": 0,
             "max_iterations": None,
             "checked": False,
             "checker": None,
@@ -824,6 +825,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             assert i <= self.env["max_iterations"], "Out of iterations"
 
     def solution_callback_inner(self, x_enc_a, frm):
+        self.env["callbacks"] += 1
         feasible = True  # assume feasible
         for expr in self._explain_assignment(x_enc_a, frm=frm):
             if isinstance(expr, Comparison) and expr.name == "<=":
@@ -847,7 +849,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if feasible and frm == "MIPSOL":
             if self.env["verbosity"]:
                 self.log("found feasible", verbosity=2)
+                self.log(x_enc_a, verbosity=3)
             self.env["found_feasible"] = feasible
+            if self.env["debug"]:
+                self.check_max_iterations(self.env["callbacks"])
 
     def get_solution_callback(self):
         from gurobipy import GRB
@@ -1280,8 +1285,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["checked"]:
             self.solve(*args, **kwargs)
             return self.env["checker"].solveAll(*args, **kwargs)
-
-        return super().solveAll(self, *args, **kwargs)
+        return super().solveAll(*args, **kwargs)
 
     def get_x_encs(self, X):
         return [x_enc_i for x in X for x_enc_i in self.ivarmap[x]._xs]

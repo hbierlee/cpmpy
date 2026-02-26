@@ -84,6 +84,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             # Basic test cases
             # yield ("alldiff", cp.Model(cp.AllDifferent(cp.intvar(1, 3, shape=3, name="x"))))
             yield ("single_row", generate_table_from_data([[1, 1]]))
+            yield ("two_rows", generate_table_from_data([[1, 1], [2, 2]]))
             yield ("singleton_dom", generate_table_from_data([[1, 1]], ub=1))
             yield ("singleton_dom_infeasible", generate_table_from_data([[1, 2]], ub=1))
             yield ("feasible_diagonal", generate_table_from_data([[1, 1], [2, 2]], ub=3))
@@ -201,16 +202,6 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             #     cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])),
             # )
 
-            yield (
-                "wide_table",
-                cp.Model(
-                    cp.Table(
-                        cp.intvar(1, 3, shape=10, name="x"),
-                        [[1, 2, 3, 1, 2, 3, 1, 2, 3, 1], [2, 1, 2, 1, 2, 1, 2, 1, 2, 1]],
-                    )
-                ),
-            )
-
             # Generated table tests
             # for gaps in (None, 0.5):
             for k in (
@@ -262,6 +253,19 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                     #     f"big{suffix}",
                     #     with_constraints(generate_table_(50, 5000, 10000)),
                     # )
+
+
+        if a <= 3 <= b:
+            yield (
+                "wide_table",
+                cp.Model(
+                    cp.Table(
+                        cp.intvar(1, 3, shape=10, name="x"),
+                        [[1, 2, 3, 1, 2, 3, 1, 2, 3, 1], [2, 1, 2, 1, 2, 1, 2, 1, 2, 1]],
+                    )
+                ),
+            )
+
 
         if a <= 5 <= b:
             # yield ("hcpizza", _load_xcsp3("2025/COP22to25/HCPizza-20-20-2-8-01_c23.xml"))
@@ -394,7 +398,7 @@ def allsols(slv, model, solution_limit=100, max_search=None, time_limit=None):
 
     slv.solveAll(display=display, solution_limit=solution_limit)
     actual_sat = bool(sols)
-    assert len(sols) < solution_limit, "increase sol limit"
+    assert len(sols) < solution_limit, f"increase sol limit, found {sols}"
     return sols if len(sols) < solution_limit else None
 
 
@@ -497,9 +501,9 @@ def get_envs():
     debug_env = {
         "verbosity": 3,
         "debug": 1,
-        "max_iterations": 500,
+        "max_iterations": 5000,
         "seed": 42,
-        # "checked": True,
+        "checked": False,
     }
 
     if False:
