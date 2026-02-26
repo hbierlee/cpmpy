@@ -703,7 +703,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         }
         self.indent = 0
 
-
+        if self.env["verbosity"]:
+            cp.transformations.int2bool.IntVarEnc.NAMED = True
         if self.env["verbosity"] >= 4:
             np.set_printoptions(**DEBUG_NP_PRINTOPTIONS)
             pprint.pprint(env)
