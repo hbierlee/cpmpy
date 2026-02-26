@@ -1302,10 +1302,11 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
             # Define which columns to bold and whether higher or lower is better
             bold_cols = {
-                'solv': 'max',      # highest solved is best
-                'feas': 'max',      # highest feasible is best
-                't_solv_p2': 'min', # lowest time is best
-                'cuts': 'min',      # highest cuts is best
+                'solv': 'max',
+                'feas': 'max',
+                'post': 'max',
+                't_solv_p2': 'min',
+                'cuts': 'min',
             }
 
             for col, best in bold_cols.items():
