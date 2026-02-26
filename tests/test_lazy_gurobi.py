@@ -1097,6 +1097,10 @@ def benchmark_table_constraints(
             env["solver_kwargs"]["env"]["debug"] = debug
 
         for name, model in test_cases:
+            # TODO ?
+            for x in get_variables_model(model):
+                x._occurs = False
+
             print(f"Running {name} with {env_alias}...")
             print(env)
 

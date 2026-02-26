@@ -331,7 +331,7 @@ class IntVarEncDirect(IntVarEnc):
             raise UNKNOWN_COMPARATOR_ERROR
 
     def encode_term(self, w=1):
-        return [(w * i, b) for i, b in enumerate(self._xs)], self._x.lb * w
+        return [(w * i, b) for i, b in enumerate(self._xs)], w * self._x.lb
 
 
 class IntVarEncOrder(IntVarEnc):

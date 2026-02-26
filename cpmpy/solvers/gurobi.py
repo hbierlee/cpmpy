@@ -956,7 +956,8 @@ class CPM_gurobi(SolverInterface):
         )
 
         # combine: occurring terms stay as-is, non-occurring get encoded
-        obj = cp.sum(x * w for x, w in occurring + terms) + k
+        obj = cp.sum(x * w for x, w in occurring + terms)
+        self.obj = obj + k
 
 
         self.add(bool_cons + channelling)

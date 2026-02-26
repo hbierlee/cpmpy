@@ -720,16 +720,12 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.env["user_vars"] = tuple(sorted(self.user_vars, key=lambda x: x.name))
             self.env["feasible"] = cpm_model.solve()
             self.env["model"] = cpm_model
-            _, self.env["expected_solutions"] = cp.solvers.utils.solutions(
+            self.env["X"], self.env["expected_solutions"] = cp.solvers.utils.solutions(
                 cpm_model,
                 X=self.env["user_vars"],
                 projected_solution_limit=None,
                 time_limit=CHECKER_TIME_LIMIT,
             )
-            self.env["remain"] = without(self.solutions_checker(), self.env["expected_solutions"])
-            if self.env["verbosity"]:
-                self.log("SOLS", len(self.env["expected_solutions"]))
-                self.log("TO REMOVE\n", self.env["remain"], verbosity=3)
 
     def log(self, *mess, verbosity=1, end="\n", indent=None):
         assert self.env["verbosity"]
@@ -1147,6 +1143,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         # assert len(sols) >= len(T_enc), f"{sols} != {len(T_enc)} for checker {self.env['checker']}"
 
+    def objective(self, *args, **kwargs):
+        super().objective(*args, **kwargs)
+        if self.env["checked"]:
+            self.env["checker"].objective(self.obj, **kwargs)
+
     # @mem_profile
     def solve(self, time_limit=None, solution_callback=None, env=None, **kwargs):
         """
@@ -1167,18 +1168,53 @@ class CPM_lazy_gurobi(CPM_gurobi):
         try:
             dt = time.time()
             if self.env["checked"]:
-                expected_solution = min(self.env["expected_solutions"].tolist(), default=None)
+                self.env["checker"] += [
+                    c for x_enc in self.ivarmap.values() for c in x_enc.encode_channelling_constraint(csemap=self._csemap)
+                ]
+                self.env["remain"] = without(self.solutions_checker(), self.env["expected_solutions"])
+                if self.env["verbosity"]:
+                    self.log("SOLS", len(self.env["expected_solutions"]))
+                    self.log("TO REMOVE\n", self.env["remain"], verbosity=3)
                 for iteration in itertools.count():
                     done = not len(self.env["remain"])
 
                     if time_limit is not None and time.time() - dt > time_limit:
                         raise TimeoutError
 
-                    sol = min(self.env["remain"].tolist(), default=expected_solution)
-                    hassol = sol is not None
+                    # take the first non-solution, once depeleted, take the first solution
+                    if len(self.env["remain"]):
+                        sol = min(self.env["remain"].tolist())
+                    else:
+                        if self.env["model"].has_objective():
+                            hassol = self.env["checker"].solve()
+                            if hassol:
+                                self.objective_value_ = self.env["model"].objective_value()
+                        else:
+                            sol = min(self.env["expected_solutions"].tolist(), default=None)
+                            hassol = sol is not None
 
-                    if sol is None:
                         break
+                        sol = min(self.env["expected_solutions"].tolist(), default=None)
+                        hassol = sol is not None
+                        if hassol:
+                            for x, v in zip(self.env["user_vars"], sol):
+                                x._value = v
+
+                            objective = self.env["model"].objective_
+
+                            if objective is not None and (
+                                self.objective_value_ is None
+                                or (
+                                    objective.value() < self.objective_value_
+                                    if self.env["model"].objective_is_min
+                                    else objective.value() > self.objective_value_
+                                )
+                            ):
+                                self.objective_value_ = objective.value()
+                        break
+
+                    # if sol is None:
+                    #     break
 
                     for x, v in zip(self.env["user_vars"], sol):
                         x._value = v
@@ -1193,10 +1229,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     for expr, k in self.solution_callback_inner(x_enc_a, "MIPSOL"):
                         self.env["checker"] += [expr <= k]
 
-                    if done:
-                        break
-                    if self.env["found_feasible"]:
-                        break
             else:
                 hassol = super().solve(
                     solution_callback=self.get_solution_callback(),
@@ -1235,6 +1267,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         return hassol
 
+    def solveAll(self, *args, **kwargs):
+        if self.env["checked"]:
+            self.solve(*args, **kwargs)
+            return self.env["checker"].solveAll(*args, **kwargs)
+
+        return super().solveAll(self, *args, **kwargs)
+
     def get_x_encs(self, X):
         return [x_enc_i for x in X for x_enc_i in self.ivarmap[x]._xs]
 
@@ -1263,12 +1302,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
         else:
             cons = cpm_expr
 
+        cons = super().transform(cons)
         if self.env["checked"]:
             for c in cons:
                 self.env["checker"] += c
-
-        return super().transform(cons)
-
+        return cons
 
     def transform(self, cpm_expressions):
         return [cpm_con for cpm_expr in cpm_expressions for cpm_con in self.transform_(cpm_expr)]
