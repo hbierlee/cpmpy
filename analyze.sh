@@ -8,10 +8,10 @@ ARGS+=(--time-limit 600)
 # ARGS+=(--compare all bool)
 ARGS+=(--compare bool coverlift_input)
 ARGS+=(--paper)
-ARGS+=(--glob-alias bool gleb all coverlift_input none shrink mdd-reduce-dom-incr)
+ARGS+=(--glob-alias bool gleb all coverlift_input none shrink mdd-reduce-dom-incr ortools)
 # ARGS+=(--no-errors)
 # ARGS+=(--tex analysis)
-ARGS+=(--sync pinac42:/cw/dtailocal/henk/Projects/cpmpy)
+# ARGS+=(--sync pinac42:/cw/dtailocal/henk/Projects/cpmpy)
 
 
 rm -rf analysis
