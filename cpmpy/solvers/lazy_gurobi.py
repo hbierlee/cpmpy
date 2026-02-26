@@ -690,7 +690,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "example2": False,
             "example_frac": False,
             "feasible": None,
-            "short_channel": True,
+            "cbCut": False,
             **({} if env is None else env),
         }
         self.indent = 0
