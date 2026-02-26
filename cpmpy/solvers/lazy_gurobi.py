@@ -690,6 +690,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "example2": False,
             "example_frac": False,
             "feasible": None,
+            "short_channel": True,
             **({} if env is None else env),
         }
         self.indent = 0
@@ -710,10 +711,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["checked"]:
             self.env["checker"] = cp.Model()
 
+        # TODO temp
+        cp.transformations.int2bool.IntVarEnc.SHORT_CHANNEL = self.env["short_channel"]
+
         super().__init__(
             name="lazy_gurobi",
             cpm_model=cpm_model,
             verbose=self.env["verbosity"] >= 4,
+            short_channel=self.env["short_channel"],
             **kwargs,
         )
 

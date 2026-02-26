@@ -285,7 +285,7 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], cons
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, order=Order.INPUT, named=False, output_stats=False, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, order=Order.INPUT, named=False, output_stats=False, short_channel=False, **kwargs):
         """
         Constructor of the native solver object
 
@@ -305,6 +305,8 @@ class CPM_gurobi(SolverInterface):
         self.verbose = verbose
         self.ivarmap = dict()
         self.named = named
+        self.short_channel = short_channel
+
 
         # these should be save for integer objectives
         # the objective for an optimal result has to be strictly within one integer
@@ -1047,7 +1049,12 @@ class CPM_gurobi(SolverInterface):
                 # TODO is int var
                 x_enc = self.ivarmap.get(x.name, None)
                 if x_enc and x._occurs is False:
-                    cpm_cons += x_enc.encode_channelling_constraint(csemap=self._csemap)
+                    if self.short_channel:
+                        # If transformation is needed
+                        x._occurs = True
+                        self += x_enc.encode_channelling_constraint(csemap=self._csemap)
+                    else:
+                        cpm_cons += x_enc.encode_channelling_constraint(csemap=self._csemap)
                 x._occurs = True
         return cpm_cons
             

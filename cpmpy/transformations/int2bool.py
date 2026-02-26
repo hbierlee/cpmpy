@@ -211,6 +211,7 @@ class IntVarEnc(ABC):
     """Abstract base class for integer variable encodings."""
 
     NAMED = False
+    SHORT_CHANNEL = False
     """Enable to name the encoding variables semantically for debugging purposes (e.g. `BV[x == 42]` for a direct encoding variable of `x`)"""
 
     def __init__(self, x, x_enc):
@@ -249,7 +250,10 @@ class IntVarEnc(ABC):
 
     def encode_channelling_constraint(self, csemap=None):
         expr, k = self.encode_term()
-        return [cp.sum(c * b for c, b in expr) - self._x == -k]
+        if self.__class__.SHORT_CHANNEL:
+            return [(c + k) * b <= self._x for c, b in expr]
+        else:
+            return [cp.sum(c * b for c, b in expr) - self._x == -k]
 
     @abstractmethod
     def encode_comparison(self, op, rhs, csemap=None):
