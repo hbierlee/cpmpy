@@ -121,7 +121,7 @@ MEM = 'MEMORY'
 ERR = 'ERROR'
 UNK = 'UNKNOWN'
 
-def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", solved_only=False, sort_legend='alpha'):
+def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", solved_only=False, sort_legend='alpha', paper=False):
     # Get unique solvers
     solvers = df['alias'].unique()
 
@@ -172,13 +172,15 @@ def xcsp3_plot(df, time_limit=None, metric="time_solve", filter_by="solved", sol
         plt.plot(x, y, label=f"{solver} ({len(solver_data)})", linewidth=2.5)
     
     # Set plot properties
-    plt.xlabel('Time (seconds)')
+    plt.xlabel('Time [seconds]')
     # plt.ylabel(f'Number of {filter_by} instances (status in [{','.join(s[:3] for s in status_filter)}])')
     plt.ylabel(f'Number of solved instances')
+
     # Get unique year-track combinations
-    year_track_pairs = df[['year', 'track']].drop_duplicates()
-    datasets = ', '.join([f'{row.year}:{row.track}' for _, row in year_track_pairs.iterrows()])
-    plt.title(f"Performance Plot ({datasets}, {n_instances} instances){' (solved only)' if solved_only else ''}")
+    if not paper:
+        year_track_pairs = df[['year', 'track']].drop_duplicates()
+        datasets = ', '.join([f'{row.year}:{row.track}' for _, row in year_track_pairs.iterrows()])
+        plt.title(f"{datasets}, {n_instances} instances{' (solved only)' if solved_only else ''}")
     plt.grid(True)
     plt.legend()
     
@@ -335,8 +337,8 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
         ax.fill_between([min_max[0], time_limit], min_max[0], time_limit, color='white', zorder=-1)
 
     # Set plot properties
-    ax.set_xlabel(f'{solver1} - {metric} (seconds)')
-    ax.set_ylabel(f'{solver2} - {metric} (seconds)')
+    ax.set_xlabel(f'{solver1} - {metric} [seconds]')
+    ax.set_ylabel(f'{solver2} - {metric} [seconds]')
 
     # Get unique year-track combinations
     year_track_pairs = df[['year', 'track']].drop_duplicates()
@@ -347,12 +349,11 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     solver2_wins = sum(1 for i in range(len(x)) if x[i] > y[i])
     ties = sum(1 for i in range(len(x)) if np.isclose(x[i], y[i], rtol=1))
 
-    title = f"{solver1} vs {solver2}"
-    if track:
-        title += f" ({track})"
-    # title += f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}"
-    # title += f"{solver1} faster: {solver1_wins}, {solver2} faster: {solver2_wins}, Ties: {ties}"
-    ax.set_title(title)
+    if not paper:
+        title = f"{solver1} vs {solver2}"
+        if track:
+            title += f" ({track})"
+        ax.set_title(title)
     ax.grid(True, alpha=0.3)
 
     # Use log scale if there's a wide range
@@ -1238,7 +1239,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
                                         ax.set_xlabel(metadata_col)
                                         ax.set_ylabel(f'{time_col} differential')
-                                        ax.set_title(f'{baseline} - {solver}: {metadata_col} vs {time_col} differential ({track})')
+                                        if not paper:
+                                            ax.set_title(f'{baseline} - {solver}: {metadata_col} vs {time_col} differential ({track})')
 
                                         # Place legend outside plot area to avoid covering data (hide for paper)
                                         if not paper:
@@ -1294,7 +1296,54 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             )
             # tex_df = tex_df.rename(index=rename_idx)
             print(tex_df)
-            latex_output = tex_df[
+
+            # Create a copy for formatting with bold best values
+            tex_df_formatted = tex_df.copy()
+
+            # Define which columns to bold and whether higher or lower is better
+            bold_cols = {
+                'solv': 'max',      # highest solved is best
+                'feas': 'max',      # highest feasible is best
+                't_solv_p2': 'min', # lowest time is best
+                'cuts': 'min',      # highest cuts is best
+            }
+
+            for col, best in bold_cols.items():
+                if col in tex_df_formatted.columns:
+                    if best == 'max':
+                        best_val = tex_df_formatted[col].max()
+                    else:
+                        best_val = tex_df_formatted[col].min()
+
+                    # Format column: bold the best value(s)
+                    def format_val(x, best_val=best_val, col=col):
+                        if pd.isna(x):
+                            return ""
+                        if col in ['solv', 'feas']:
+                            formatted = f"{x:.0f}"
+                        else:
+                            formatted = f"{x:.1f}"
+                        if x == best_val:
+                            return f"\\textbf{{{formatted}}}"
+                        return formatted
+
+                    tex_df_formatted[col] = tex_df_formatted[col].apply(format_val)
+
+            # Format other columns normally
+            for col in tex_df_formatted.columns:
+                if col not in bold_cols:
+                    def format_other(x):
+                        if pd.isna(x):
+                            return ""
+                        if col in ['unk', 'mem', 'post']:
+                            return f"{x:.0f}"
+                        return f"{x:.1f}"
+                    tex_df_formatted[col] = tex_df_formatted[col].apply(format_other)
+
+            # Escape underscores in alias names for LaTeX
+            tex_df_formatted.index = tex_df_formatted.index.map(lambda x: x.replace('_', r'\_'))
+
+            latex_output = tex_df_formatted[
                 [
                     *(["unk", "mem", "post"]),
                     *(["feas"] if is_cop else []),
@@ -1307,10 +1356,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     *(["\\sat"] if is_cop else []),
                     *(["\\sol", "time [s]", "cuts", "CB [\\%]"]),
                 ],
-                float_format="%.1f",
                 caption=f"{n_instances} {track} instances",
                 label=f"tbl:res:{track.lower()}",
-                escape=True,
+                escape=False,  # Don't escape so \textbf works
             )
 
             # Move caption to bottom of table
@@ -1366,6 +1414,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 time_limit,
                 filter_by="feasible",
                 sort_legend=sort_legend,
+                paper=paper,
             )
 
             if plot:
