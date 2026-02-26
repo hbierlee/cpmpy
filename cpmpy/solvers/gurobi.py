@@ -212,7 +212,6 @@ class CPM_gurobi(SolverInterface):
             return None
 
     def encode_table_constraint(self, X, T):
-
         dom_sizes = [dom_size(x) for x in X]
         width = sum(dom_sizes)
         T_enc = np.zeros((len(T), width), dtype=np.bool)
@@ -229,7 +228,7 @@ class CPM_gurobi(SolverInterface):
         X_enc = []
         cons = []
         parts = []
-        for i, x in enumerate(X, 1):
+        for i, x in enumerate(X, start=1):
             x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
                 self.ivarmap, x, "direct", csemap=self._csemap
             )
@@ -252,6 +251,9 @@ class CPM_gurobi(SolverInterface):
             cols = T_enc.all(axis=0) if polarity else (~T_enc).all(axis=0)
             if polarity:
                 cons += [x >= 1 for x in X_enc[cols]]
+                # cols |= parts == parts[cols]
+                for p in np.unique(parts[cols]):
+                    cols |= (parts == p)
             else:
                 cons += [x <= 0 for x in X_enc[cols]]
             T_enc = T_enc[:, ~cols]
