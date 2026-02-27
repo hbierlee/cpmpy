@@ -711,6 +711,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "feasible": None,
             "cbCut": False,
             "short_channel": False,
+            "early": False,
             **({} if env is None else env),
         }
         self.indent = 0
@@ -864,7 +865,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["verbosity"]:
                     self.env["cuts"][-1]["cut"] = (expr, k)
                 yield expr, k
-                # break # TODO could lead to fewer cuts, but then expensive part of callback is repeated often
+                # TODO could lead to fewer cuts, but then expensive part of callback is repeated often
+                if self.env["early"]:
+                    break 
             elif is_true_cst(expr):
                 continue
             elif is_false_cst(expr):
