@@ -379,7 +379,6 @@ class CPM_gurobi(SolverInterface):
                 class MDD:
                     def __init__(self):
                         self.MDD_cache = {}
-                        self.MDD_cache_reverse = defaultdict(list)
                         self.repeated_keys = set()
 
                 class TerminatingState(enum.Enum):
@@ -419,6 +418,10 @@ class CPM_gurobi(SolverInterface):
                         return Lookup(self.node_id, self.counter)
 
                 class MDD_node:
+
+                    def __repr__(self):
+                        return f"Mdd node(node_id={self.node_id}, level={self.level}, transition={self.transition})"
+
                     def __init__(self, node_id, level, transition):
                         self.node_id = node_id
                         self.level = level
@@ -473,9 +476,10 @@ class CPM_gurobi(SolverInterface):
 
                     def _canonical_transition(self):
                         items = []
+
                         for key in sorted(self.transition.keys()):
-                            v = self.transition[key]
-                            items.append((key, hash(v)))
+                            value = self.transition[key]
+                            items.append((key, value))
 
                         return tuple(items)
 
@@ -487,7 +491,7 @@ class CPM_gurobi(SolverInterface):
                         mdd_node = cache[mdd_node]
                     return mdd_node
 
-                def reduce_mdd(row, mdd_node, mdd, level):
+                def reduce_mdd(mdd_node, mdd, level):
                     if isinstance(mdd_node, TerminatingState):
                         return mdd_node
 
@@ -496,7 +500,7 @@ class CPM_gurobi(SolverInterface):
                     B = {}
 
                     for key in mdd_node.transition.keys():
-                        reduced_mdd = reduce_mdd(row, mdd_node.transition[key], mdd, level + 1)
+                        reduced_mdd = reduce_mdd(mdd_node.transition[key], mdd, level + 1)
                         if reduced_mdd != False:
                             B[key] = reduced_mdd
 
@@ -504,16 +508,24 @@ class CPM_gurobi(SolverInterface):
                         return False
 
                     G = MDD_node(mdd_node.node_id, level, B)
-                    lookups = mdd.MDD_cache_reverse[G]
 
-                    for lookup in lookups:
-                        if lookup.node_id != mdd_node.node_id:
-                            mdd.repeated_keys.add(lookup.node_id)
-                            return lookup.__deepcopy__()
+                    if mdd_node.node_id in mdd.repeated_keys:
+                        return Lookup(mdd_node.node_id).__deepcopy__()
+
+                    temp = None
+                    for (G_key, G_elem) in mdd.MDD_cache.items():
+                        if G_key.node_id != mdd_node.node_id:
+                            if G_elem == G:
+                                if G_elem.node_id in mdd.repeated_keys:
+                                    return Lookup(G_elem.node_id).__deepcopy__()
+                                else:
+                                    temp = G_elem.node_id
+
+                    if temp is not None:
+                        mdd.repeated_keys.add(temp)
+                        return Lookup(temp).__deepcopy__()
 
                     mdd.MDD_cache[Lookup(mdd_node.node_id)] = G
-
-                    mdd.MDD_cache_reverse[G].append(Lookup(mdd_node.node_id))
                     return Lookup(mdd_node.node_id)
 
                 def add_row_to_mdd(row, mdd_node, mdd, level=0, diff_level=None):
@@ -523,7 +535,6 @@ class CPM_gurobi(SolverInterface):
                         if mdd_node.node_id in mdd.repeated_keys:
                             prev_node = mdd.MDD_cache[tuple_key].deepcopy()
                             mdd.MDD_cache[tuple_key] = prev_node
-                            mdd.MDD_cache_reverse[prev_node].append(tuple_key)
                             tuple_key = tuple_key.incr()
 
                     if level == len(row):
@@ -535,22 +546,11 @@ class CPM_gurobi(SolverInterface):
                         mdd_node.transition[value] = add_row_to_mdd(row,
                                                                     MDD_node(tuple(row[:(level + 1)]), level + 1, {}),
                                                                     mdd, level + 1, diff_level)
-                        mdd.MDD_cache[tuple_key] = mdd_node
-                        mdd.MDD_cache_reverse[mdd_node].append(tuple_key)
-
-                        if reduce:
-                            if level == diff_level:
-                                for key in mdd_node.transition:
-                                    if key < value:
-                                        reduced_mdd = reduce_mdd(row, mdd_node.transition[key], mdd, level + 1)
-                                        mdd_node.transition[key] = reduced_mdd
 
                     else:
                         mdd_node.transition[value] = add_row_to_mdd(row, mdd_node.transition[value], mdd, level + 1,
                                                                     diff_level)
-                        mdd.MDD_cache[tuple_key] = mdd_node
-                        mdd.MDD_cache_reverse[mdd_node].append(tuple_key)
-
+                    mdd.MDD_cache[tuple_key] = mdd_node
                     return tuple_key
 
                 def find_different_level(row1, row2):
@@ -570,6 +570,7 @@ class CPM_gurobi(SolverInterface):
                     mdd_node = add_row_to_mdd(table[0], mdd_node, mdd, 0, None)
                     for i in range(1, table.shape[0]):
                         row = table[i]
+
                         prev_row = table[i - 1]
 
                         diff_level = find_different_level(prev_row, row)
@@ -577,6 +578,11 @@ class CPM_gurobi(SolverInterface):
                         if diff_level != -1:
                             mdd_node = add_row_to_mdd(row, mdd_node, mdd, 0, diff_level)
 
+                    if reduce:
+                        mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
+                        for key in mdd_node.transition.keys():
+                            reduced_mdd = reduce_mdd( mdd_node.transition[key], mdd, 1)
+                            mdd_node.transition[key] = reduced_mdd
                     return mdd.MDD_cache
 
                 class Flow:
