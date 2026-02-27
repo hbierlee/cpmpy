@@ -549,7 +549,8 @@ def get_envs():
         "debug": 1,
         "max_iterations": 5000,
         "seed": 42,
-        "checked": False,
+        "checked": CHECKED
+
     }
 
     if False:
@@ -604,8 +605,9 @@ class TestTables:
         path = pathlib.Path("fail.pkl")
         if path.exists():
             with open(path, "rb") as f:
-                X_enc, A_enc, T_enc, parts, frm, env = pickle.load(f)
-            print("E", env)
+                cut = pickle.load(f)
+                print(cut)
+                X_enc, A_enc, T_enc, parts, frm, env = cut
             slv = CPM_lazy_gurobi(
                 env=env | {"verbosity": 3, "debug": True, "checked": False},
                 # env={
@@ -616,7 +618,7 @@ class TestTables:
 
             COLS = None
 
-            print("parts", len(np.unique(parts)))
+            # print("parts", len(np.unique(parts)))
             # COLS = np.isin(parts, range(83,85))
             if COLS is not None:
                 A_enc = A_enc[COLS]
@@ -625,13 +627,18 @@ class TestTables:
                 X_enc = X_enc[COLS]
 
             print(" ", np.array(X_enc))
-            tbl = TableData(X_enc, T_enc, parts, None, slv)
+            
+            if env["negatives"]:
+                n = len(A_enc) // 2
+                tbl = TableData(X_enc[:n], T_enc[:,:n], parts[:n], None, slv)
+            else:
+                tbl = TableData(X_enc, T_enc, parts, None, slv)
             explanation = tbl.explain(A_enc, frm=frm)
             if explanation is None:
                 print("Infeasible")
             else:
                 expr = slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
-                slv.check_explanation(expr, X_enc, A_enc, T_enc, frm)
+                slv.check_explanation(expr, X_enc, A_enc, T_enc, parts, frm)
 
     @pytest.mark.skip()
     def test_coverlift(self, env):
@@ -913,6 +920,7 @@ SOLVE_EXPECTED = True  # Set to False to skip solving for expected values
 TIME_LIMIT = 30
 REPEAT = 3
 SOL_LIMIT = 10e5
+CHECKED = False
 
 
 def _generate_cases_with_expected():
@@ -1182,8 +1190,13 @@ def benchmark_table_constraints(
                 solve_start = time.time()
                 if time_limit - dt < 0:
                     raise TimeoutError
-                sat = slv.solve(time_limit=time_limit - dt)
+                has_sol = slv.solve(time_limit=time_limit - dt)
                 sdt = time.time() - solve_start
+
+                # Verify solution satisfies all constraints
+                if has_sol:
+                    for con in model.constraints:
+                        assert con.value(), f"Constraint not satisfied: {con} by {show_assignment(get_variables(con))}"
 
                 # Get peak memory usage
                 peak_mem_mb = None
@@ -1198,7 +1211,7 @@ def benchmark_table_constraints(
                         grb_mem_mb = slv.grb_model.getAttr("MaxMemUsed")
 
                 obj = slv.objective_value() if model.has_objective() else None
-                if sat is None:
+                if has_sol is None:
                     print(f"  TIMEOUT after {dt:.2f}s")
                     raise TimeoutError
                 else:
@@ -1220,13 +1233,12 @@ def benchmark_table_constraints(
                         stats["mem_gurobi_mb"] = grb_mem_mb
 
                 # Add test case info and environment to stats
-                timeout = sat is None
+                timeout = has_sol is None
                 result = {
                     "env": env_alias,
                     "name": name,
                     "status": slv.status().exitstatus,
                     "obj": obj,
-                    "timeout": timeout,
                     "time_solve": sdt,
                     **stats,
                 }

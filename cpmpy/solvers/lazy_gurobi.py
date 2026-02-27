@@ -179,7 +179,10 @@ class TableData:
     def get_expr(self, X, C_enc, k):
         return cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
-    def show_cut(self, X, C_enc, k, frm=None, verbosity=2):
+    def show_cut(self, X, k, C_enc=None, frm=None, verbosity=2):
+        if C_enc is None:
+            C_enc = X.astype(int)
+
         terms = []
         for i, c in enumerate(C_enc):
             if c:
@@ -242,9 +245,16 @@ class TableData:
                 if self.solver.env["negatives"]:
                     densities = self.densities
                     B = densities[choices]
+                    HB = H + 1 * B  # lex obj since 0<B<1 (no constant cols)
+                    h = np.argmax(HB)
+
                     if self.solver.env["verbosity"]:
-                        self.solver.log("HH", H * (B.max() + 1) + B, verbosity=2)
-                    h = np.argmax(H * (B.max() + 1) + B)
+                        self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
+                        self.solver.log("H", H, verbosity=2)
+                        self.solver.log("B", B, verbosity=2)
+                        self.solver.log("HB", HB, verbosity=2)
+                        self.solver.log("C", show_nz(choices), verbosity=2)
+                        self.solver.log("h", show(h), show_nz(choices), show(np.flatnonzero(choices)[h]), verbosity=2)
 
                     # if self.solver._vary():
                     #     # log(a) / (2^(C-1) * (1 - d))  == log₂(a) - (C-1) - log₂(1 - d)
@@ -256,14 +266,6 @@ class TableData:
                     #     # the pos cols will have low density, the neg cols have high density
                     #     B = densities[choices]
                     #     h = np.argmax(H * (B.max() + 1) + B)
-                    #     if self.solver.env["verbosity"]:
-                    #         self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
-                    #         self.solver.log("HHH", H, verbosity=2)
-                    #         self.solver.log("B", B, verbosity=2)
-                    #         self.solver.log("H", H, verbosity=2)
-                    #         self.solver.log("H", H * (B.max() + 1) + B, verbosity=2)
-                    #         self.solver.log("C", show_nz(choices), verbosity=2)
-                    #         self.solver.log("h", h, np.flatnonzero(choices), np.flatnonzero(choices)[h], verbosity=2)
                     #         # a / (2^(C-1) * b)
 
                     # TODO native?
@@ -348,8 +350,6 @@ class TableData:
                 assert A_enc[parts == p].any(), f"Zero part {p} in {A_enc}, {parts}, {self.X_enc}"
                 assert solver.is_ge(A_enc[parts], 0.0).any(), A_enc
 
-        # assert len(A_enc) == len(T_enc.T)
-
         self.env["cuts"].append({"from": frm})
 
         m = len(T_enc)  # number of cols
@@ -385,7 +385,8 @@ class TableData:
                 R = np.ones(m, dtype=bool)
 
                 # i = choice
-                choice = self.choose(U & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
+                choices = U & A_enc_pos
+                choice = self.choose(choices, R, A_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
@@ -406,24 +407,27 @@ class TableData:
                 R = T_enc[:, choice]
                 k = 0
 
-                # if self.solver.env["negatives"]:
-                #     is_pos = choice < self.cols()
-                #     assert is_pos
+                if self.env["verbosity"]:
+                    solver.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
 
-                    # # actually, the opposite part cannot be chosen?
-                    # # also allowed to choose from opposite part
-                    # choices[parts == -part] = True
-                    # choices[choice - self.cols()] = False
-                    # # X[-choice] = False  # TODO redundant
+                if self.solver.env["negatives"]:
+                    choices[parts == -part] = True
+                    if part < 0:  # neg choice
+                        choices[choice - self.cols()] = False  # cannot choose this particular pos choice
+                    # assert is_pos
+
+                # # actually, the opposite part cannot be chosen?
+                # # also allowed to choose from opposite part
+                # choices[parts == -part] = True
+                # choices[choice - self.cols()] = False
+                # # X[-choice] = False  # TODO redundant
 
                 if self.env["example_frac"]:
                     assert_example(X, [2])
                     assert k == 0
                     assert_example(R, [1, 5])
                     assert parts[choice] == 1
-
-                if self.env["verbosity"]:
-                    solver.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=solver.indent + 2)
 
         else:
             R = np.ones(m, dtype=bool)
@@ -437,6 +441,8 @@ class TableData:
             solver.log(show_table(T_enc[R, :]), verbosity=3, indent=solver.indent + 2)
             solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
             solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
+            solver.log(f"A_enc_pos = {show_table(A_enc_pos)}", verbosity=3, indent=solver.indent + 2)
+            solver.log(f"A_enc_pos = {show_nz(A_enc_pos)}", verbosity=3, indent=solver.indent + 2)
 
         for iteration in itertools.count():
             if none(R):
@@ -451,29 +457,33 @@ class TableData:
 
             choice_parts = parts == part
             R = R & T_enc[:, choice]
-            X[choice] = 1
-            k += 1
 
             # remove from choices
-            if self.solver.env["negatives"]:
-                if part > 0:
-                    chosen = choice_parts | (parts == -part)
-                    # self.solver.log("rm from choices", show_nz(chosen))
-                    choices[chosen] = False
-                else:
-                    choices[choice] = False
-                    choices[choice - self.cols()] = False
-                    # if only one choice remains in this part, remove it too
-                    remaining = np.flatnonzero(choices & choice_parts)
-                    if len(remaining) == 1:
-                        choices[remaining[0]] = False
-                        choices[remaining[0] - self.cols()] = False
-            else:
+            if not self.solver.env["negatives"] or part > 0:  # pos choice
+                k += 1
+                choices[parts == -part] = False
                 choices[choice_parts] = False
+            else:
+                # if this is the first of the part
+                if not X[parts == part].any():
+                    k += 1
+
+                choices[choice] = False
+                choices[choice - self.cols()] = False
+
+                # if only one choice remains in this part, remove it too
+                remaining = np.flatnonzero(choices & choice_parts)
+                if len(remaining) == 1:
+                    solver.log("RM remaining")
+                    choices[remaining[0]] = False
+                    choices[remaining[0] - self.cols()] = False
+
+            X[choice] = 1
 
             solver.check_max_iterations(iteration)
 
             if self.env["verbosity"]:
+                self.show_cut(X, k, verbosity=1)
                 solver.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
                 solver.log(
                     f"chosen {'pos' if is_pos else 'neg'} col. {show_ind(choice)} of part {parts[choice]}",
@@ -496,7 +506,7 @@ class TableData:
             solver.log(f"by explanation of size ({sum(X)})", verbosity=2)
             solver.log(show_nz(X), verbosity=3)
             solver.log("C_enc", C_enc, verbosity=3)
-            self.show_cut(X, C_enc, k, verbosity=1)
+            self.show_cut(X, k, C_enc=C_enc, verbosity=1)
 
         # if self.env["debug"] and X_enc is not None:
         #     expr = self.get_expr(X, C_enc, k)
@@ -511,13 +521,13 @@ class TableData:
                 add = X.sum() - Xl
                 solver.log("coverlift added ", add, "of", Xl, verbosity=2)
                 if add:
-                    self.show_cut(X, C_enc, k, frm=frm)
+                    self.show_cut(X, k, C_enc=C_enc, frm=frm)
 
         if self.env["shrink"]:
             C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
 
         if self.env["verbosity"]:
-            self.show_cut(X, C_enc, k, frm=frm, verbosity=1)
+            self.show_cut(X, k, C_enc=C_enc, frm=frm, verbosity=1)
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -664,7 +674,7 @@ class TableData:
 
             assert X[j], f"{show(j)} not chosen in {X}"
             if self.env["verbosity"]:
-                self.show_cut(S, C_enc, k)
+                self.show_cut(S, k, C_enc=C_enc)
 
         return S, C_enc, k
 
@@ -867,7 +877,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 yield expr, k
                 # TODO could lead to fewer cuts, but then expensive part of callback is repeated often
                 if self.env["early"]:
-                    break 
+                    break
             elif is_true_cst(expr):
                 continue
             elif is_false_cst(expr):
@@ -1072,6 +1082,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def solutions_checker(self, time_limit=None):
         time_limit = CHECKER_TIME_LIMIT if time_limit is None else time_limit
+
         return cp.solvers.utils.solutions(
             self.env["checker"],
             X=self.env["user_vars"],
@@ -1116,7 +1127,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
             #     f"{nsols}:The {expr} for {A_enc} made model unsat\n\n{T_enc}\n\n{self.env['checker']}\n\n"
             # )
 
+            # Save X_enc values before solving checker (solutions_checker overwrites them)
+            # For NegBoolView, save the underlying _bv variable
+            def get_base_var(x):
+                return x._bv if isinstance(x, NegBoolView) else x
+
+            saved_x_enc_values = {get_base_var(x): get_base_var(x).value() for tbl in self.tables for x in tbl.X_enc}
+
             actual_solutions = self.solutions_checker()
+
+            # Restore X_enc values
+            for x, v in saved_x_enc_values.items():
+                x._value = v
 
             def show_assignments(As):
                 return "\n".join(repr(a) for a in As)
@@ -1234,8 +1256,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     self.log("SOLS", len(self.env["expected_solutions"]))
                     self.log("TO REMOVE\n", self.env["remain"], verbosity=3)
                 for iteration in itertools.count():
-                    done = not len(self.env["remain"])
-
                     if time_limit is not None and time.time() - dt > time_limit:
                         raise TimeoutError
 
@@ -1250,6 +1270,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                         else:
                             sol = min(self.env["expected_solutions"].tolist(), default=None)
                             hassol = sol is not None
+
+                            if hassol:
+                                for x, v in zip(self.env["user_vars"], sol):
+                                    x._value = v
+
 
                         break
                         sol = min(self.env["expected_solutions"].tolist(), default=None)
