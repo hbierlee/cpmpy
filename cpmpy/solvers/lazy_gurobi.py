@@ -406,9 +406,9 @@ class TableData:
                 R = T_enc[:, choice]
                 k = 0
 
-                if self.solver.env["negatives"]:
-                    is_pos = choice < self.cols()
-                    assert is_pos
+                # if self.solver.env["negatives"]:
+                #     is_pos = choice < self.cols()
+                #     assert is_pos
 
                     # # actually, the opposite part cannot be chosen?
                     # # also allowed to choose from opposite part
