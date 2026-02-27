@@ -69,6 +69,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
     def _generate():
         a, b = hardness
 
+        # yield ("stillife_bug", _load_xcsp3("2025/COP22to25/StillLife-05-05_c24.xml"))
         # # yield ("bug", _load_xcsp3("2025/COP22to25/DC-rijndael-xor5-d1-t0-r04-keysize7-plainsize4_c22.xml"))
         # yield ("bug", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland08_c22.xml"))
         # return
@@ -145,7 +146,6 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                 ),
             )
 
-
             yield (
                 "constant_column",
                 cp.Model(
@@ -218,12 +218,12 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             # yield ("many_rows_2", with_constraints(generate_table(2, 95, 10)))
             # yield ("many_rows_3", with_constraints(generate_table(3, 100, 5))) # -4.5%
 
-        if a <= 2 <= b:
             # yield (
             #     "sparse_table",
             #     cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])),
             # )
 
+        if a <= 2 <= b:
             yield (
                 "Spot-bug",
                 generate_table_from_data(
@@ -249,57 +249,57 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                 ),
             )
 
-            # Generated table tests
-            # for gaps in (None, 0.5):
-            for k in (
-                1,
-                5,
-                10,
-                # 25,
-            ):
-                # suffix = "_gaps" if gaps else "_nogaps"
-                suffix = f"_k{k}"
+        # Generated table tests
+        # for gaps in (None, 0.5):
+        for k in (
+            1,
+            5,
+            10,
+            # 25,
+        ):
+            # suffix = "_gaps" if gaps else "_nogaps"
+            suffix = f"_k{k}"
 
-                def generate_table_(*args, **kwargs):
-                    return generate_table(*args, **kwargs, k=k)
+            def generate_table_(*args, **kwargs):
+                return generate_table(*args, **kwargs, k=k)
 
-                yield (
-                    f"t4x4x4{suffix}",
-                    with_constraints(
-                        generate_table_(4, 4, 4),
-                        with_alldiff=False,
-                        with_min=False,
-                    ),
-                )
+            yield (
+                f"t4x4x4{suffix}",
+                with_constraints(
+                    generate_table_(4, 4, 4),
+                    with_alldiff=False,
+                    with_min=False,
+                ),
+            )
 
-                yield (f"t2x2x3_k2{suffix}", with_constraints(generate_table_(2, 2, 3)))
+            yield (f"t2x2x3_k2{suffix}", with_constraints(generate_table_(2, 2, 3)))
 
-                yield (
-                    f"t3x3x4{suffix}",
-                    with_constraints(
-                        generate_table_(3, 3, 4),
-                    ),
-                )
+            yield (
+                f"t3x3x4{suffix}",
+                with_constraints(
+                    generate_table_(3, 3, 4),
+                ),
+            )
 
-                yield (
-                    f"t4x3x4_k2{suffix}",
-                    with_constraints(generate_table_(4, 3, 4)),
-                )
+            yield (
+                f"t4x3x4_k2{suffix}",
+                with_constraints(generate_table_(4, 3, 4)),
+            )
 
-                if a <= 3 <= b:
-                    yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
-                    yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
-                    yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
+            if a <= 3 <= b:
+                yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
+                yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
+                yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
 
-                if a <= 4 <= b:
-                    yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
-                    yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
-                    yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
+            if a <= 4 <= b:
+                yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
+                yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
+                yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
 
-                    # yield (
-                    #     f"big{suffix}",
-                    #     with_constraints(generate_table_(50, 5000, 10000)),
-                    # )
+                # yield (
+                #     f"big{suffix}",
+                #     with_constraints(generate_table_(50, 5000, 10000)),
+                # )
 
         if a <= 3 <= b:
             yield (
@@ -317,6 +317,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             # yield ("fillomino", _load_xcsp3("2025/CSP22to25/Fillomino-5-0_c24.xml"))
             yield ("soccer", _load_xcsp3("2025/CSP22to25/Soccer-20-12-20-1_c24.xml"))
             yield ("airland", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml"))
+            yield ("crossword", _load_xcsp3("2025/CSP22to25/Crossword-m18-ogd2008-vg-04-05_c22.xml"))  # good result but high CB
 
             airland = _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml")
             airland.constraints = [next(c for c in airland.constraints if c.name == "table")]
@@ -1223,7 +1224,7 @@ def benchmark_table_constraints(
                 result = {
                     "env": env_alias,
                     "name": name,
-                    "satisfiable": sat,
+                    "status": slv.status().exitstatus,
                     "obj": obj,
                     "timeout": timeout,
                     "time_solve": sdt,

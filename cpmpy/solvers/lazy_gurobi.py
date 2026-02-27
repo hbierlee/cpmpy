@@ -917,6 +917,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 for x_enc_i, grb_x in all_xs:
                     x_enc_i._value = cbGetVal(grb_x)
 
+                if self.env["verbosity"]:
+                    self.log("VHAT", verbosity=3)
+                    for x_enc_i, grb_x in all_xs:
+                        self.log(x_enc_i, x_enc_i.value(), verbosity=3)
+
                 for expr, k in self.solution_callback_inner(frm):
                     cut = self._make_numexpr(expr) <= k
                     if frm == "MIPSOL" or not self.env["cbCut"]:
@@ -1272,10 +1277,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     for x, v in zip(self.env["user_vars"], sol):
                         x._value = v
 
-                    all_xs = {x_enc_i for tbl in self.tables for x_enc_i in tbl.X_enc}
                     for expr, lit in self._csemap.items():
                         lit._value = expr.value()
-                    x_enc_a = {x_enc_i: x_enc_i.value() for x_enc_i in all_xs}
+
+                    all_xs = {x_enc_i for tbl in self.tables for x_enc_i in tbl.X_enc}
 
                     self.check_max_iterations(iteration)
                     assert all(x.value() is not None for x in all_xs), f"Has sol but no value {all_xs}"
