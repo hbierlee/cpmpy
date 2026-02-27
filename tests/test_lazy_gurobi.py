@@ -124,6 +124,28 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                     cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]])
                 ),
             )
+
+            yield (
+                "constant_column_b",
+                cp.Model(
+                    cp.Table(
+                        [cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")],
+                        [[1, 1], [1, 2], [1, 3]],
+                    )
+                ),
+            )
+
+            yield (
+                "constant_column_c",
+                cp.Model(
+                    cp.Table(
+                        [cp.intvar(1, 4, name="x"), cp.intvar(1, 4, name="y")],
+                        [[1, 1], [2, 2], [3, 3], [3, 4]],
+                    )
+                ),
+            )
+
+
             yield (
                 "constant_column",
                 cp.Model(

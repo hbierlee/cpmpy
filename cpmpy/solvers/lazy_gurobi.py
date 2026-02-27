@@ -204,7 +204,8 @@ class TableData:
 
         # print(show_table(densities), "dens")
 
-        assert choices.any()
+        if self.env["debug"]:
+            assert choices.any()
         if self.solver.env["verbosity"]:
             self.solver.log(f"Choose from {show_nz(choices)} to allow remaining rows R=\n{show_nz(R)}", verbosity=3)
             self.solver.log(show_table(T_enc[R, :]), "T_enc[R,:]", verbosity=3)
@@ -342,6 +343,11 @@ class TableData:
             solver.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
             solver.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
 
+        if self.env["debug"]:
+            for p in np.unique(parts):
+                assert A_enc[parts == p].any(), f"Zero part {p} in {A_enc}, {parts}, {self.X_enc}"
+                assert solver.is_ge(A_enc[parts], 0.0).any(), A_enc
+
         # assert len(A_enc) == len(T_enc.T)
 
         self.env["cuts"].append({"from": frm})
@@ -389,7 +395,7 @@ class TableData:
                     choice = 2 - 1
 
                 # V <- {p(i)}
-                part = parts[choice] # p(i)
+                part = parts[choice]  # p(i)
                 choices = np.zeros(len(T_enc.T), dtype=bool)
                 choices[parts == part] = True  # only choose from current part
                 choices[choice] = False  # except for i
@@ -437,11 +443,7 @@ class TableData:
                 break
 
             choice = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
-            assert not X[choice], choice
-
-            if choice is None:
-                # this can happen only if assignment is feasible
-                raise Exception("No choices left for ", frm)
+            assert choice is not None and not X[choice], choice
 
             is_pos = choice < self.cols()
 
@@ -884,25 +886,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
     def get_solution_callback(self):
         from gurobipy import GRB
 
-        all_xs = {x_enc_i for table in self.tables for x_enc_i in table.X_enc}
+        xs = {x_enc_i._bv if isinstance(x_enc_i, NegBoolView) else x_enc_i for table in self.tables for x_enc_i in table.X_enc}
+        all_xs = tuple((x, self._varmap[x]) for x in xs)
 
         def solution_callback(what, where):
             time_cb = time.time()
 
             try:
-                x_enc_a = None
                 frm = None
-
-                def cbGetVal(cpm_var, cbGet):
-                    # if isinstance(cpm_var, NegBoolView):
-                    #     return 1.0 - cbGet(self.solver_var(~cpm_var))
-                    # return cbGet(self.solver_var(cpm_var))
-                    # shortcut some stuff from solver_var ; we know the var exists
-                    return (
-                        (1.0 - cbGet(self._varmap[cpm_var._bv]))
-                        if isinstance(cpm_var, NegBoolView)
-                        else cbGet(self._varmap[cpm_var])
-                    )
 
                 match where:
                     case GRB.Callback.MIPNODE:
@@ -910,17 +901,18 @@ class CPM_lazy_gurobi(CPM_gurobi):
                             return
                         # Optimal solution to LP relaxation
                         if what.cbGet(GRB.Callback.MIPNODE_STATUS) == GRB.OPTIMAL:
-                            for x_enc_i in all_xs:
-                                x_enc_i._value = cbGetVal(x_enc_i, what.cbGetNodeRel)
                             frm = "MIPNODE-OPT"
+                            cbGetVal = what.cbGetNodeRel
                         else:
                             return
                     case GRB.Callback.MIPSOL:  # Integer solution
-                        for x_enc_i in all_xs:
-                            x_enc_i._value = cbGetVal(x_enc_i, what.cbGetSolution)
+                        cbGetVal = what.cbGetSolution
                         frm = "MIPSOL"
                     case _:
                         return
+
+                for x_enc_i, grb_x in all_xs:
+                    x_enc_i._value = cbGetVal(grb_x)
 
                 for expr, k in self.solution_callback_inner(frm):
                     cut = self._make_numexpr(expr) <= k
@@ -975,14 +967,17 @@ class CPM_lazy_gurobi(CPM_gurobi):
             self.log("EXPLAIN", frm, verbosity=2)
             self.log("Full sol", verbosity=4)
 
+        def value(x):
+            return 1.0 - x._bv.value() if isinstance(x, NegBoolView) else x.value()
+
         for i, tbl in enumerate(self.tables, start=INDEX):
             X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
             if frm == "MIPSOL":
-                A_enc = X_enc.value() > 0.5
+                A_enc = np.fromiter((value(x) > 0.5 for x in X_enc), dtype=bool)
                 assert A_enc.dtype == bool, A_enc.dtype
                 is_integer = True
             else:
-                A_enc = X_enc.value()
+                A_enc = np.fromiter((value(x) for x in X_enc), dtype=float)
                 assert A_enc.dtype == float
                 is_integer = False
                 if self.is_integral(A_enc).all():
@@ -1081,24 +1076,24 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if frm == "MIPSOL":
 
-            def value(expr):
+            def value(expr, value):
                 # TODO account for parts
                 if is_true_cst(expr):
                     return True
                 (expr,) = only_positive_bv([expr])
                 ws, xs, k = terms(expr)  # sum(ws*xs) <= k
-                lhs = sum(w * x.value() for w, x in zip(ws, xs))
+                lhs = sum(w * value[x] for w, x in zip(ws, xs))
                 return bool(self.is_le(lhs, k))  # np -> python bool
 
-            case = f"The explanation\n\n{expr}\n== {value(expr)}\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
+            case = f"The explanation\n\n{expr}\n==\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
 
             if not is_true_cst(expr):
-                assert value(expr) is False, f"Did not cut off assignment:\n\n{case}"
+                assert value(expr, {x: x.value() for x in X_enc}) is False, f"Did not cut off assignment:\n\n{case}"
 
             for i, T_enc_i in enumerate(T_enc):
-                for x_i, a_i_j in zip(X_enc, T_enc_i):
-                    x_i._value = a_i_j
-                assert value(expr) is True, f"Cut off row {show(i)} for case:\n\n{case}\n\n{show_table(T_enc_i)}"
+                assert value(expr, {x_j: a_i_j for x_j, a_i_j in zip(X_enc, T_enc_i)}) is True, (
+                    f"Cut off row {show(i)} for case:\n\n{case}\n\n{show_table(T_enc_i)}"
+                )
 
         if "cut" not in self.env["cuts"][-1]:
             return
@@ -1281,7 +1276,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                     self.check_max_iterations(iteration)
                     assert all(x.value() is not None for x in all_xs), f"Has sol but no value {all_xs}"
-                    for expr, k in self.solution_callback_inner(x_enc_a, "MIPSOL"):
+                    for expr, k in self.solution_callback_inner("MIPSOL"):
                         self.env["checker"] += [expr <= k]
 
             else:
