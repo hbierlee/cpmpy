@@ -207,14 +207,15 @@ class TableData:
 
         # print(show_table(densities), "dens")
 
-        if self.env["debug"]:
-            assert choices.any()
         if self.solver.env["verbosity"]:
             self.solver.log(f"Choose from {show_nz(choices)} to allow remaining rows R=\n{show_nz(R)}", verbosity=3)
             self.solver.log(show_table(T_enc[R, :]), "T_enc[R,:]", verbosity=3)
             self.solver.log("", parts, "parts", verbosity=3)
             self.solver.log("", show_table(A_enc), "A_enc", verbosity=3)
             self.solver.log("", choices.astype(int), "choices", verbosity=3)
+
+        if self.env["debug"]:
+            assert choices.any()
 
         if none(choices):
             return None
@@ -375,6 +376,7 @@ class TableData:
 
             if self.env["verbosity"]:
                 solver.log(f"U = {show_nz(U)}", verbosity=3)
+                solver.log(f"p_u = {parts[U]}", verbosity=3)
 
             if none(U):
                 if self.env["verbosity"]:
@@ -386,6 +388,9 @@ class TableData:
 
                 # i = choice
                 choices = U & A_enc_pos
+                choices &= parts > 0
+                if none(choices):
+                    return True # TODO allow neg. choices
                 choice = self.choose(choices, R, A_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:

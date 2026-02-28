@@ -606,7 +606,6 @@ class TestTables:
         if path.exists():
             with open(path, "rb") as f:
                 cut = pickle.load(f)
-                print(cut)
                 X_enc, A_enc, T_enc, parts, frm, env = cut
             slv = CPM_lazy_gurobi(
                 env=env | {"verbosity": 3, "debug": True, "checked": False},
