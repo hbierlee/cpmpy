@@ -60,7 +60,7 @@ from ..expressions.globalconstraints import DirectConstraint
 from ..transformations.comparison import only_numexpr_equality
 from ..transformations.flatten_model import flatten_constraint, flatten_objective
 from ..transformations.get_variables import get_variables
-from ..transformations.linearize import linearize_constraint, linearize_reified_variables, only_positive_bv, only_positive_bv_wsum, decompose_linear, decompose_linear_objective
+from ..transformations.linearize import linearize_constraint, linearize_reified_variables, only_positive_bv, only_positive_bv_wsum_const, decompose_linear, decompose_linear_objective
 from ..transformations.normalize import toplevel_list
 from ..transformations.reification import only_implies, reify_rewrite, only_bv_reifies
 from ..transformations.safening import no_partial_functions, safen_objective
@@ -947,7 +947,7 @@ class CPM_gurobi(SolverInterface):
                                                       supported_reified=self.supported_reified_global_constraints,
                                                       csemap=self._csemap)
         obj, flat_cons = flatten_objective(obj, csemap=self._csemap)
-        obj = only_positive_bv_wsum(obj)  # remove negboolviews
+        obj, k = only_positive_bv_wsum_const(obj)  # remove negboolviews
         channelling = self.handle_channelling(safe_cons + decomp_cons + flat_cons)
 
         weights, xs = ([1] * len(obj.args), obj.args) if obj.name == "sum" else obj.args
@@ -957,7 +957,7 @@ class CPM_gurobi(SolverInterface):
         non_occurring = [(w, x) for w, x in zip(weights, xs) if not x._occurs]
 
         # only encode non-occurring terms
-        non_ocurring, bool_cons, k = cp.transformations.int2bool._encode_lin_expr(
+        non_ocurring, bool_cons, k_ = cp.transformations.int2bool._encode_lin_expr(
             self.ivarmap,
             [x for w, x in non_occurring],
             [w for w, x in non_occurring],
@@ -967,7 +967,7 @@ class CPM_gurobi(SolverInterface):
 
         # combine: occurring terms stay as-is, non-occurring get encoded
         obj = cp.sum(x * w for x, w in occurring + non_ocurring)
-        self.obj = obj + k
+        self.obj = obj + k + k_
 
 
         self.add(safe_cons + decomp_cons + flat_cons + bool_cons + channelling)
