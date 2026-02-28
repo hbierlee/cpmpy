@@ -290,9 +290,9 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                 yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
                 yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
                 yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
+                yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
 
             if a <= 4 <= b:
-                yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
                 yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
                 yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
 
@@ -1057,7 +1057,7 @@ FILTER_PRESETS = {
             ),
         )
     ],
-    "coverlift_heur": [
+    "com": [
         (
             "alias",
             (
@@ -1260,6 +1260,7 @@ def benchmark_table_constraints(
     df = pd.DataFrame(results)
 
     cols = ["constraints", "n_cuts"]
+
     if verbosity == 0:
         cols += ["time_solve"]
 
@@ -1306,7 +1307,8 @@ def benchmark_table_constraints(
             values += ["avg_power"]
 
         if not checked and verbosity == 0:
-            values += ["time_solve"]
+            if hardness[0] >= 5:
+                values += ["time_solve"]
             values += ["mem_python_mb"]
             # values += ["mem_gurobi_mb"]
 

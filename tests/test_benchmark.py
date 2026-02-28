@@ -200,10 +200,11 @@ class TestBenchmark:
         print(df)
         status = ExitStatus(df["status"])
         assert status in expected_status, f"Unexpected status for {experiment['solver']}\n\n{df['exception']}"
-        assert (
-            dt
-            < experiment["time_limit"] + experiment["check_time_limit"] + (2 if experiment["checker_path"] else 0) + TIME_BUFFER
+
+        max_total_time = (
+            experiment["time_limit"] + experiment["check_time_limit"] + (2 if experiment["checker_path"] else 0) + TIME_BUFFER
         )
+        assert (dt < max_total_time, f"Max total time exceeded")
 
         feasible = status in (ExitStatus.unsat, ExitStatus.optimal, ExitStatus.sat)
         print(df)
