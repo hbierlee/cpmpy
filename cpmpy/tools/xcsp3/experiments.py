@@ -126,9 +126,16 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                 for encoding, reduce, order in [
                     (encoding_, reduce, order)
                     for encoding_ in [Encoding.GLEB, Encoding.BOOL, Encoding.MDD]
-                    for reduce in ([True, False] if encoding_ is Encoding.MDD else [None])
+                    for reduce in (
+                        [
+                            True,
+                            # False,
+                        ]
+                        if encoding_ is Encoding.MDD
+                        else [None]
+                    )
                     for order in (Order if encoding_ is Encoding.MDD else [None])
-                ]
+                ] + [(Encoding.MDD, False, Order.DOM_INCR)]
             ],
             *[
                 {
