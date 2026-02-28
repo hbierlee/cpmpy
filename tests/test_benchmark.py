@@ -134,7 +134,7 @@ class TestBenchmark:
                                 # "glob_instance": "AlteredStates-02_c25.xml",
                                 "glob_instance": "Fortress1-08_c25.xml",
                                 "verbose": True,
-                                "track": "COP25",
+                                "track": "COP22to25",
                                 "time_limit": TIMEOUT,
                                 "check_time_limit": 3,
                                 "checker_path": "jbang  --main org.xcsp.parser.callbacks.SolutionChecker org.xcsp:xcsp3-tools:2.5",
