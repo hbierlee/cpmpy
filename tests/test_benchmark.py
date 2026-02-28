@@ -119,6 +119,7 @@ def idfn(a):
         return ",".join(f"{a.value}" for a in a)
 
 
+@pytest.mark.order("last")
 class TestBenchmark:
     @pytest.mark.parametrize(
         "idx, experiment, expected_status",
