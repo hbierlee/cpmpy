@@ -390,7 +390,7 @@ class TableData:
                 choices = U & A_enc_pos
                 choices &= parts > 0
                 if none(choices):
-                    return True # TODO allow neg. choices
+                    return True  # TODO allow neg. choices
                 choice = self.choose(choices, R, A_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
@@ -513,6 +513,9 @@ class TableData:
             solver.log("C_enc", C_enc, verbosity=3)
             self.show_cut(X, k, C_enc=C_enc, verbosity=1)
 
+        if self.env["shrink"]:
+            C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
+
         # if self.env["debug"] and X_enc is not None:
         #     expr = self.get_expr(X, C_enc, k)
         #     solver.show_cut(X, C_enc, k)
@@ -527,9 +530,6 @@ class TableData:
                 solver.log("coverlift added ", add, "of", Xl, verbosity=2)
                 if add:
                     self.show_cut(X, k, C_enc=C_enc, frm=frm)
-
-        if self.env["shrink"]:
-            C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
 
         if self.env["verbosity"]:
             self.show_cut(X, k, C_enc=C_enc, frm=frm, verbosity=1)
@@ -1279,7 +1279,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                             if hassol:
                                 for x, v in zip(self.env["user_vars"], sol):
                                     x._value = v
-
 
                         break
                         sol = min(self.env["expected_solutions"].tolist(), default=None)
