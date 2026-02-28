@@ -373,6 +373,7 @@ class _BoolVarImpl(_IntVarImpl):
     def __init__(self, lb=0, ub=1, name=None):
         assert(lb == 0 or lb == 1)
         assert(ub == 0 or ub == 1)
+        self._occurs = True
 
         if name is None:
             name = f"{_BV_PREFIX}{_BoolVarImpl.counter}"
