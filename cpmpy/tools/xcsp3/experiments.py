@@ -104,7 +104,9 @@ def glob_filter(experiments, filters):
 SEED = 42
 
 
-def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_none=True):
+def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_none=True):
+    if features is None:
+        features = FEATURES
     return glob_filter(
         [
             *[{"solver": "ortools", "alias": "ortools", "solve_kwargs": {"random_seed": SEED}}],
@@ -137,12 +139,9 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=True, add_non
                 }
                 for solver in ["lazy_gurobi"]
                 for alias, solver_kwargs in [
-                    (alias, {"env": env, "encoding": Encoding.BOOL})
-                    for alias, env in ablate(
-                        FEATURES if features is None else features,
-                        add_none=add_none,
-                        add_all=add_all,
-                    )
+                    (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.DOM_INCR})
+                    for alias, env in ablate(features, add_none=add_none, add_all=add_all)
+                    + [("best", enable_all(features) | {"shrink": False})]
                 ]
             ],
         ],
@@ -200,5 +199,9 @@ def ablate(feats, add_one=True, add_none=False, add_all=False, filters=None):
             if add_one
             else []
         ),
-        *([("all", {feat: feat_vals[-1] for feat, feat_vals in feats})] if add_all else []),
+        *([("all", enable_all(feats))] if add_all else []),
     ]
+
+
+def enable_all(feats):
+    return {feat: feat_vals[-1] for feat, feat_vals in feats}
