@@ -950,7 +950,7 @@ class CPM_gurobi(SolverInterface):
         obj, k = only_positive_bv_wsum_const(obj)  # remove negboolviews
         channelling = self.handle_channelling(safe_cons + decomp_cons + flat_cons)
 
-        weights, xs = ([1] * len(obj.args), obj.args) if obj.name == "sum" else obj.args
+        weights, xs = ([1], [obj]) if isinstance(obj, _IntVarImpl) else ([1] * len(obj.args), obj.args) if obj.name == "sum" else obj.args
 
         # partition based on whether variables already occur in the model
         occurring = [(w, x) for w, x in zip(weights, xs) if x._occurs]
