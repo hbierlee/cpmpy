@@ -62,9 +62,9 @@ FEATURES = [
         "coverlift",
         (
             Coverlift.No,
+            Coverlift.INPUT,
             Coverlift.COM_MIN,
             Coverlift.COM_MAX,
-            Coverlift.INPUT,
         ),
     ),
     (
