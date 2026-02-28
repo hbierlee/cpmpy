@@ -147,7 +147,7 @@ class TestTransInt2Bool:
 class TestCSE:
 
     @pytest.mark.requires_solver("pindakaas")
-    def test_int2bool_cse_one_var(self):
+    def test_int2bool_cse_one_var(self, solver):
         x = cp.intvar(0, 2, name="x")
         slv = cp.solvers.CPM_pindakaas()
         slv.encoding = "direct"
@@ -155,7 +155,7 @@ class TestCSE:
 
     @pytest.mark.requires_solver("pindakaas")
     @pytest.mark.skip("aspirational")
-    def test_int2bool_cse_one_var_order(self):
+    def test_int2bool_cse_one_var_order(self, solver):
         x = cp.intvar(0, 2, name="x")
         slv = cp.solvers.CPM_pindakaas()
         slv.encoding = "order"
@@ -165,7 +165,7 @@ class TestCSE:
 
     @pytest.mark.requires_solver("pindakaas")
     @pytest.mark.skip("aspirational")
-    def test_int2bool_cse_two_vars(self):
+    def test_int2bool_cse_two_vars(self, solver):
         slv = cp.solvers.CPM_pindakaas()
         x = cp.intvar(0, 2, name="x")
         y = cp.intvar(0, 2, name="y")
