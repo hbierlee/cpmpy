@@ -69,6 +69,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
     def _generate():
         a, b = hardness
 
+        # yield ("stillife_bug", _load_xcsp3("2025/COP22to25/StillLife-05-05_c24.xml"))
         # # yield ("bug", _load_xcsp3("2025/COP22to25/DC-rijndael-xor5-d1-t0-r04-keysize7-plainsize4_c22.xml"))
         # yield ("bug", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland08_c22.xml"))
         # return
@@ -124,6 +125,27 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                     cp.Table([cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")], [[1, 2], [2, 1], [1, 2], [2, 1], [1, 2]])
                 ),
             )
+
+            yield (
+                "constant_column_b",
+                cp.Model(
+                    cp.Table(
+                        [cp.intvar(1, 3, name="x"), cp.intvar(1, 3, name="y")],
+                        [[1, 1], [1, 2], [1, 3]],
+                    )
+                ),
+            )
+
+            yield (
+                "constant_column_c",
+                cp.Model(
+                    cp.Table(
+                        [cp.intvar(1, 4, name="x"), cp.intvar(1, 4, name="y")],
+                        [[1, 1], [2, 2], [3, 3], [3, 4]],
+                    )
+                ),
+            )
+
             yield (
                 "constant_column",
                 cp.Model(
@@ -196,12 +218,12 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             # yield ("many_rows_2", with_constraints(generate_table(2, 95, 10)))
             # yield ("many_rows_3", with_constraints(generate_table(3, 100, 5))) # -4.5%
 
-        if a <= 2 <= b:
             # yield (
             #     "sparse_table",
             #     cp.Model(cp.Table([cp.intvar(1, 100, name="x"), cp.intvar(1, 100, name="y")], [[1, 2], [50, 75], [99, 100]])),
             # )
 
+        if a <= 2 <= b:
             yield (
                 "Spot-bug",
                 generate_table_from_data(
@@ -227,57 +249,57 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
                 ),
             )
 
-            # Generated table tests
-            # for gaps in (None, 0.5):
-            for k in (
-                1,
-                5,
-                10,
-                # 25,
-            ):
-                # suffix = "_gaps" if gaps else "_nogaps"
-                suffix = f"_k{k}"
+        # Generated table tests
+        # for gaps in (None, 0.5):
+        for k in (
+            1,
+            5,
+            10,
+            # 25,
+        ):
+            # suffix = "_gaps" if gaps else "_nogaps"
+            suffix = f"_k{k}"
 
-                def generate_table_(*args, **kwargs):
-                    return generate_table(*args, **kwargs, k=k)
+            def generate_table_(*args, **kwargs):
+                return generate_table(*args, **kwargs, k=k)
 
-                yield (
-                    f"t4x4x4{suffix}",
-                    with_constraints(
-                        generate_table_(4, 4, 4),
-                        with_alldiff=False,
-                        with_min=False,
-                    ),
-                )
+            yield (
+                f"t4x4x4{suffix}",
+                with_constraints(
+                    generate_table_(4, 4, 4),
+                    with_alldiff=False,
+                    with_min=False,
+                ),
+            )
 
-                yield (f"t2x2x3_k2{suffix}", with_constraints(generate_table_(2, 2, 3)))
+            yield (f"t2x2x3_k2{suffix}", with_constraints(generate_table_(2, 2, 3)))
 
-                yield (
-                    f"t3x3x4{suffix}",
-                    with_constraints(
-                        generate_table_(3, 3, 4),
-                    ),
-                )
+            yield (
+                f"t3x3x4{suffix}",
+                with_constraints(
+                    generate_table_(3, 3, 4),
+                ),
+            )
 
-                yield (
-                    f"t4x3x4_k2{suffix}",
-                    with_constraints(generate_table_(4, 3, 4)),
-                )
+            yield (
+                f"t4x3x4_k2{suffix}",
+                with_constraints(generate_table_(4, 3, 4)),
+            )
 
-                if a <= 3 <= b:
-                    yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
-                    yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
-                    yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
+            if a <= 3 <= b:
+                yield (f"t5x100x10{suffix}", with_constraints(generate_table_(5, 100, 10)))
+                yield (f"t10x200x15{suffix}", with_constraints(generate_table_(10, 200, 15)))
+                yield (f"t10x500x10{suffix}", with_constraints(generate_table_(10, 500, 10)))
+                yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
 
-                if a <= 4 <= b:
-                    yield (f"t15x300x20{suffix}", with_constraints(generate_table_(15, 300, 20)))
-                    yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
-                    yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
+            if a <= 4 <= b:
+                yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
+                yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
 
-                    # yield (
-                    #     f"big{suffix}",
-                    #     with_constraints(generate_table_(50, 5000, 10000)),
-                    # )
+                # yield (
+                #     f"big{suffix}",
+                #     with_constraints(generate_table_(50, 5000, 10000)),
+                # )
 
         if a <= 3 <= b:
             yield (
@@ -295,6 +317,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             # yield ("fillomino", _load_xcsp3("2025/CSP22to25/Fillomino-5-0_c24.xml"))
             yield ("soccer", _load_xcsp3("2025/CSP22to25/Soccer-20-12-20-1_c24.xml"))
             yield ("airland", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml"))
+            yield ("crossword", _load_xcsp3("2025/CSP22to25/Crossword-m18-ogd2008-vg-04-05_c22.xml"))  # good result but high CB
 
             airland = _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland01_c22.xml")
             airland.constraints = [next(c for c in airland.constraints if c.name == "table")]
@@ -526,7 +549,8 @@ def get_envs():
         "debug": 1,
         "max_iterations": 5000,
         "seed": 42,
-        "checked": False,
+        "checked": CHECKED
+
     }
 
     if False:
@@ -581,8 +605,8 @@ class TestTables:
         path = pathlib.Path("fail.pkl")
         if path.exists():
             with open(path, "rb") as f:
-                X_enc, A_enc, T_enc, parts, frm, env = pickle.load(f)
-            print("E", env)
+                cut = pickle.load(f)
+                X_enc, A_enc, T_enc, parts, frm, env = cut
             slv = CPM_lazy_gurobi(
                 env=env | {"verbosity": 3, "debug": True, "checked": False},
                 # env={
@@ -593,7 +617,7 @@ class TestTables:
 
             COLS = None
 
-            print("parts", len(np.unique(parts)))
+            # print("parts", len(np.unique(parts)))
             # COLS = np.isin(parts, range(83,85))
             if COLS is not None:
                 A_enc = A_enc[COLS]
@@ -602,13 +626,18 @@ class TestTables:
                 X_enc = X_enc[COLS]
 
             print(" ", np.array(X_enc))
-            tbl = TableData(X_enc, T_enc, parts, None, slv)
+            
+            if env["negatives"]:
+                n = len(A_enc) // 2
+                tbl = TableData(X_enc[:n], T_enc[:,:n], parts[:n], None, slv)
+            else:
+                tbl = TableData(X_enc, T_enc, parts, None, slv)
             explanation = tbl.explain(A_enc, frm=frm)
             if explanation is None:
                 print("Infeasible")
             else:
                 expr = slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
-                slv.check_explanation(expr, X_enc, A_enc, T_enc, frm)
+                slv.check_explanation(expr, X_enc, A_enc, T_enc, parts, frm)
 
     @pytest.mark.skip()
     def test_coverlift(self, env):
@@ -890,6 +919,7 @@ SOLVE_EXPECTED = True  # Set to False to skip solving for expected values
 TIME_LIMIT = 30
 REPEAT = 3
 SOL_LIMIT = 10e5
+CHECKED = False
 
 
 def _generate_cases_with_expected():
@@ -1027,7 +1057,7 @@ FILTER_PRESETS = {
             ),
         )
     ],
-    "coverlift_heur": [
+    "com": [
         (
             "alias",
             (
@@ -1159,8 +1189,13 @@ def benchmark_table_constraints(
                 solve_start = time.time()
                 if time_limit - dt < 0:
                     raise TimeoutError
-                sat = slv.solve(time_limit=time_limit - dt)
+                has_sol = slv.solve(time_limit=time_limit - dt)
                 sdt = time.time() - solve_start
+
+                # Verify solution satisfies all constraints
+                if has_sol:
+                    for con in model.constraints:
+                        assert con.value(), f"Constraint not satisfied: {con} by {show_assignment(get_variables(con))}"
 
                 # Get peak memory usage
                 peak_mem_mb = None
@@ -1175,7 +1210,7 @@ def benchmark_table_constraints(
                         grb_mem_mb = slv.grb_model.getAttr("MaxMemUsed")
 
                 obj = slv.objective_value() if model.has_objective() else None
-                if sat is None:
+                if has_sol is None:
                     print(f"  TIMEOUT after {dt:.2f}s")
                     raise TimeoutError
                 else:
@@ -1197,13 +1232,12 @@ def benchmark_table_constraints(
                         stats["mem_gurobi_mb"] = grb_mem_mb
 
                 # Add test case info and environment to stats
-                timeout = sat is None
+                timeout = has_sol is None
                 result = {
                     "env": env_alias,
                     "name": name,
-                    "satisfiable": sat,
+                    "status": slv.status().exitstatus,
                     "obj": obj,
-                    "timeout": timeout,
                     "time_solve": sdt,
                     **stats,
                 }
@@ -1226,6 +1260,7 @@ def benchmark_table_constraints(
     df = pd.DataFrame(results)
 
     cols = ["constraints", "n_cuts"]
+
     if verbosity == 0:
         cols += ["time_solve"]
 
@@ -1272,7 +1307,8 @@ def benchmark_table_constraints(
             values += ["avg_power"]
 
         if not checked and verbosity == 0:
-            values += ["time_solve"]
+            if hardness[0] >= 5:
+                values += ["time_solve"]
             values += ["mem_python_mb"]
             # values += ["mem_gurobi_mb"]
 

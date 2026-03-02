@@ -60,8 +60,7 @@ from ..expressions.globalconstraints import DirectConstraint
 from ..transformations.comparison import only_numexpr_equality
 from ..transformations.flatten_model import flatten_constraint, flatten_objective
 from ..transformations.get_variables import get_variables
-from ..transformations.linearize import linearize_constraint, linearize_reified_variables, only_positive_bv, \
-    only_positive_bv_wsum, decompose_linear, decompose_linear_objective
+from ..transformations.linearize import linearize_constraint, linearize_reified_variables, only_positive_bv, only_positive_bv_wsum_const, decompose_linear, decompose_linear_objective
 from ..transformations.normalize import toplevel_list
 from ..transformations.reification import only_implies, reify_rewrite, only_bv_reifies
 from ..transformations.safening import no_partial_functions, safen_objective
@@ -320,6 +319,7 @@ class CPM_gurobi(SolverInterface):
         self.ivarmap = dict()
         self.named = named
         self.short_channel = short_channel
+        self.encode_obj = encode_obj
 
         # these should be save for integer objectives
         # the objective for an optimal result has to be strictly within one integer
@@ -953,38 +953,46 @@ class CPM_gurobi(SolverInterface):
         get_variables(expr, self.user_vars)
 
         # transform objective
+        cons = []
         obj, safe_cons = safen_objective(expr)
+        cons += safe_cons
         obj, decomp_cons = decompose_linear_objective(obj,
                                                       supported=self.supported_global_constraints,
                                                       supported_reified=self.supported_reified_global_constraints,
                                                       csemap=self._csemap)
+        cons += decomp_cons
         obj, flat_cons = flatten_objective(obj, csemap=self._csemap)
-        obj = only_positive_bv_wsum(obj)  # remove negboolviews
-        channelling = self.handle_channelling(safe_cons + decomp_cons + flat_cons)
+        cons += flat_cons
+        obj, k = only_positive_bv_wsum_const(obj)  # remove negboolviews
+        cons += self.handle_channelling(cons)
 
-        weights, xs = ([1] * len(obj.args), obj.args) if obj.name == "sum" else obj.args
+        if self.encode_obj:
+            weights, xs = ([1], [obj]) if isinstance(obj, _IntVarImpl) else ([1] * len(obj.args), obj.args) if obj.name == "sum" else obj.args
+            # partition based on whether variables already occur in the model
+            occurring = [(w, x) for w, x in zip(weights, xs) if x._occurs]
+            non_occurring = [(w, x) for w, x in zip(weights, xs) if not x._occurs]
 
-        # partition based on whether variables already occur in the model
-        occurring = [(w, x) for w, x in zip(weights, xs) if x._occurs]
-        non_occurring = [(w, x) for w, x in zip(weights, xs) if not x._occurs]
+            # only encode non-occurring terms
+            non_ocurring, bool_cons, k_ = cp.transformations.int2bool._encode_lin_expr(
+                self.ivarmap,
+                [x for w, x in non_occurring],
+                [w for w, x in non_occurring],
+                "direct",
+                csemap=self._csemap,
+            )
+            assert len(bool_cons) == 0
 
-        # only encode non-occurring terms
-        non_ocurring, bool_cons, k = cp.transformations.int2bool._encode_lin_expr(
-            self.ivarmap,
-            [x for w, x in non_occurring],
-            [w for w, x in non_occurring],
-            "direct",
-            csemap=self._csemap,
-        )
+            # combine: occurring terms stay as-is, non-occurring get encoded
+            obj = cp.sum(x * w for x, w in occurring + non_ocurring)
+            k += k_
+        else:
+            cons += self.handle_channelling(obj)
 
-        # combine: occurring terms stay as-is, non-occurring get encoded
-        obj = cp.sum(x * w for x, w in occurring + non_ocurring)
-        self.obj = obj + k
 
-        self.add(safe_cons + decomp_cons + flat_cons + bool_cons + channelling)
+        self.add(cons)
 
         # make objective function or variable and post
-        self.obj = obj
+        self.obj = obj + k
         grb_obj = self._make_numexpr(obj)
         if minimize:
             self.grb_model.setObjective(grb_obj, sense=GRB.MINIMIZE)

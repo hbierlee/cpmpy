@@ -208,7 +208,7 @@ class TestSolverTransform:
                 print(f"  {i}. {t}")
 
 
-        transformed_sols, transformed_complete = self.allsols(all_transformed, vs, original_cons=constraints)
+        transformed_sols, transformed_complete = self.allsols(all_transformed, vs, original_cons=constraints, ivarmap=solver.ivarmap)
 
         print(f"Original solutions: {len(original_sols)}{'' if original_complete else ' (partial)'}")
         print(f"Transformed solutions: {len(transformed_sols)}{'' if transformed_complete else ' (partial)'}")
@@ -227,7 +227,7 @@ class TestSolverTransform:
             # (validation already happened in allsols via original_cons)
             print(f"Large domain case - validated {len(transformed_sols)} solutions against original constraints")
 
-    def allsols(self, cons, vs, original_cons=None, solution_limit=10000, timeout=60):
+    def allsols(self, cons, vs, original_cons=None, solution_limit=10000, timeout=60, ivarmap=None):
         """Get all solutions for the given constraints projected onto variables vs.
 
         Args:
@@ -236,6 +236,8 @@ class TestSolverTransform:
             original_cons: Optional list of original constraints to validate each solution against
             solution_limit: Maximum number of solutions to enumerate
             timeout: Maximum time in seconds (default 60). Raises TimeoutError if exceeded.
+            ivarmap: Optional dict mapping variable names to their int2bool encodings.
+                     Used to decode integer variable values from Boolean encoding.
 
         Returns:
             Tuple of (set of solutions, bool indicating if enumeration was complete)
@@ -257,6 +259,15 @@ class TestSolverTransform:
         sols = set()
 
         def collect():
+            # Decode integer variable values from Boolean encoding if ivarmap provided
+            if ivarmap:
+                for v in vs:
+                    if v.name in ivarmap:
+                        enc = ivarmap[v.name]
+                        decoded_val = enc.decode()
+                        if decoded_val is not None:
+                            v._value = decoded_val
+
             sol = tuple(argvals(vs))
             sols.add(sol)
 

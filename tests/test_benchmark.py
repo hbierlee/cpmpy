@@ -119,6 +119,7 @@ def idfn(a):
         return ",".join(f"{a.value}" for a in a)
 
 
+@pytest.mark.order("last")
 class TestBenchmark:
     @pytest.mark.parametrize(
         "idx, experiment, expected_status",
@@ -133,7 +134,7 @@ class TestBenchmark:
                                 # "glob_instance": "AlteredStates-02_c25.xml",
                                 "glob_instance": "Fortress1-08_c25.xml",
                                 "verbose": True,
-                                "track": "COP25",
+                                "track": "COP22to25",
                                 "time_limit": TIMEOUT,
                                 "check_time_limit": 3,
                                 "checker_path": "jbang  --main org.xcsp.parser.callbacks.SolutionChecker org.xcsp:xcsp3-tools:2.5",
@@ -199,10 +200,11 @@ class TestBenchmark:
         print(df)
         status = ExitStatus(df["status"])
         assert status in expected_status, f"Unexpected status for {experiment['solver']}\n\n{df['exception']}"
-        assert (
-            dt
-            < experiment["time_limit"] + experiment["check_time_limit"] + (2 if experiment["checker_path"] else 0) + TIME_BUFFER
+
+        max_total_time = (
+            experiment["time_limit"] + experiment["check_time_limit"] + (2 if experiment["checker_path"] else 0) + TIME_BUFFER
         )
+        assert (dt < max_total_time, f"Max total time exceeded")
 
         feasible = status in (ExitStatus.unsat, ExitStatus.optimal, ExitStatus.sat)
         print(df)

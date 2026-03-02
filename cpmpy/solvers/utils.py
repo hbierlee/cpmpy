@@ -281,6 +281,9 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
 
     if X is None:
         X = get_variables_model(P)
+        V = None
+    else:
+        V = [x.value() for x in X]
 
     sols = []
 
@@ -358,6 +361,10 @@ def solutions(P, X=None, projected_solution_limit=None, time_limit=None, verbosi
         # Sort lexicographically by columns from left to right
         sort_idx = np.lexsort(sols_array.T[::-1])
         sols_array = sols_array[sort_idx]
+
+    if V is not None:
+        for x, v in zip(X,V):
+            x._value = v
 
     return X, sols_array
 
