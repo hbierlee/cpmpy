@@ -1084,7 +1084,8 @@ def benchmark_table_constraints(
     track_memory=False,
     checked=None,
     time_limit=None,
-    choices=None
+    choices=None,
+    xcsp3_path=None,
 ):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
@@ -1148,7 +1149,12 @@ def benchmark_table_constraints(
             time_limit = 60 if hardness[1] >= 3 else 10
 
     # Generate all test cases once (to ensure same cases for all envs)
-    test_cases = list(generate_models_w_tables(hardness=hardness, glob=glob))
+    if xcsp3_path:
+        # Use only the specified XCSP3 instance
+        name = pathlib.Path(xcsp3_path).stem
+        test_cases = [(name, _load_xcsp3(xcsp3_path))]
+    else:
+        test_cases = list(generate_models_w_tables(hardness=hardness, glob=glob))
 
     # Save each test case as a pickle file
     test_cases_dir = pathlib.Path("test_cases")
@@ -1440,8 +1446,34 @@ if __name__ == "__main__":
         default=None,
         help="Time limit in seconds for each solve (default: auto based on hardness)",
     )
+    parser.add_argument(
+        "--xcsp3",
+        type=str,
+        default=None,
+        help="Find and run XCSP3 instance matching this pattern (searches in 2025/ directory)",
+    )
 
     args = parser.parse_args()
+
+    # Handle --xcsp3 pattern matching
+    xcsp3_glob = None
+    if args.xcsp3:
+        import glob as glob_module
+        pattern = f"2025/**/*{args.xcsp3}*.xml"
+        matches = sorted(glob_module.glob(pattern, recursive=True))
+        if not matches:
+            print(f"No XCSP3 instances found matching pattern: {pattern}")
+            sys.exit(1)
+        elif len(matches) == 1:
+            xcsp3_glob = matches[0]
+            print(f"Found XCSP3 instance: {xcsp3_glob}")
+        else:
+            print(f"Multiple XCSP3 instances found matching '{args.xcsp3}':")
+            for i, m in enumerate(matches[:20]):
+                print(f"  {i}: {m}")
+            if len(matches) > 20:
+                print(f"  ... and {len(matches) - 20} more")
+            sys.exit(1)
 
     print(f"Running table constraints benchmark...")
     print(f"  Hardness: {tuple(args.hardness)}")
@@ -1453,6 +1485,8 @@ if __name__ == "__main__":
     print(f"  Time limit: {args.time_limit}")
     if args.glob:
         print(f"  Glob: {args.glob}")
+    if xcsp3_glob:
+        print(f"  XCSP3: {xcsp3_glob}")
 
     df = benchmark_table_constraints(
         hardness=tuple(args.hardness),
@@ -1464,6 +1498,7 @@ if __name__ == "__main__":
         checked=args.checked if args.checked else None,
         time_limit=args.time_limit,
         choices=args.choices,
+        xcsp3_path=xcsp3_glob,
     )
 
     df.to_csv(args.output, index=False)
