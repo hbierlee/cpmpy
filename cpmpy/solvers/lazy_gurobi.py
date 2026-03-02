@@ -1080,10 +1080,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     pickle.dump(failure, f)
                 raise e
 
-    def add(self, cons):
+    def add(self, cons, get_user_vars=True):
         if not isinstance(cons, list):
             cons = [cons]
-        return super().add(cons)
+        return super().add(cons, get_user_vars=get_user_vars)
 
     __add__ = add  # avoid redirect in superclass
 

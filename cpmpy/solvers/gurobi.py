@@ -980,7 +980,8 @@ class CPM_gurobi(SolverInterface):
             cons += self.handle_channelling(obj)
 
 
-        self.add(cons)
+        self.add(cons, get_user_vars=False)
+
 
         # make objective function or variable and post
         self.obj = obj + k
@@ -1078,7 +1079,7 @@ class CPM_gurobi(SolverInterface):
         return cpm_cons
             
 
-    def add(self, cpm_expr_orig):
+    def add(self, cpm_expr_orig, get_user_vars=True):
       """
             Eagerly add a constraint to the underlying solver.
 
@@ -1099,7 +1100,8 @@ class CPM_gurobi(SolverInterface):
       from gurobipy import GRB
 
       # add new user vars to the set
-      get_variables(cpm_expr_orig, collect=self.user_vars)
+      if get_user_vars:
+          get_variables(cpm_expr_orig, collect=self.user_vars)
 
       if self.verbose:
         cp.transformations.int2bool.IntVarEnc.NAMED = True
