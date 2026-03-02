@@ -1252,7 +1252,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
                                         # Save plot
                                         if plot:
-                                            save_plot(fig, plot, f"correlation-{track}-{baseline}-{solver}-{metadata_col}-{time_col}")
+                                            correlation_plot = f"correlation-{track}-{baseline}--{solver}" if paper else f"correlation-{track}-{baseline}-{solver}-{metadata_col}-{time_col}"
+                                            save_plot(fig, plot, correlation_plot)
 
                                         plt.close(fig)
 
@@ -1470,9 +1471,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
                 if plot:
                     # Include both solver names in filename for clarity
-                    solver1_short = baseline_solver.replace('gurobi-', '').replace('-', '')
-                    solver2_short = solver2.replace('gurobi-', '').replace('-', '')
-                    save_plot(fig_scatter, plot, f"scatter-{track}-{solver1_short}--{solver2_short}")
+                    save_plot(fig_scatter, plot, f"scatter-{track}-{baseline_solver}--{solver2}")
 
     # Set status to ERR for rows that don't pass the checker
     def checker_failed(checker_result):
