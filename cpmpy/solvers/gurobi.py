@@ -742,8 +742,10 @@ class CPM_gurobi(SolverInterface):
 
         if verbose:
             self.grb_model.Params.LogFile = "/tmp/gurobi.log"
-            self.grb_model.Params.OutputFlag = 1
-            self.grb_model.write("/tmp/gurobi.lp")
+            # self.grb_model.Params.OutputFlag = 1
+            p = "/tmp/gurobi.lp"
+            print("Write LP to", p)
+            self.grb_model.write(p)
 
     @property
     def native_model(self):
@@ -989,7 +991,8 @@ class CPM_gurobi(SolverInterface):
             cons += self.handle_channelling(obj)
 
 
-        self.add(cons)
+        self.add(cons, get_user_vars=False)
+
 
         # make objective function or variable and post
         self.obj = obj + k
@@ -1091,9 +1094,9 @@ class CPM_gurobi(SolverInterface):
                 x._occurs = True
         return cpm_cons
 
-    def add(self, cpm_expr_orig):
-        """
-              Eagerly add a constraint to the underlying solver.
+    def add(self, cpm_expr_orig, get_user_vars=True):
+      """
+            Eagerly add a constraint to the underlying solver.
 
               Any CPMpy expression given is immediately transformed (through `transform()`)
               and then posted to the solver in this function.
@@ -1111,8 +1114,9 @@ class CPM_gurobi(SolverInterface):
         """
         from gurobipy import GRB
 
-        # add new user vars to the set
-        get_variables(cpm_expr_orig, collect=self.user_vars)
+      # add new user vars to the set
+      if get_user_vars:
+          get_variables(cpm_expr_orig, collect=self.user_vars)
 
         if self.verbose:
             cp.transformations.int2bool.IntVarEnc.NAMED = True

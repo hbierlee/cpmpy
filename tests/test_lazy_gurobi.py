@@ -480,7 +480,7 @@ def check_model(model, exp=None, checked=True, expected_sat=None, expected_obj=N
         print("solving for actual feasibility", slv)
         if expected_sols is not None:
             print("allsols")
-            actual_sols = allsols(slv, model, time_limit=TIME_LIMIT, solution_limit=SOL_LIMIT)
+            actual_sols = allsols(slv, model, time_limit=TIME_LIMIT, solution_limit=SOL_LIMIT, max_search=MAX_SEARCH)
             assert frozenset(actual_sols) == frozenset(expected_sols)
             actual_sat = len(actual_sols) > 0
         else:
@@ -538,14 +538,14 @@ def with_constraints(model, with_alldiff=False, with_min=True):
     if with_alldiff:
         model += cp.AllDifferent(X)
     if with_min:
-        model.minimize(sum(X))
+        model.minimize(sum(X) + 42)
     return model
 
 
 def get_envs():
 
     debug_env = {
-        "verbosity": 3,
+        "verbosity": VERBOSITY,
         "debug": 1,
         "max_iterations": 5000,
         "seed": 42,
@@ -582,7 +582,8 @@ def get_envs():
         elif "lazy" in e["alias"]:
             e["solver_kwargs"]["env"] |= debug_env
         elif "base" in e["alias"]:
-            e["solver_kwargs"] |= {"named": True}
+            e["solver_kwargs"] |= {"named": True, "verbose": True}
+            cp.transformations.int2bool.IntVarEnc.NAMED = True
         yield e
 
 
@@ -920,11 +921,14 @@ TIME_LIMIT = 30
 REPEAT = 3
 SOL_LIMIT = 10e5
 CHECKED = False
+MAX_SEARCH=10e4
+VERBOSITY=1
+HARDNESS=2
 
 
 def _generate_cases_with_expected():
     """Generate test cases and precompute expected feasibility/objective once per model."""
-    for name, model in generate_models_w_tables():
+    for name, model in generate_models_w_tables(hardness=(0, HARDNESS)):
         # print("Get expected", name)
         # Solve once to get expected values (if enabled)
         if SOLVE_EXPECTED:
@@ -932,7 +936,7 @@ def _generate_cases_with_expected():
             expected_sat = model_.solve()
             expected_obj = model_.objective_value() if model.has_objective() else None
             expected_sols = (
-                allsols(CPM_ortools(cpm_model=model), model, max_search=10e4, solution_limit=SOL_LIMIT)
+                allsols(CPM_ortools(cpm_model=model), model, max_search=MAX_SEARCH, solution_limit=SOL_LIMIT)
                 if ALLSOLS and not model.has_objective()
                 else None
             )
@@ -974,6 +978,7 @@ class TestModels:
     def test_models(self, case, env):
         name, rep, model, expected_sat, expected_obj, expected_sols = case
         env["solve_kwargs"]["Seed"] = rep
+        print(f"== INSTANCE {name} ==")
         check_model(
             model,
             exp=env,
@@ -1079,6 +1084,8 @@ def benchmark_table_constraints(
     track_memory=False,
     checked=None,
     time_limit=None,
+    choices=None,
+    xcsp3_path=None,
 ):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
@@ -1142,7 +1149,12 @@ def benchmark_table_constraints(
             time_limit = 60 if hardness[1] >= 3 else 10
 
     # Generate all test cases once (to ensure same cases for all envs)
-    test_cases = list(generate_models_w_tables(hardness=hardness, glob=glob))
+    if xcsp3_path:
+        # Use only the specified XCSP3 instance
+        name = pathlib.Path(xcsp3_path).stem
+        test_cases = [(name, _load_xcsp3(xcsp3_path))]
+    else:
+        test_cases = list(generate_models_w_tables(hardness=hardness, glob=glob))
 
     # Save each test case as a pickle file
     test_cases_dir = pathlib.Path("test_cases")
@@ -1164,6 +1176,7 @@ def benchmark_table_constraints(
             env["solver_kwargs"]["env"]["checked"] = checked
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
             env["solver_kwargs"]["env"]["debug"] = debug
+            env["solver_kwargs"]["env"]["choices"] = [int(i) for i in choices] if choices is not None else None
 
         for name, model in test_cases:
             # TODO ?
@@ -1421,14 +1434,46 @@ if __name__ == "__main__":
         help="Enable solution checking/verification",
     )
     parser.add_argument(
+        "--choices",
+        nargs="*",
+        default=None,
+        help="Fix choices",
+    )
+    parser.add_argument(
         "--time-limit",
         "-t",
         type=int,
         default=None,
         help="Time limit in seconds for each solve (default: auto based on hardness)",
     )
+    parser.add_argument(
+        "--xcsp3",
+        type=str,
+        default=None,
+        help="Find and run XCSP3 instance matching this pattern (searches in 2025/ directory)",
+    )
 
     args = parser.parse_args()
+
+    # Handle --xcsp3 pattern matching
+    xcsp3_glob = None
+    if args.xcsp3:
+        import glob as glob_module
+        pattern = f"2025/**/*{args.xcsp3}*.xml*"
+        matches = sorted(glob_module.glob(pattern, recursive=True))
+        if not matches:
+            print(f"No XCSP3 instances found matching pattern: {pattern}")
+            sys.exit(1)
+        elif len(matches) == 1:
+            xcsp3_glob = matches[0]
+            print(f"Found XCSP3 instance: {xcsp3_glob}")
+        else:
+            print(f"Multiple XCSP3 instances found matching '{args.xcsp3}':")
+            for i, m in enumerate(matches[:20]):
+                print(f"  {i}: {m}")
+            if len(matches) > 20:
+                print(f"  ... and {len(matches) - 20} more")
+            sys.exit(1)
 
     print(f"Running table constraints benchmark...")
     print(f"  Hardness: {tuple(args.hardness)}")
@@ -1440,6 +1485,8 @@ if __name__ == "__main__":
     print(f"  Time limit: {args.time_limit}")
     if args.glob:
         print(f"  Glob: {args.glob}")
+    if xcsp3_glob:
+        print(f"  XCSP3: {xcsp3_glob}")
 
     df = benchmark_table_constraints(
         hardness=tuple(args.hardness),
@@ -1450,6 +1497,8 @@ if __name__ == "__main__":
         track_memory=args.track_memory,
         checked=args.checked if args.checked else None,
         time_limit=args.time_limit,
+        choices=args.choices,
+        xcsp3_path=xcsp3_glob,
     )
 
     df.to_csv(args.output, index=False)

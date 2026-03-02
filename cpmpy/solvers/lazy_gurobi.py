@@ -71,7 +71,8 @@ INDEX = 1
 DEBUG_NP_PRINTOPTIONS = {
     "threshold": sys.maxsize,
     "linewidth": np.inf,
-    "formatter": {"float_kind": "{:.2f}".format},
+    "formatter": {"float_kind": "{:.7f}".format},
+    "suppress": True,  # avoid scientific notation
 }
 
 
@@ -414,9 +415,12 @@ class TableData:
                     solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
 
                 if self.solver.env["negatives"]:
-                    choices[parts == -part] = True
-                    if part < 0:  # neg choice
-                        choices[choice - self.cols()] = False  # cannot choose this particular pos choice
+                    if part > 0:
+                        choices[parts == -part] = True  # can also select neg. cols
+                        choices[choice + self.cols()] = False  # except the counterpart
+                    else:
+                        assert False
+                        choices[choice - self.cols()] = False
                     # assert is_pos
 
                 # # actually, the opposite part cannot be chosen?
@@ -464,15 +468,20 @@ class TableData:
             R = R & T_enc[:, choice]
 
             # remove from choices
-            if not self.solver.env["negatives"] or part > 0:  # pos choice
+            if part > 0:  # pos choice
                 k += 1
+                # remove current and negative choice
                 choices[parts == -part] = False
                 choices[choice_parts] = False
+                if self.env["negatives"]:
+                    choices[choice + self.cols()] = False
+                X[choice_parts & A_enc_pos] = True
             else:
                 # if this is the first of the part
                 if not X[parts == part].any():
                     k += 1
 
+                # remove current and positive choice
                 choices[choice] = False
                 choices[choice - self.cols()] = False
 
@@ -482,13 +491,15 @@ class TableData:
                     solver.log("RM remaining")
                     choices[remaining[0]] = False
                     choices[remaining[0] - self.cols()] = False
+                    # TODO maybe add i/o X[choice] add X[remaining[0]]
 
-            X[choice_parts & A_enc_pos] = True
+                X[choice] = True
 
             solver.check_max_iterations(iteration)
 
             if self.env["verbosity"]:
                 self.show_cut(X, k, verbosity=1)
+                self.solver.log("c ==", (choice_parts & A_enc_pos).sum(), verbosity=2)
                 solver.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
                 solver.log(
                     f"chosen {'pos' if is_pos else 'neg'} col. {show_ind(choice)} of part {parts[choice]}",
@@ -727,6 +738,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "cbCut": False,
             "short_channel": False,
             "early": False,
+            "choices": None,
             **({} if env is None else env),
         }
         self.indent = 0
@@ -1078,10 +1090,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     pickle.dump(failure, f)
                 raise e
 
-    def add(self, cons):
+    def add(self, cons, get_user_vars=True):
         if not isinstance(cons, list):
             cons = [cons]
-        return super().add(cons)
+        return super().add(cons, get_user_vars=get_user_vars)
 
     __add__ = add  # avoid redirect in superclass
 
@@ -1259,6 +1271,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.env["remain"] = without(self.solutions_checker(), self.env["expected_solutions"])
                 if self.env["verbosity"]:
                     self.log("SOLS", len(self.env["expected_solutions"]))
+                    # self.log("NON_SOLS", len(self.env["remain"]), verbosity=2)
                     self.log("TO REMOVE\n", self.env["remain"], verbosity=3)
                 for iteration in itertools.count():
                     if time_limit is not None and time.time() - dt > time_limit:
@@ -1266,7 +1279,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                     # take the first non-solution, once depeleted, take the first solution
                     if len(self.env["remain"]):
-                        sol = min(self.env["remain"].tolist())
+                        if self.env["choices"] is not None:
+                            assert self.env["choices"], (
+                                f"Choose from\n{'\n'.join(f'{i}: {c}' for i, c in enumerate(self.env['remain']))}"
+                            )
+                            sol = self.env["remain"][self.env["choices"].pop()]
+                        else:
+                            sol = min(self.env["remain"].tolist())
                     else:
                         if self.env["model"].has_objective():
                             hassol = self.env["checker"].solve()
