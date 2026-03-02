@@ -1459,7 +1459,7 @@ if __name__ == "__main__":
     xcsp3_glob = None
     if args.xcsp3:
         import glob as glob_module
-        pattern = f"2025/**/*{args.xcsp3}*.xml"
+        pattern = f"2025/**/*{args.xcsp3}*.xml*"
         matches = sorted(glob_module.glob(pattern, recursive=True))
         if not matches:
             print(f"No XCSP3 instances found matching pattern: {pattern}")
