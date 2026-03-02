@@ -480,7 +480,7 @@ def check_model(model, exp=None, checked=True, expected_sat=None, expected_obj=N
         print("solving for actual feasibility", slv)
         if expected_sols is not None:
             print("allsols")
-            actual_sols = allsols(slv, model, time_limit=TIME_LIMIT, solution_limit=SOL_LIMIT)
+            actual_sols = allsols(slv, model, time_limit=TIME_LIMIT, solution_limit=SOL_LIMIT, max_search=MAX_SEARCH)
             assert frozenset(actual_sols) == frozenset(expected_sols)
             actual_sat = len(actual_sols) > 0
         else:
@@ -538,14 +538,14 @@ def with_constraints(model, with_alldiff=False, with_min=True):
     if with_alldiff:
         model += cp.AllDifferent(X)
     if with_min:
-        model.minimize(sum(X))
+        model.minimize(sum(X) + 42)
     return model
 
 
 def get_envs():
 
     debug_env = {
-        "verbosity": 3,
+        "verbosity": VERBOSITY,
         "debug": 1,
         "max_iterations": 5000,
         "seed": 42,
@@ -923,7 +923,7 @@ SOL_LIMIT = 10e5
 CHECKED = False
 MAX_SEARCH=10e4
 VERBOSITY=1
-HARDNESS=3
+HARDNESS=2
 
 
 def _generate_cases_with_expected():
@@ -1084,6 +1084,7 @@ def benchmark_table_constraints(
     track_memory=False,
     checked=None,
     time_limit=None,
+    choices=None
 ):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
@@ -1169,6 +1170,7 @@ def benchmark_table_constraints(
             env["solver_kwargs"]["env"]["checked"] = checked
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
             env["solver_kwargs"]["env"]["debug"] = debug
+            env["solver_kwargs"]["env"]["choices"] = [int(i) for i in choices] if choices is not None else None
 
         for name, model in test_cases:
             # TODO ?

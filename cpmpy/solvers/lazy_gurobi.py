@@ -470,6 +470,7 @@ class TableData:
             # remove from choices
             if part > 0:  # pos choice
                 k += 1
+                # remove current and negative choice
                 choices[parts == -part] = False
                 choices[choice_parts] = False
                 if self.env["negatives"]:
@@ -480,7 +481,7 @@ class TableData:
                 if not X[parts == part].any():
                     k += 1
 
-                # for a negative choice, remove the current choice and the positive choice
+                # remove current and positive choice
                 choices[choice] = False
                 choices[choice - self.cols()] = False
 
@@ -494,11 +495,11 @@ class TableData:
 
                 X[choice] = True
 
-
             solver.check_max_iterations(iteration)
 
             if self.env["verbosity"]:
                 self.show_cut(X, k, verbosity=1)
+                self.solver.log("c ==", (choice_parts & A_enc_pos).sum(), verbosity=2)
                 solver.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
                 solver.log(
                     f"chosen {'pos' if is_pos else 'neg'} col. {show_ind(choice)} of part {parts[choice]}",
@@ -1270,6 +1271,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.env["remain"] = without(self.solutions_checker(), self.env["expected_solutions"])
                 if self.env["verbosity"]:
                     self.log("SOLS", len(self.env["expected_solutions"]))
+                    # self.log("NON_SOLS", len(self.env["remain"]), verbosity=2)
                     self.log("TO REMOVE\n", self.env["remain"], verbosity=3)
                 for iteration in itertools.count():
                     if time_limit is not None and time.time() - dt > time_limit:
@@ -1278,7 +1280,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     # take the first non-solution, once depeleted, take the first solution
                     if len(self.env["remain"]):
                         if self.env["choices"] is not None:
-                            assert self.env["choices"], f"Choose from\n{'\n'.join(f"{i}: {c}" for i, c in  enumerate(self.env['remain']))}"
+                            assert self.env["choices"], (
+                                f"Choose from\n{'\n'.join(f'{i}: {c}' for i, c in enumerate(self.env['remain']))}"
+                            )
                             sol = self.env["remain"][self.env["choices"].pop()]
                         else:
                             sol = min(self.env["remain"].tolist())
