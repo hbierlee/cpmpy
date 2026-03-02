@@ -483,7 +483,7 @@ class TableData:
                     choices[remaining[0]] = False
                     choices[remaining[0] - self.cols()] = False
 
-            X[choice] = 1
+            X[choice_parts & A_enc_pos] = True
 
             solver.check_max_iterations(iteration)
 
