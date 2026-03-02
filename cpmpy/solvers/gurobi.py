@@ -397,38 +397,36 @@ class CPM_gurobi(SolverInterface):
                     SRC = 'src'
                     SNK = 'snk'
 
-                class Lookup:
+                class Prefix:
 
                     def __repr__(self):
-                        return f"Lookup(node_id={self.node_id}, counter={self.counter})"
+                        return f"Prefix(node_id={self.prefix})"
 
-                    def __init__(self, node_id, counter=1):
-                        self.node_id = node_id
-                        self.counter = counter
+                    def __init__(self, prefix):
+                        self.prefix = prefix
 
-                    def incr(self):
-                        return Lookup(self.node_id, self.counter + 1)
+
 
                     def __eq__(self, other):
-                        if not isinstance(other, Lookup):
+                        if not isinstance(other, Prefix):
                             return False
                         else:
-                            return self.node_id == other.node_id and self.counter == other.counter
+                            return self.prefix == other.prefix
 
                     def __hash__(self):
-                        return hash((self.node_id, self.counter))
+                        return hash((self.prefix))
 
                     def __deepcopy__(self):
-                        return Lookup(self.node_id, self.counter)
+                        return Prefix(self.prefix)
 
 
                 class MDD_node:
 
                     def __repr__(self):
-                        return f"Mdd node(node_id={self.node_id}, level={self.level}, transition={self.transition})"
+                        return f"Mdd node(node_id={self.prefix}, level={self.level}, transition={self.transition})"
 
-                    def __init__(self, node_id, level, transition):
-                        self.node_id = node_id
+                    def __init__(self, prefix, level, transition):
+                        self.prefix = prefix
                         self.level = level
                         self.transition = transition
 
@@ -455,25 +453,18 @@ class CPM_gurobi(SolverInterface):
                         if self in memo:
                             return memo[self]
 
-                        new_node = MDD_node(self.node_id, self.level, {})
+                        new_node = MDD_node(self.prefix, self.level, {})
                         memo[self] = new_node
 
                         for key, value in self.transition.items():
                             if isinstance(value, MDD_node):
                                 new_node.transition[key] = value.deepcopy(memo)
-                            if isinstance(value, Lookup):
+                            if isinstance(value, Prefix):
                                 new_node.transition[key] = value.__deepcopy__()
                             else:
                                 new_node.transition[key] = value
 
                         return new_node
-
-                    def __hash__(self):
-
-                        transition_items = tuple(
-                            sorted(self.transition.items())
-                        )
-                        return hashtable((self.level, transition_items))
 
 
                 class MDD_node_key:
@@ -482,8 +473,8 @@ class CPM_gurobi(SolverInterface):
                         self.level = node.level
 
                         def key_value_repr(v):
-                            if isinstance(v, Lookup):
-                                return (v.node_id, v.counter)
+                            if isinstance(v, Prefix):
+                                return (v.prefix)
                             elif isinstance(v, TerminatingState):
                                 return ("TerminatingState")
                             else:
@@ -509,7 +500,7 @@ class CPM_gurobi(SolverInterface):
 
 
                 def lookup_mdd(mdd_node, cache):
-                    while isinstance(mdd_node, Lookup):
+                    while isinstance(mdd_node, Prefix):
                         mdd_node = cache[mdd_node]
                     return mdd_node
 
@@ -529,10 +520,10 @@ class CPM_gurobi(SolverInterface):
                     if len(B.keys()) == 0:
                         return False
 
-                    G = MDD_node(mdd_node.node_id, level, B)
+                    G = MDD_node(mdd_node.prefix, level, B)
 
-                    if mdd_node.node_id in mdd.repeated_keys:
-                        return Lookup(mdd_node.node_id).__deepcopy__()
+                    if mdd_node.prefix in mdd.repeated_keys:
+                        return Prefix(mdd_node.prefix).__deepcopy__()
 
                     temp = None
 
@@ -541,40 +532,35 @@ class CPM_gurobi(SolverInterface):
                         lookups = mdd.MDD_cache_reverse.get(key, set())
 
                         for lookup in lookups:
-                            if lookup.node_id in mdd.repeated_keys:
-                                return Lookup(lookup.node_id).__deepcopy__()
+                            if lookup.prefix in mdd.repeated_keys:
+                                return Prefix(lookup.prefix).__deepcopy__()
                             else:
-                                temp = lookup.node_id
+                                temp = lookup.prefix
 
                         if temp is not None:
                             mdd.repeated_keys.add(temp)
-                            return Lookup(temp).__deepcopy__()
+                            return Prefix(temp).__deepcopy__()
 
                     else:
                         for (G_key, G_elem) in mdd.MDD_cache.items():
-                            if G_key.node_id != mdd_node.node_id:
+                            if G_key.prefix != mdd_node.prefix:
                                 if G_elem == G:
-                                    if G_elem.node_id in mdd.repeated_keys:
-                                        return Lookup(G_elem.node_id).__deepcopy__()
+                                    if G_elem.prefix in mdd.repeated_keys:
+                                        return Prefix(G_elem.prefix).__deepcopy__()
                                     else:
-                                        temp = G_elem.node_id
+                                        temp = G_elem.prefix
 
                         if temp is not None:
                             mdd.repeated_keys.add(temp)
-                            return Lookup(temp).__deepcopy__()
+                            return Prefix(temp).__deepcopy__()
 
-                    mdd.MDD_cache[Lookup(mdd_node.node_id)] = G
+                    mdd.MDD_cache[Prefix(mdd_node.prefix)] = G
 
-                    return Lookup(mdd_node.node_id)
+                    return Prefix(mdd_node.prefix)
 
                 def add_row_to_mdd(row, mdd_node, mdd, level=0):
                     mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
-                    tuple_key = Lookup(tuple(row[:level]))
-                    if isinstance(mdd_node, MDD_node):
-                        if mdd_node.node_id in mdd.repeated_keys:
-                            prev_node = mdd.MDD_cache[tuple_key].deepcopy()
-                            mdd.MDD_cache[tuple_key] = prev_node
-                            tuple_key = tuple_key.incr()
+                    tuple_key = Prefix(tuple(row[:level]))
 
                     if level == len(row):
                         return TerminatingState.SNK
@@ -664,7 +650,7 @@ class CPM_gurobi(SolverInterface):
 
                             column_counter[column] += 1
                             flow[key].add_flow_out((column, column_counter[column]))
-                            if isinstance(v, Lookup):
+                            if isinstance(v, Prefix):
                                 flow[v].add_flow_in((column, column_counter[column]))
                             if isinstance(v, TerminatingState):
                                 flow['snk'].add_flow_in((column, column_counter[column]))
@@ -682,10 +668,10 @@ class CPM_gurobi(SolverInterface):
                             for n in range(1, column_counter[key] + 1):
                                 substitution[(key, n)] = bvs[n - 1]
 
-                    excluded = {Lookup(tuple(), 1), "snk"}
+                    excluded = {Prefix(tuple()), "snk"}
                     for key in sorted(
                             (k for k in flow if k not in excluded),
-                            key=lambda k: len(k.node_id)
+                            key=lambda k: len(k.prefix)
                     ):
                         if (len(flow[key].flow_in) == 1 and len(flow[key].flow_out) == 1
                                 and column_counter[flow[key].flow_in[0][0]] > 1 and column_counter[
@@ -696,7 +682,7 @@ class CPM_gurobi(SolverInterface):
                                 [substitution[(c, m)] for (c, m) in flow[key].flow_out])]
 
                     cons += [cp.sum([substitution[(c, m)] for (c, m) in flow['snk'].flow_in]) == 1]
-                    cons += [cp.sum([substitution[(c, m)] for (c, m) in flow[Lookup(tuple(), 1)].flow_out]) == 1]
+                    cons += [cp.sum([substitution[(c, m)] for (c, m) in flow[Prefix(tuple())].flow_out]) == 1]
 
                     for key in column_counter.keys():
                         if column_counter[key] > 1:
