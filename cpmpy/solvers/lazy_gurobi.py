@@ -214,9 +214,6 @@ class TableData:
             self.solver.log("", show_table(A_enc), "A_enc", verbosity=3)
             self.solver.log("", choices.astype(int), "choices", verbosity=3)
 
-        if self.env["debug"]:
-            assert choices.any()
-
         if none(choices):
             return None
         match heuristic:
@@ -454,6 +451,9 @@ class TableData:
                 break
 
             choice = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
+            if choice is None:
+                return True
+
             assert choice is not None and not X[choice], choice
 
             is_pos = choice < self.cols()
