@@ -727,8 +727,10 @@ class CPM_gurobi(SolverInterface):
 
         if verbose:
             self.grb_model.Params.LogFile = "/tmp/gurobi.log"
-            self.grb_model.Params.OutputFlag = 1
-            self.grb_model.write("/tmp/gurobi.lp")
+            # self.grb_model.Params.OutputFlag = 1
+            p = "/tmp/gurobi.lp"
+            print("Write LP to", p)
+            self.grb_model.write(p)
 
 
     @property

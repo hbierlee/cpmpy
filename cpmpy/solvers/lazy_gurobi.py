@@ -71,7 +71,8 @@ INDEX = 1
 DEBUG_NP_PRINTOPTIONS = {
     "threshold": sys.maxsize,
     "linewidth": np.inf,
-    "formatter": {"float_kind": "{:.2f}".format},
+    "formatter": {"float_kind": "{:.7f}".format},
+    "suppress": True,  # avoid scientific notation
 }
 
 
@@ -727,6 +728,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             "cbCut": False,
             "short_channel": False,
             "early": False,
+            "choices": None,
             **({} if env is None else env),
         }
         self.indent = 0
@@ -1266,7 +1268,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                     # take the first non-solution, once depeleted, take the first solution
                     if len(self.env["remain"]):
-                        sol = min(self.env["remain"].tolist())
+                        if self.env["choices"] is not None:
+                            assert self.env["choices"], f"Choose from\n{'\n'.join(f"{i}: {c}" for i, c in  enumerate(self.env['remain']))}"
+                            sol = self.env["remain"][self.env["choices"].pop()]
+                        else:
+                            sol = min(self.env["remain"].tolist())
                     else:
                         if self.env["model"].has_objective():
                             hassol = self.env["checker"].solve()

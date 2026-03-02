@@ -582,7 +582,8 @@ def get_envs():
         elif "lazy" in e["alias"]:
             e["solver_kwargs"]["env"] |= debug_env
         elif "base" in e["alias"]:
-            e["solver_kwargs"] |= {"named": True}
+            e["solver_kwargs"] |= {"named": True, "verbose": True}
+            cp.transformations.int2bool.IntVarEnc.NAMED = True
         yield e
 
 
@@ -920,11 +921,14 @@ TIME_LIMIT = 30
 REPEAT = 3
 SOL_LIMIT = 10e5
 CHECKED = False
+MAX_SEARCH=10e4
+VERBOSITY=1
+HARDNESS=3
 
 
 def _generate_cases_with_expected():
     """Generate test cases and precompute expected feasibility/objective once per model."""
-    for name, model in generate_models_w_tables():
+    for name, model in generate_models_w_tables(hardness=(0, HARDNESS)):
         # print("Get expected", name)
         # Solve once to get expected values (if enabled)
         if SOLVE_EXPECTED:
@@ -932,7 +936,7 @@ def _generate_cases_with_expected():
             expected_sat = model_.solve()
             expected_obj = model_.objective_value() if model.has_objective() else None
             expected_sols = (
-                allsols(CPM_ortools(cpm_model=model), model, max_search=10e4, solution_limit=SOL_LIMIT)
+                allsols(CPM_ortools(cpm_model=model), model, max_search=MAX_SEARCH, solution_limit=SOL_LIMIT)
                 if ALLSOLS and not model.has_objective()
                 else None
             )
@@ -974,6 +978,7 @@ class TestModels:
     def test_models(self, case, env):
         name, rep, model, expected_sat, expected_obj, expected_sols = case
         env["solve_kwargs"]["Seed"] = rep
+        print(f"== INSTANCE {name} ==")
         check_model(
             model,
             exp=env,
@@ -1421,6 +1426,12 @@ if __name__ == "__main__":
         help="Enable solution checking/verification",
     )
     parser.add_argument(
+        "--choices",
+        nargs="*",
+        default=None,
+        help="Fix choices",
+    )
+    parser.add_argument(
         "--time-limit",
         "-t",
         type=int,
@@ -1450,6 +1461,7 @@ if __name__ == "__main__":
         track_memory=args.track_memory,
         checked=args.checked if args.checked else None,
         time_limit=args.time_limit,
+        choices=args.choices,
     )
 
     df.to_csv(args.output, index=False)
