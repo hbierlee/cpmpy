@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 ##
 ## gurobi.py
 ##
@@ -19,7 +19,7 @@
     .. code-block:: console
 
         $ pip install gurobipy
-    
+
     Gurobi Optimizer requires an active licence (for example a free academic license)
     You can read more about available licences at https://www.gurobi.com/downloads/
 
@@ -60,7 +60,8 @@ from ..expressions.globalconstraints import DirectConstraint
 from ..transformations.comparison import only_numexpr_equality
 from ..transformations.flatten_model import flatten_constraint, flatten_objective
 from ..transformations.get_variables import get_variables
-from ..transformations.linearize import linearize_constraint, linearize_reified_variables, only_positive_bv, only_positive_bv_wsum, decompose_linear, decompose_linear_objective
+from ..transformations.linearize import linearize_constraint, linearize_reified_variables, only_positive_bv, \
+    only_positive_bv_wsum, decompose_linear, decompose_linear_objective
 from ..transformations.normalize import toplevel_list
 from ..transformations.reification import only_implies, reify_rewrite, only_bv_reifies
 from ..transformations.safening import no_partial_functions, safen_objective
@@ -74,12 +75,14 @@ import enum
 # save this to reset it (for unit tests)
 cpmpy_decompose = Table.decompose
 
+
 class Feature(Enum):
     def __repr__(self):
         return repr(self.value)
 
     def __str__(self):
         return str(self.value)
+
 
 class Encoding(Feature):
     CPMPY = "cpmpy"
@@ -88,11 +91,13 @@ class Encoding(Feature):
     BOOL = "bool"
     MDD = "mdd"
 
+
 class Order(Feature):
     INPUT = "input"
     DOM_INCR = "dom-incr"
     DOM_DECR = "dom-decr"
     FIEDLER = "fiedler"
+
 
 def trivial_decomposition(arr, tab):
     if len(tab) == 0:
@@ -107,6 +112,7 @@ def agreement_score(col1, col2):
     pairs = Counter(zip(col1, col2))
     return sum(n - 1 for n in pairs.values() if n > 1)
 
+
 def agreement_matrix(arr):
     n_cols = arr.shape[1]
     scores = np.zeros((n_cols, n_cols), dtype=int)
@@ -116,6 +122,7 @@ def agreement_matrix(arr):
             scores[i, j] = score
             scores[j, i] = score
     return scores
+
 
 def spectral_order_edges(arr):
     """
@@ -145,8 +152,10 @@ def spectral_order_edges(arr):
 
     return list(column_order)
 
+
 try:
     import gurobipy as gp
+
     GRB_ENV = None
 except ImportError:
     pass
@@ -157,11 +166,11 @@ class CPM_gurobi(SolverInterface):
     Interface to Gurobi's Python API
 
     Creates the following attributes (see parent constructor for more):
-    
+
     - ``grb_model``: object, TEMPLATE's model object
 
     The :class:`~cpmpy.expressions.globalconstraints.DirectConstraint`, when used, calls a function on the ``grb_model`` object.
-    
+
     Documentation of the solver's own Python API:
     https://docs.gurobi.com/projects/optimizer/en/current/reference/python.html
     """
@@ -186,7 +195,8 @@ class CPM_gurobi(SolverInterface):
     @staticmethod
     def license_ok():
         if not CPM_gurobi.installed():
-            warnings.warn(f"License check failed, python package 'gurobipy' is not installed! Please check 'CPM_gurobi.installed()' before attempting to check license.")
+            warnings.warn(
+                f"License check failed, python package 'gurobipy' is not installed! Please check 'CPM_gurobi.installed()' before attempting to check license.")
             return False
         try:
             import gurobipy as gp
@@ -199,7 +209,7 @@ class CPM_gurobi(SolverInterface):
         except Exception as e:
             warnings.warn(f"Problem encountered with Gurobi license: {e}")
             return False
-        
+
     @staticmethod
     def version() -> Optional[str]:
         """
@@ -262,7 +272,6 @@ class CPM_gurobi(SolverInterface):
 
         return X_enc, T_enc, cons, parts
 
-
     def boolvar(self, name=None, **kwargs):
         """Wrap cp.boolvar with safe debug names if enabled"""
         if self.named and name is not None:
@@ -275,7 +284,6 @@ class CPM_gurobi(SolverInterface):
     def encode_table_expr(self, X):
         cons = []
         for x in X:
-
             x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
                 self.ivarmap, x, "direct", csemap=self._csemap
             )
@@ -287,7 +295,9 @@ class CPM_gurobi(SolverInterface):
 
         return [self.ivarmap[x.name] for x in X], cons
 
-    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY, reduce=False, order=Order.INPUT, named=False, output_stats=False, short_channel=False, **kwargs):
+    def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY,
+                 reduce=False, order=Order.INPUT, hashtable=True, named=False, output_stats=False, short_channel=False,
+                 **kwargs):
         """
         Constructor of the native solver object
 
@@ -296,9 +306,11 @@ class CPM_gurobi(SolverInterface):
             subsolver: None, not used
         """
         if not self.installed():
-            raise ModuleNotFoundError("CPM_gurobi: Install the python package 'cpmpy[gurobi]' to use this solver interface.") 
+            raise ModuleNotFoundError(
+                "CPM_gurobi: Install the python package 'cpmpy[gurobi]' to use this solver interface.")
         elif not self.license_ok():
-            raise ModuleNotFoundError("CPM_gurobi: No license found or a problem occured during license check. Make sure your license is activated!")
+            raise ModuleNotFoundError(
+                "CPM_gurobi: No license found or a problem occured during license check. Make sure your license is activated!")
         import gurobipy as gp
 
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
@@ -308,7 +320,6 @@ class CPM_gurobi(SolverInterface):
         self.ivarmap = dict()
         self.named = named
         self.short_channel = short_channel
-
 
         # these should be save for integer objectives
         # the objective for an optimal result has to be strictly within one integer
@@ -379,6 +390,7 @@ class CPM_gurobi(SolverInterface):
                 class MDD:
                     def __init__(self):
                         self.MDD_cache = {}
+                        self.MDD_cache_reverse = defaultdict(set)
                         self.repeated_keys = set()
 
                 class TerminatingState(enum.Enum):
@@ -404,18 +416,11 @@ class CPM_gurobi(SolverInterface):
                             return self.node_id == other.node_id and self.counter == other.counter
 
                     def __hash__(self):
-                        # Hash based on mdd_id and counter to match __eq__
-                        # Convert mdd_id to a hashable form if it's a tuple or other collection
-                        try:
-                            node_id_hash = hash(self.node_id)
-                        except TypeError:
-                            # If mdd_id is unhashable (like a list/dict), convert to tuple
-                            node_id_hash = hash(
-                                tuple(self.node_id) if isinstance(self.node_id, (list, tuple)) else self.node_id)
-                        return hash((node_id_hash, self.counter))
+                        return hash((self.node_id, self.counter))
 
                     def __deepcopy__(self):
                         return Lookup(self.node_id, self.counter)
+
 
                 class MDD_node:
 
@@ -428,7 +433,6 @@ class CPM_gurobi(SolverInterface):
                         self.transition = transition
 
                     def __eq__(self, other):
-
                         if not isinstance(other, MDD_node):
                             return False
 
@@ -439,18 +443,8 @@ class CPM_gurobi(SolverInterface):
                             return False
 
                         for key in self.transition:
-                            v1 = self.transition[key]
-                            v2 = other.transition[key]
-
-                            if isinstance(v1, MDD_node) and isinstance(v2, MDD_node):
-                                if v1 != v2:
-                                    return False
-                            if isinstance(v1, Lookup) and isinstance(v2, Lookup):
-                                if v1 != v2:
-                                    return False
-                            if isinstance(v1, TerminatingState) and isinstance(v2, TerminatingState):
-                                return True
-                            return False
+                            if self.transition[key] != other.transition[key]:
+                                return False
 
                         return True
 
@@ -474,17 +468,45 @@ class CPM_gurobi(SolverInterface):
 
                         return new_node
 
-                    def _canonical_transition(self):
-                        items = []
+                    def __hash__(self):
 
-                        for key in sorted(self.transition.keys()):
-                            value = self.transition[key]
-                            items.append((key, value))
+                        transition_items = tuple(
+                            sorted(self.transition.items())
+                        )
+                        return hashtable((self.level, transition_items))
 
-                        return tuple(items)
+
+                class MDD_node_key:
+
+                    def __init__(self, node: "MDD_node"):
+                        self.level = node.level
+
+                        def key_value_repr(v):
+                            if isinstance(v, Lookup):
+                                return (v.node_id, v.counter)
+                            elif isinstance(v, TerminatingState):
+                                return ("TerminatingState")
+                            else:
+                                raise TypeError(f"Unsupported transition value type: {type(v)}")
+
+                        # Freeze transition into tuple of sorted (key, value_repr)
+                        self.transition = tuple(
+                            sorted((k, key_value_repr(v)) for k, v in node.transition.items())
+                        )
+
+                        # Precompute hash
+                        self._hash = hash((self.level, self.transition))
+
+                    def __eq__(self, other):
+                        return (
+                                isinstance(other, MDD_node_key) and
+                                self.level == other.level and
+                                self.transition == other.transition
+                        )
 
                     def __hash__(self):
-                        return hash((self.level, self._canonical_transition()))
+                        return self._hash
+
 
                 def lookup_mdd(mdd_node, cache):
                     while isinstance(mdd_node, Lookup):
@@ -513,22 +535,39 @@ class CPM_gurobi(SolverInterface):
                         return Lookup(mdd_node.node_id).__deepcopy__()
 
                     temp = None
-                    for (G_key, G_elem) in mdd.MDD_cache.items():
-                        if G_key.node_id != mdd_node.node_id:
-                            if G_elem == G:
-                                if G_elem.node_id in mdd.repeated_keys:
-                                    return Lookup(G_elem.node_id).__deepcopy__()
-                                else:
-                                    temp = G_elem.node_id
 
-                    if temp is not None:
-                        mdd.repeated_keys.add(temp)
-                        return Lookup(temp).__deepcopy__()
+                    if hashtable:
+                        key = MDD_node_key(G)
+                        lookups = mdd.MDD_cache_reverse.get(key, set())
+
+                        for lookup in lookups:
+                            if lookup.node_id in mdd.repeated_keys:
+                                return Lookup(lookup.node_id).__deepcopy__()
+                            else:
+                                temp = lookup.node_id
+
+                        if temp is not None:
+                            mdd.repeated_keys.add(temp)
+                            return Lookup(temp).__deepcopy__()
+
+                    else:
+                        for (G_key, G_elem) in mdd.MDD_cache.items():
+                            if G_key.node_id != mdd_node.node_id:
+                                if G_elem == G:
+                                    if G_elem.node_id in mdd.repeated_keys:
+                                        return Lookup(G_elem.node_id).__deepcopy__()
+                                    else:
+                                        temp = G_elem.node_id
+
+                        if temp is not None:
+                            mdd.repeated_keys.add(temp)
+                            return Lookup(temp).__deepcopy__()
 
                     mdd.MDD_cache[Lookup(mdd_node.node_id)] = G
+
                     return Lookup(mdd_node.node_id)
 
-                def add_row_to_mdd(row, mdd_node, mdd, level=0, diff_level=None):
+                def add_row_to_mdd(row, mdd_node, mdd, level=0):
                     mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
                     tuple_key = Lookup(tuple(row[:level]))
                     if isinstance(mdd_node, MDD_node):
@@ -545,19 +584,12 @@ class CPM_gurobi(SolverInterface):
                     if value not in mdd_node.transition:
                         mdd_node.transition[value] = add_row_to_mdd(row,
                                                                     MDD_node(tuple(row[:(level + 1)]), level + 1, {}),
-                                                                    mdd, level + 1, diff_level)
+                                                                    mdd, level + 1)
 
                     else:
-                        mdd_node.transition[value] = add_row_to_mdd(row, mdd_node.transition[value], mdd, level + 1,
-                                                                    diff_level)
+                        mdd_node.transition[value] = add_row_to_mdd(row, mdd_node.transition[value], mdd, level + 1)
                     mdd.MDD_cache[tuple_key] = mdd_node
                     return tuple_key
-
-                def find_different_level(row1, row2):
-                    mask = row1 < row2
-                    indices = np.where(mask)[0]
-
-                    return indices[0] if indices.size > 0 else -1
 
                 def construct_mdd(table):
                     if table.size == 0:
@@ -567,22 +599,20 @@ class CPM_gurobi(SolverInterface):
 
                     mdd_node = MDD_node(tuple(), 0, {})
 
-                    mdd_node = add_row_to_mdd(table[0], mdd_node, mdd, 0, None)
-                    for i in range(1, table.shape[0]):
+                    for i in range(0, table.shape[0]):
                         row = table[i]
-
-                        prev_row = table[i - 1]
-
-                        diff_level = find_different_level(prev_row, row)
-
-                        if diff_level != -1:
-                            mdd_node = add_row_to_mdd(row, mdd_node, mdd, 0, diff_level)
+                        mdd_node = add_row_to_mdd(row, mdd_node, mdd, 0)
 
                     if reduce:
+                        if hashtable:
+                            for lookup, node in mdd.MDD_cache.items():
+                                key = MDD_node_key(node)
+                                mdd.MDD_cache_reverse[key].add(lookup)
                         mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
                         for key in mdd_node.transition.keys():
-                            reduced_mdd = reduce_mdd( mdd_node.transition[key], mdd, 1)
+                            reduced_mdd = reduce_mdd(mdd_node.transition[key], mdd, 1)
                             mdd_node.transition[key] = reduced_mdd
+
                     return mdd.MDD_cache
 
                 class Flow:
@@ -611,7 +641,7 @@ class CPM_gurobi(SolverInterface):
 
                     return None
 
-                def mdd_to_flow(cache, X, X_enc):
+                def mdd_to_flow(mdd_cache, X, X_enc):
                     """Convert MDD cache to flow constraints, accounting for column reordering"""
                     domains = np.array([dom_size(x) for x in X])
                     lb = np.array([x.lb for x in X])
@@ -619,12 +649,12 @@ class CPM_gurobi(SolverInterface):
                     no_columns = sum(domains)
 
                     column_counter = {k: 0 for k in range(no_columns)}
-                    flow = {k: Flow() for k in cache.keys()}
+                    flow = {k: Flow() for k in mdd_cache.keys()}
                     flow['snk'] = Flow()
 
-                    for key in cache.keys():
+                    for key in mdd_cache.keys():
 
-                        val = lookup_mdd(cache[key], cache)
+                        val = lookup_mdd(mdd_cache[key], mdd_cache)
 
                         for (k, v) in val.transition.items():
                             column = sum(domains[:val.level]) + k - lb[val.level]
@@ -671,7 +701,8 @@ class CPM_gurobi(SolverInterface):
                     for key in column_counter.keys():
                         if column_counter[key] > 1:
                             cons += [
-                                cp.sum([substitution[(key, n)] for n in range(1, column_counter[key] + 1)]) == get_correct_bv(
+                                cp.sum([substitution[(key, n)] for n in
+                                        range(1, column_counter[key] + 1)]) == get_correct_bv(
                                     key, X, X_enc)]
 
                     return cons
@@ -698,9 +729,10 @@ class CPM_gurobi(SolverInterface):
 
                     reordered_Tb = Tb[:, ordering]
 
-                    sorted_T = reordered_Tb[np.lexsort(reordered_Tb.T[::-1])]
+                    # sorted_T = reordered_Tb[np.lexsort(reordered_Tb.T[::-1])]
+                    # mdd_cache = construct_mdd(sorted_T)
 
-                    mdd_cache = construct_mdd(sorted_T)
+                    mdd_cache = construct_mdd(reordered_Tb)
 
                     X_reordered = [X[i] for i in ordering]
 
@@ -713,12 +745,10 @@ class CPM_gurobi(SolverInterface):
                 Table.decompose = mdd_decompose
 
             case _:
-                    raise Exception(f"TODO: {encoding}")
-
+                raise Exception(f"TODO: {encoding}")
 
         if verbose:
             pathlib.Path("/tmp/encoding.txt").unlink(missing_ok=True)
-
 
         # initialise everything else and post the constraints/objective
         # it is sufficient to implement add() and minimize/maximize() below
@@ -728,7 +758,6 @@ class CPM_gurobi(SolverInterface):
             self.grb_model.Params.LogFile = "/tmp/gurobi.log"
             self.grb_model.Params.OutputFlag = 1
             self.grb_model.write("/tmp/gurobi.lp")
-
 
     @property
     def native_model(self):
@@ -777,7 +806,7 @@ class CPM_gurobi(SolverInterface):
         """Check if x is integral within IntFeasTol."""
         return np.abs(x - np.round(x)) <= self.native_model.Params.IntFeasTol
 
-    def solve(self, time_limit:Optional[float]=None, solution_callback=None, **kwargs):
+    def solve(self, time_limit: Optional[float] = None, solution_callback=None, **kwargs):
         """
             Call the gurobi solver
 
@@ -817,7 +846,7 @@ class CPM_gurobi(SolverInterface):
         # edge case, empty model, ensure the solver has something to solve
         if not len(self.user_vars):
             self.add(intvar(1, 1) == 1)
-        
+
         # call the solver, with parameters
         for param, val in ({"Threads": 1} | kwargs).items():
             self.grb_model.setParam(param, val)
@@ -849,7 +878,8 @@ class CPM_gurobi(SolverInterface):
             else:
                 self.cpm_status.exitstatus = ExitStatus.FEASIBLE
         elif grb_status == GRB.INTERRUPTED:
-            raise getattr(self.native_model, "_callback_exception", None) or Exception("Gurobi was interrupted (perhaps the solution callback called model.terminate())")
+            raise getattr(self.native_model, "_callback_exception", None) or Exception(
+                "Gurobi was interrupted (perhaps the solution callback called model.terminate())")
         else:  # another?
             raise NotImplementedError(
                 f"Translation of gurobi status {grb_status} to CPMpy status not implemented")  # a new status type was introduced, please report on github
@@ -884,7 +914,7 @@ class CPM_gurobi(SolverInterface):
                 self.objective_value_ = self.objective_.value()
 
 
-        else: # clear values of variables
+        else:  # clear values of variables
             for cpm_var in self.user_vars:
                 cpm_var._value = None
 
@@ -892,10 +922,7 @@ class CPM_gurobi(SolverInterface):
             for field, stat in self.stats().items():
                 print(f"c Stat={field}={stat}")
 
-
-
         return has_sol
-
 
     def solver_var(self, cpm_var):
         """
@@ -903,7 +930,7 @@ class CPM_gurobi(SolverInterface):
             or returns from cache if previously created
         """
 
-        if is_num(cpm_var): # shortcut, eases posting constraints
+        if is_num(cpm_var):  # shortcut, eases posting constraints
             return cpm_var
 
         # special case, negative-bool-view. Should be eliminated in linearize
@@ -923,7 +950,6 @@ class CPM_gurobi(SolverInterface):
 
         # return from cache
         return self._varmap[cpm_var]
-
 
     def objective(self, expr, minimize=True):
         """
@@ -969,7 +995,6 @@ class CPM_gurobi(SolverInterface):
         obj = cp.sum(x * w for x, w in occurring + non_ocurring)
         self.obj = obj + k
 
-
         self.add(safe_cons + decomp_cons + flat_cons + bool_cons + channelling)
 
         # make objective function or variable and post
@@ -1004,7 +1029,7 @@ class CPM_gurobi(SolverInterface):
         if cpm_expr.name == "sum":
             return gp.quicksum(self.solver_vars(cpm_expr.args))
         if cpm_expr.name == "sub":
-            a,b = self.solver_vars(cpm_expr.args)
+            a, b = self.solver_vars(cpm_expr.args)
             return a - b
         # wsum
         if cpm_expr.name == "wsum":
@@ -1029,14 +1054,17 @@ class CPM_gurobi(SolverInterface):
         # apply transformations, then post internally
         # expressions have to be linearized to fit in MIP model. See /transformations/linearize
         cpm_cons = toplevel_list(cpm_expr)
-        cpm_cons = no_partial_functions(cpm_cons, safen_toplevel={"mod", "div", "element"})  # linearize and decompose expect safe exprs
+        cpm_cons = no_partial_functions(cpm_cons, safen_toplevel={"mod", "div",
+                                                                  "element"})  # linearize and decompose expect safe exprs
         cpm_cons = decompose_linear(cpm_cons,
                                     supported=self.supported_global_constraints,
                                     supported_reified=self.supported_reified_global_constraints,
                                     csemap=self._csemap)
         cpm_cons = flatten_constraint(cpm_cons, csemap=self._csemap)  # flat normal form
-        cpm_cons = reify_rewrite(cpm_cons, supported=frozenset(['sum', 'wsum']), csemap=self._csemap)  # constraints that support reification
-        cpm_cons = only_numexpr_equality(cpm_cons, supported=frozenset(["sum", "wsum", "sub"]), csemap=self._csemap)  # supports >, <, !=
+        cpm_cons = reify_rewrite(cpm_cons, supported=frozenset(['sum', 'wsum']),
+                                 csemap=self._csemap)  # constraints that support reification
+        cpm_cons = only_numexpr_equality(cpm_cons, supported=frozenset(["sum", "wsum", "sub"]),
+                                         csemap=self._csemap)  # supports >, <, !=
         cpm_cons = linearize_reified_variables(
             cpm_cons,
             min_values=2,
@@ -1046,7 +1074,9 @@ class CPM_gurobi(SolverInterface):
         cpm_cons = only_bv_reifies(cpm_cons, csemap=self._csemap)
         cpm_cons = only_implies(cpm_cons, csemap=self._csemap)  # anything that can create full reif should go above...
         # gurobi does not round towards zero, so no 'div' in supported set: https://github.com/CPMpy/cpmpy/pull/593#issuecomment-2786707188
-        cpm_cons = linearize_constraint(cpm_cons, supported=frozenset({"sum", "wsum","->","sub","min","max","mul","abs","pow"}), csemap=self._csemap)  # the core of the MIP-linearization
+        cpm_cons = linearize_constraint(cpm_cons, supported=frozenset(
+            {"sum", "wsum", "->", "sub", "min", "max", "mul", "abs", "pow"}),
+                                        csemap=self._csemap)  # the core of the MIP-linearization
         cpm_cons = only_positive_bv(cpm_cons, csemap=self._csemap)  # after linearization, rewrite ~bv into 1-bv
         cpm_cons += self.handle_channelling(cpm_cons)
         return cpm_cons
@@ -1066,143 +1096,146 @@ class CPM_gurobi(SolverInterface):
                         cpm_cons += x_enc.encode_channelling_constraint(csemap=self._csemap)
                 x._occurs = True
         return cpm_cons
-            
 
     def add(self, cpm_expr_orig):
-      """
-            Eagerly add a constraint to the underlying solver.
+        """
+              Eagerly add a constraint to the underlying solver.
 
-            Any CPMpy expression given is immediately transformed (through `transform()`)
-            and then posted to the solver in this function.
+              Any CPMpy expression given is immediately transformed (through `transform()`)
+              and then posted to the solver in this function.
 
-            This can raise 'NotImplementedError' for any constraint not supported after transformation
+              This can raise 'NotImplementedError' for any constraint not supported after transformation
 
-            The variables used in expressions given to add are stored as 'user variables'. Those are the only ones
-            the user knows and cares about (and will be populated with a value after solve). All other variables
-            are auxiliary variables created by transformations.
+              The variables used in expressions given to add are stored as 'user variables'. Those are the only ones
+              the user knows and cares about (and will be populated with a value after solve). All other variables
+              are auxiliary variables created by transformations.
 
-        :param cpm_expr: CPMpy expression, or list thereof
-        :type cpm_expr: Expression or list of Expression
+          :param cpm_expr: CPMpy expression, or list thereof
+          :type cpm_expr: Expression or list of Expression
 
-        :return: self
-      """
-      from gurobipy import GRB
+          :return: self
+        """
+        from gurobipy import GRB
 
-      # add new user vars to the set
-      get_variables(cpm_expr_orig, collect=self.user_vars)
+        # add new user vars to the set
+        get_variables(cpm_expr_orig, collect=self.user_vars)
 
-      if self.verbose:
-        cp.transformations.int2bool.IntVarEnc.NAMED = True
-        with open("/tmp/encoding.txt", "a") as f:
-          print(f"C", cpm_expr_orig, file=f)
-          print("X", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables(cpm_expr_orig)), file=f)
-
-
-      # transform and post the constraints
-      for cpm_expr in self.transform(cpm_expr_orig):
         if self.verbose:
-          print("  ", cpm_expr, file=open("/tmp/encoding.txt", "a"))
-        if self.time_limit is not None:
-            runtime = time.time() - self.time
-            if runtime > self.time_limit:
-                self.cpm_status.exitstatus = ExitStatus.UNKNOWN
-                self.cpm_status.runtime = runtime
-                break
+            cp.transformations.int2bool.IntVarEnc.NAMED = True
+            with open("/tmp/encoding.txt", "a") as f:
+                print(f"C", cpm_expr_orig, file=f)
+                print("X", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables(cpm_expr_orig)), file=f)
 
-        # Comparisons: only numeric ones as 'only_implies()' has removed the '==' reification for Boolean expressions
-        # numexpr `comp` bvar|const
-        if isinstance(cpm_expr, Comparison):
-            lhs, rhs = cpm_expr.args
-            grbrhs = self.solver_var(rhs)
+        # transform and post the constraints
+        for cpm_expr in self.transform(cpm_expr_orig):
+            if self.verbose:
+                print("  ", cpm_expr, file=open("/tmp/encoding.txt", "a"))
+            if self.time_limit is not None:
+                runtime = time.time() - self.time
+                if runtime > self.time_limit:
+                    self.cpm_status.exitstatus = ExitStatus.UNKNOWN
+                    self.cpm_status.runtime = runtime
+                    break
 
-            # Thanks to `only_numexpr_equality()` only supported comparisons should remain
-            if cpm_expr.name == '<=':
-                grblhs = self._make_numexpr(lhs)
-                self.grb_model.addLConstr(grblhs, GRB.LESS_EQUAL, grbrhs)
-            elif cpm_expr.name == '>=':
-                grblhs = self._make_numexpr(lhs)
-                self.grb_model.addLConstr(grblhs, GRB.GREATER_EQUAL, grbrhs)
-            elif cpm_expr.name == '==':
-                if isinstance(lhs, _NumVarImpl) \
-                        or (isinstance(lhs, Operator) and (lhs.name == 'sum' or lhs.name == 'wsum' or lhs.name == "sub")):
-                    # a BoundedLinearExpression LHS, special case, like in objective
+            # Comparisons: only numeric ones as 'only_implies()' has removed the '==' reification for Boolean expressions
+            # numexpr `comp` bvar|const
+            if isinstance(cpm_expr, Comparison):
+                lhs, rhs = cpm_expr.args
+                grbrhs = self.solver_var(rhs)
+
+                # Thanks to `only_numexpr_equality()` only supported comparisons should remain
+                if cpm_expr.name == '<=':
                     grblhs = self._make_numexpr(lhs)
-                    self.grb_model.addLConstr(grblhs, GRB.EQUAL, grbrhs)
+                    self.grb_model.addLConstr(grblhs, GRB.LESS_EQUAL, grbrhs)
+                elif cpm_expr.name == '>=':
+                    grblhs = self._make_numexpr(lhs)
+                    self.grb_model.addLConstr(grblhs, GRB.GREATER_EQUAL, grbrhs)
+                elif cpm_expr.name == '==':
+                    if isinstance(lhs, _NumVarImpl) \
+                            or (isinstance(lhs, Operator) and (
+                            lhs.name == 'sum' or lhs.name == 'wsum' or lhs.name == "sub")):
+                        # a BoundedLinearExpression LHS, special case, like in objective
+                        grblhs = self._make_numexpr(lhs)
+                        self.grb_model.addLConstr(grblhs, GRB.EQUAL, grbrhs)
 
-                elif lhs.name == 'mul':
-                    assert len(lhs.args) == 2, "Gurobi only supports multiplication with 2 variables"
-                    a, b = self.solver_vars(lhs.args)
-                    self.grb_model.setParam("NonConvex", 2)
-                    self.grb_model.addConstr(a * b == grbrhs)
+                    elif lhs.name == 'mul':
+                        assert len(lhs.args) == 2, "Gurobi only supports multiplication with 2 variables"
+                        a, b = self.solver_vars(lhs.args)
+                        self.grb_model.setParam("NonConvex", 2)
+                        self.grb_model.addConstr(a * b == grbrhs)
 
-                elif lhs.name == 'div':
-                    if not is_num(lhs.args[1]):
-                        raise NotSupportedError(f"Gurobi only supports division by constants, but got {lhs.args[1]}")
-                    a, b = self.solver_vars(lhs.args)
-                    self.grb_model.addLConstr(a / b, GRB.EQUAL, grbrhs)
+                    elif lhs.name == 'div':
+                        if not is_num(lhs.args[1]):
+                            raise NotSupportedError(
+                                f"Gurobi only supports division by constants, but got {lhs.args[1]}")
+                        a, b = self.solver_vars(lhs.args)
+                        self.grb_model.addLConstr(a / b, GRB.EQUAL, grbrhs)
 
-                else:
-                    # General constraints
-                    # grbrhs should be a variable for gurobi in the subsequent, fake it
-                    if is_num(grbrhs):
-                        grbrhs = self.solver_var(intvar(lb=grbrhs, ub=grbrhs))
-
-                    if lhs.name == 'min':
-                        self.grb_model.addGenConstrMin(grbrhs, self.solver_vars(lhs.args))
-                    elif lhs.name == 'max':
-                        self.grb_model.addGenConstrMax(grbrhs, self.solver_vars(lhs.args))
-                    elif lhs.name == 'abs':
-                        self.grb_model.addGenConstrAbs(grbrhs, self.solver_var(lhs.args[0]))
-                    elif lhs.name == 'pow':
-                        x, a = self.solver_vars(lhs.args)
-                        self.grb_model.addGenConstrPow(x, grbrhs, a)
                     else:
-                        raise NotImplementedError(
+                        # General constraints
+                        # grbrhs should be a variable for gurobi in the subsequent, fake it
+                        if is_num(grbrhs):
+                            grbrhs = self.solver_var(intvar(lb=grbrhs, ub=grbrhs))
+
+                        if lhs.name == 'min':
+                            self.grb_model.addGenConstrMin(grbrhs, self.solver_vars(lhs.args))
+                        elif lhs.name == 'max':
+                            self.grb_model.addGenConstrMax(grbrhs, self.solver_vars(lhs.args))
+                        elif lhs.name == 'abs':
+                            self.grb_model.addGenConstrAbs(grbrhs, self.solver_var(lhs.args[0]))
+                        elif lhs.name == 'pow':
+                            x, a = self.solver_vars(lhs.args)
+                            self.grb_model.addGenConstrPow(x, grbrhs, a)
+                        else:
+                            raise NotImplementedError(
+                                "Not a known supported gurobi comparison '{}' {}".format(lhs.name, cpm_expr))
+                else:
+                    raise NotImplementedError(
                         "Not a known supported gurobi comparison '{}' {}".format(lhs.name, cpm_expr))
+
+            elif isinstance(cpm_expr, Operator) and cpm_expr.name == "->":
+                # Indicator constraints
+                # Take form bvar -> sum(x,y,z) >= rvar
+                cond, sub_expr = cpm_expr.args
+                assert isinstance(cond, _BoolVarImpl), f"Implication constraint {cpm_expr} must have BoolVar as lhs"
+                assert isinstance(sub_expr, Comparison), "Implication must have linear constraints on right hand side"
+                if isinstance(cond, NegBoolView):
+                    cond, bool_val = self.solver_var(cond._bv), False
+                else:
+                    cond, bool_val = self.solver_var(cond), True
+
+                lhs, rhs = sub_expr.args
+                if isinstance(lhs, _NumVarImpl) or lhs.name == "sum" or lhs.name == "wsum":
+                    lin_expr = self._make_numexpr(lhs)
+                else:
+                    raise Exception(
+                        f"Unknown linear expression {lhs} on right side of indicator constraint: {cpm_expr}")
+                if sub_expr.name == "<=":
+                    self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.LESS_EQUAL, self.solver_var(rhs))
+                elif sub_expr.name == ">=":
+                    self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.GREATER_EQUAL,
+                                                         self.solver_var(rhs))
+                elif sub_expr.name == "==":
+                    self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.EQUAL, self.solver_var(rhs))
+                else:
+                    raise Exception(f"Unknown linear expression {sub_expr} name")
+
+            # True or False
+            elif isinstance(cpm_expr, BoolVal):
+                self.grb_model.addConstr(cpm_expr.args[0])
+
+            # a direct constraint, pass to solver
+            elif isinstance(cpm_expr, DirectConstraint):
+                cpm_expr.callSolver(self, self.grb_model)
+
             else:
-                raise NotImplementedError(
-                "Not a known supported gurobi comparison '{}' {}".format(lhs.name, cpm_expr))
+                raise NotImplementedError(cpm_expr)  # if you reach this... please report on github
 
-        elif isinstance(cpm_expr, Operator) and cpm_expr.name == "->":
-            # Indicator constraints
-            # Take form bvar -> sum(x,y,z) >= rvar
-            cond, sub_expr = cpm_expr.args
-            assert isinstance(cond, _BoolVarImpl), f"Implication constraint {cpm_expr} must have BoolVar as lhs"
-            assert isinstance(sub_expr, Comparison), "Implication must have linear constraints on right hand side"
-            if isinstance(cond, NegBoolView):
-                cond, bool_val = self.solver_var(cond._bv), False
-            else:
-                cond, bool_val = self.solver_var(cond), True
+        return self
 
-            lhs, rhs = sub_expr.args
-            if isinstance(lhs, _NumVarImpl) or lhs.name == "sum" or lhs.name == "wsum":
-                lin_expr = self._make_numexpr(lhs)
-            else:
-                raise Exception(f"Unknown linear expression {lhs} on right side of indicator constraint: {cpm_expr}")
-            if sub_expr.name == "<=":
-                self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.LESS_EQUAL, self.solver_var(rhs))
-            elif sub_expr.name == ">=":
-                self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.GREATER_EQUAL, self.solver_var(rhs))
-            elif sub_expr.name == "==":
-                self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.EQUAL, self.solver_var(rhs))
-            else:
-                raise Exception(f"Unknown linear expression {sub_expr} name")
-
-        # True or False
-        elif isinstance(cpm_expr, BoolVal):
-            self.grb_model.addConstr(cpm_expr.args[0])
-
-        # a direct constraint, pass to solver
-        elif isinstance(cpm_expr, DirectConstraint):
-            cpm_expr.callSolver(self, self.grb_model)
-
-        else:
-            raise NotImplementedError(cpm_expr)  # if you reach this... please report on github
-
-      return self
     __add__ = add  # avoid redirect in superclass
 
-    def solution_hint(self, cpm_vars:List[_NumVarImpl], vals:List[int|bool]):
+    def solution_hint(self, cpm_vars: List[_NumVarImpl], vals: List[int | bool]):
         """
         Gurobi supports warmstarting the solver with a (in)feasible solution.
         The provided value will affect branching heurstics during solving, making it more likely the final solution will contain the provided assignment.
@@ -1211,7 +1244,7 @@ class CPM_gurobi(SolverInterface):
         https://docs.gurobi.com/projects/optimizer/en/current/reference/attributes/variable.html#varhintval
 
         Optionally, you can also set the relative priority of the hint, using:
-        
+
         .. code-block:: python
 
             solver.solver_var(cpm_var).setAttr("VarHintPri", <priority>)
@@ -1222,7 +1255,8 @@ class CPM_gurobi(SolverInterface):
         for cpm_var, val in zip(cpm_vars, vals):
             self.solver_var(cpm_var).setAttr("VarHintVal", val)
 
-    def solveAll(self, display:Optional[Callback]=None, time_limit:Optional[float]=None, solution_limit:Optional[int]=None, call_from_model=False, **kwargs):
+    def solveAll(self, display: Optional[Callback] = None, time_limit: Optional[float] = None,
+                 solution_limit: Optional[int] = None, call_from_model=False, **kwargs):
         """
             Compute all solutions and optionally display the solutions.
 
@@ -1257,7 +1291,7 @@ class CPM_gurobi(SolverInterface):
                 "try setting solution limit to a large number")
 
         # Force gurobi to keep searching in the tree for optimal solutions
-        sa_kwargs = {"PoolSearchMode":2, "PoolSolutions":solution_limit}
+        sa_kwargs = {"PoolSearchMode": 2, "PoolSolutions": solution_limit}
 
         # solve the model
         self.solve(time_limit=time_limit, **sa_kwargs, **kwargs)
@@ -1319,15 +1353,14 @@ class CPM_gurobi(SolverInterface):
 
         if opt_sol_count:
             if opt_sol_count == solution_limit:
-                self.cpm_status.exitstatus = ExitStatus.FEASIBLE 
+                self.cpm_status.exitstatus = ExitStatus.FEASIBLE
             else:
                 grb_status = self.grb_model.Status
-                if grb_status == GRB.TIME_LIMIT: # reached time limit
+                if grb_status == GRB.TIME_LIMIT:  # reached time limit
                     self.cpm_status.exitstatus = ExitStatus.FEASIBLE
-                else: # found all solutions   
+                else:  # found all solutions
                     self.cpm_status.exitstatus = ExitStatus.OPTIMAL
         # if unsat or timout with no solution, .solve() will have already set the state accordingly (so nothing to update)
-
 
         return opt_sol_count
 
