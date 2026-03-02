@@ -415,9 +415,12 @@ class TableData:
                     solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
 
                 if self.solver.env["negatives"]:
-                    choices[parts == -part] = True
-                    if part < 0:  # neg choice
-                        choices[choice - self.cols()] = False  # cannot choose this particular pos choice
+                    if part > 0:
+                        choices[parts == -part] = True  # can also select neg. cols
+                        choices[choice + self.cols()] = False  # except the counterpart
+                    else:
+                        assert False
+                        choices[choice - self.cols()] = False
                     # assert is_pos
 
                 # # actually, the opposite part cannot be chosen?
@@ -465,15 +468,19 @@ class TableData:
             R = R & T_enc[:, choice]
 
             # remove from choices
-            if not self.solver.env["negatives"] or part > 0:  # pos choice
+            if part > 0:  # pos choice
                 k += 1
                 choices[parts == -part] = False
                 choices[choice_parts] = False
+                if self.env["negatives"]:
+                    choices[choice + self.cols()] = False
+                X[choice_parts & A_enc_pos] = True
             else:
                 # if this is the first of the part
                 if not X[parts == part].any():
                     k += 1
 
+                # for a negative choice, remove the current choice and the positive choice
                 choices[choice] = False
                 choices[choice - self.cols()] = False
 
@@ -483,8 +490,10 @@ class TableData:
                     solver.log("RM remaining")
                     choices[remaining[0]] = False
                     choices[remaining[0] - self.cols()] = False
+                    # TODO maybe add i/o X[choice] add X[remaining[0]]
 
-            X[choice_parts & A_enc_pos] = True
+                X[choice] = True
+
 
             solver.check_max_iterations(iteration)
 
