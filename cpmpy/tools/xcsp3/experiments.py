@@ -114,17 +114,18 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                 {
                     "solver": CPM_gurobi,
                     "alias": f"base_gurobi-{encoding}"
-                    + (f"-{f'reduce' if reduce else 'noreduce'}-{order}" if encoding is Encoding.MDD else ""),
+                    + (f"-{f'reduce' if reduce else 'noreduce'}-{order}-{f'hashtable' if hashtable else 'nohashtable'}" if encoding is Encoding.MDD else ""),
                     "solver_kwargs": {
                         "encoding": encoding,
                         "reduce": reduce,
                         "order": order,
+                        "hashtable": hashtable,
                         "output_stats": True,
                     },
                     "solve_kwargs": {"Seed": SEED},
                 }
-                for encoding, reduce, order in [
-                    (encoding_, reduce, order)
+                for encoding, reduce, order, hashtable in [
+                    (encoding_, reduce, order, hashtable)
                     for encoding_ in [Encoding.GLEB, Encoding.BOOL, Encoding.MDD]
                     for reduce in (
                         [
@@ -135,7 +136,8 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                         else [None]
                     )
                     for order in (Order if encoding_ is Encoding.MDD else [None])
-                ] + [(Encoding.MDD, False, Order.DOM_INCR)]
+                    for hashtable in ([True, False] if encoding_ is Encoding.MDD else [None])
+                ]
             ],
             *[
                 {
