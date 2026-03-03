@@ -1266,6 +1266,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     solved_df = df[df['solved']]
     inst_metric_range = (solved_df[inst_metric_col].min(), solved_df[inst_metric_col].max())
 
+    # Collect subtables for combined LaTeX output
+    track_subtables = []
+
     for track, groups in df.groupby(by="track"):
         is_cop = "COP" in track
         if tex is not None:
@@ -1345,7 +1348,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             # Escape underscores in alias names for LaTeX
             tex_df_formatted.index = tex_df_formatted.index.map(lambda x: x.replace('_', r'\_'))
 
-            latex_output = tex_df_formatted[
+            # Generate just the tabular content (no table wrapper)
+            tabular_output = tex_df_formatted[
                 [
                     *(["unk", "mem", "post"]),
                     *(["feas"] if is_cop else []),
@@ -1358,39 +1362,41 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     *(["\\sat"] if is_cop else []),
                     *(["\\sol", "time [s]", "cuts", "CB [\\%]"]),
                 ],
-                caption=f"{n_instances} {track} instances",
-                label=f"tbl:res:{track.lower()}",
                 escape=False,  # Don't escape so \textbf works
+                index_names=False,
             )
 
-            # Move caption to bottom of table
-            lines = latex_output.split('\n')
-            caption_lines = []
-            other_lines = []
-
-            # Separate caption/label lines from other lines
+            # Extract just the tabular environment (remove table wrapper if present)
+            lines = tabular_output.split('\n')
+            tabular_lines = []
+            in_tabular = False
             for line in lines:
-                if line.strip().startswith('\\caption') or line.strip().startswith('\\label'):
-                    caption_lines.append(line)
-                else:
-                    other_lines.append(line)
+                if '\\begin{tabular}' in line:
+                    in_tabular = True
+                if in_tabular:
+                    tabular_lines.append(line)
+                if '\\end{tabular}' in line:
+                    in_tabular = False
 
-            # Reconstruct with caption at the bottom
-            if caption_lines:
-                # Find the \end{table} line
-                for i, line in enumerate(other_lines):
-                    if '\\end{table}' in line:
-                        # Insert caption lines before \end{table}
-                        other_lines = other_lines[:i] + caption_lines + other_lines[i:]
-                        break
-                latex_output = '\n'.join(other_lines)
-            else:
-                latex_output = '\n'.join(other_lines)
+            tabular_content = '\n'.join(tabular_lines) if tabular_lines else tabular_output
 
-            # Save to file
-            with open(tex / f"table-{track}.tex", 'w') as f:
-                f.write(latex_output)
-            print(f"LaTeX table saved to {tex}")
+            # Extract solved counts for lazy, base, and ortools approaches
+            solv_values = {}
+            for alias in tex_df.index:
+                if 'lazy' in alias.lower():
+                    solv_values['lazy'] = int(tex_df.loc[alias, 'solv'])
+                elif 'base' in alias.lower():
+                    solv_values['base'] = int(tex_df.loc[alias, 'solv'])
+                elif 'ortools' in alias.lower():
+                    solv_values['ortools'] = int(tex_df.loc[alias, 'solv'])
+
+            # Collect subtable info for combined output
+            track_subtables.append({
+                'track': track,
+                'n_instances': n_instances,
+                'tabular': tabular_content,
+                'solv_values': solv_values,
+            })
 
         # Determine which plots to generate and show
         show_cactus = False
@@ -1472,6 +1478,53 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 if plot:
                     # Include both solver names in filename for clarity
                     save_plot(fig_scatter, plot, f"scatter-{track}-{baseline_solver}--{solver2}")
+
+    # Write combined LaTeX table with subtables
+    if tex is not None and track_subtables:
+        tex.mkdir(exist_ok=True, parents=True)
+
+        # Sort subtables to put CSP first
+        track_subtables.sort(key=lambda x: (0 if 'CSP' in x['track'] else 1, x['track']))
+
+        # Build newcommands for solved counts
+        combined_lines = []
+        for subtable in track_subtables:
+            track_short = subtable['track'][:3].lower()
+            for approach, count in subtable.get('solv_values', {}).items():
+                combined_lines.append(f"\\newcommand{{\\solv{approach}{track_short}}}{{{count}}}")
+        combined_lines.append('')
+
+        # Build combined table with subtables
+        combined_lines.extend([
+            r'\begin{table}[htbp]',
+            r'    \centering',
+            r'    \caption{\tableCaption}',
+            r'    \label{tbl:res:combined}',
+            '',
+        ])
+
+        for i, subtable in enumerate(track_subtables):
+            combined_lines.append(r'    \begin{subtable}{\textwidth}')
+            combined_lines.append(r'        \centering')
+            combined_lines.append(f"        \\caption{{{subtable['n_instances']} {subtable['track']} instances}}")
+            combined_lines.append(f"        \\label{{tbl:res:{subtable['track'].lower()}}}")
+            # Indent the tabular content
+            for line in subtable['tabular'].split('\n'):
+                combined_lines.append(f'        {line}')
+            combined_lines.append(r'    \end{subtable}')
+            if i < len(track_subtables) - 1:
+                combined_lines.append('')
+                combined_lines.append(r'    \vspace{1em}')
+                combined_lines.append('')
+
+        combined_lines.append('')
+        combined_lines.append(r'\end{table}')
+
+        combined_output = '\n'.join(combined_lines)
+
+        with open(tex / "table-combined.tex", 'w') as f:
+            f.write(combined_output)
+        print(f"Combined LaTeX table saved to {tex / 'table-combined.tex'}")
 
     # Set status to ERR for rows that don't pass the checker
     def checker_failed(checker_result):
