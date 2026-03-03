@@ -734,18 +734,20 @@ class CPM_gurobi(SolverInterface):
                 raise Exception(f"TODO: {encoding}")
 
         if verbose:
-            pathlib.Path("/tmp/encoding.txt").unlink(missing_ok=True)
+            self.encoding_path = pathlib.Path(f"/tmp/encoding_{name}.txt") if self.verbose else None
+            pathlib.Path(self.encoding_path).unlink(missing_ok=True)
+        else:
+            self.encoding_path = None
 
         # initialise everything else and post the constraints/objective
         # it is sufficient to implement add() and minimize/maximize() below
         super().__init__(name=name, cpm_model=cpm_model, **kwargs)
 
-        if verbose:
+        if self.encoding_path:
             self.grb_model.Params.LogFile = "/tmp/gurobi.log"
             # self.grb_model.Params.OutputFlag = 1
-            p = "/tmp/gurobi.lp"
-            print("Write LP to", p)
-            self.grb_model.write(p)
+            print("W", self.encoding_path.with_suffix(".lp"))
+            self.grb_model.write(str(self.encoding_path.with_suffix(".lp")))
 
     @property
     def native_model(self):
@@ -1116,120 +1118,122 @@ class CPM_gurobi(SolverInterface):
 
       # add new user vars to the set
       if get_user_vars:
-        get_variables(cpm_expr_orig, collect=self.user_vars)
+          get_variables(cpm_expr_orig, collect=self.user_vars)
 
-        if self.verbose:
-            cp.transformations.int2bool.IntVarEnc.NAMED = True
-            with open("/tmp/encoding.txt", "a") as f:
-                print(f"C", cpm_expr_orig, file=f)
-                print("X", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables(cpm_expr_orig)), file=f)
+      if self.encoding_path:
+          cp.transformations.int2bool.IntVarEnc.NAMED = True
+          with open(self.encoding_path, "a") as f:
+              print(f"C", cpm_expr_orig, file=f)
+              print("X", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in get_variables(cpm_expr_orig)), file=f)
 
         # transform and post the constraints
-        for cpm_expr in self.transform(cpm_expr_orig):
-            if self.verbose:
-                print("  ", cpm_expr, file=open("/tmp/encoding.txt", "a"))
-            if self.time_limit is not None:
-                runtime = time.time() - self.time
-                if runtime > self.time_limit:
-                    self.cpm_status.exitstatus = ExitStatus.UNKNOWN
-                    self.cpm_status.runtime = runtime
-                    break
+      for cpm_expr in self.transform(cpm_expr_orig):
+          if self.encoding_path:
 
-            # Comparisons: only numeric ones as 'only_implies()' has removed the '==' reification for Boolean expressions
-            # numexpr `comp` bvar|const
-            if isinstance(cpm_expr, Comparison):
-                lhs, rhs = cpm_expr.args
-                grbrhs = self.solver_var(rhs)
+              with open(self.encoding_path, "a") as f:
+                  print("  ", cpm_expr, file=f)
+          if self.time_limit is not None:
+              runtime = time.time() - self.time
+              if runtime > self.time_limit:
+                  self.cpm_status.exitstatus = ExitStatus.UNKNOWN
+                  self.cpm_status.runtime = runtime
+                  break
 
-                # Thanks to `only_numexpr_equality()` only supported comparisons should remain
-                if cpm_expr.name == '<=':
-                    grblhs = self._make_numexpr(lhs)
-                    self.grb_model.addLConstr(grblhs, GRB.LESS_EQUAL, grbrhs)
-                elif cpm_expr.name == '>=':
-                    grblhs = self._make_numexpr(lhs)
-                    self.grb_model.addLConstr(grblhs, GRB.GREATER_EQUAL, grbrhs)
-                elif cpm_expr.name == '==':
-                    if isinstance(lhs, _NumVarImpl) \
-                            or (isinstance(lhs, Operator) and (
-                            lhs.name == 'sum' or lhs.name == 'wsum' or lhs.name == "sub")):
-                        # a BoundedLinearExpression LHS, special case, like in objective
-                        grblhs = self._make_numexpr(lhs)
-                        self.grb_model.addLConstr(grblhs, GRB.EQUAL, grbrhs)
+          # Comparisons: only numeric ones as 'only_implies()' has removed the '==' reification for Boolean expressions
+          # numexpr `comp` bvar|const
+          if isinstance(cpm_expr, Comparison):
+              lhs, rhs = cpm_expr.args
+              grbrhs = self.solver_var(rhs)
 
-                    elif lhs.name == 'mul':
-                        assert len(lhs.args) == 2, "Gurobi only supports multiplication with 2 variables"
-                        a, b = self.solver_vars(lhs.args)
-                        self.grb_model.setParam("NonConvex", 2)
-                        self.grb_model.addConstr(a * b == grbrhs)
+              # Thanks to `only_numexpr_equality()` only supported comparisons should remain
+              if cpm_expr.name == '<=':
+                  grblhs = self._make_numexpr(lhs)
+                  self.grb_model.addLConstr(grblhs, GRB.LESS_EQUAL, grbrhs)
+              elif cpm_expr.name == '>=':
+                  grblhs = self._make_numexpr(lhs)
+                  self.grb_model.addLConstr(grblhs, GRB.GREATER_EQUAL, grbrhs)
+              elif cpm_expr.name == '==':
+                  if isinstance(lhs, _NumVarImpl) \
+                          or (isinstance(lhs, Operator) and (
+                          lhs.name == 'sum' or lhs.name == 'wsum' or lhs.name == "sub")):
+                      # a BoundedLinearExpression LHS, special case, like in objective
+                      grblhs = self._make_numexpr(lhs)
+                      self.grb_model.addLConstr(grblhs, GRB.EQUAL, grbrhs)
 
-                    elif lhs.name == 'div':
-                        if not is_num(lhs.args[1]):
-                            raise NotSupportedError(
-                                f"Gurobi only supports division by constants, but got {lhs.args[1]}")
-                        a, b = self.solver_vars(lhs.args)
-                        self.grb_model.addLConstr(a / b, GRB.EQUAL, grbrhs)
+                  elif lhs.name == 'mul':
+                      assert len(lhs.args) == 2, "Gurobi only supports multiplication with 2 variables"
+                      a, b = self.solver_vars(lhs.args)
+                      self.grb_model.setParam("NonConvex", 2)
+                      self.grb_model.addConstr(a * b == grbrhs)
 
-                    else:
-                        # General constraints
-                        # grbrhs should be a variable for gurobi in the subsequent, fake it
-                        if is_num(grbrhs):
-                            grbrhs = self.solver_var(intvar(lb=grbrhs, ub=grbrhs))
+                  elif lhs.name == 'div':
+                      if not is_num(lhs.args[1]):
+                          raise NotSupportedError(
+                              f"Gurobi only supports division by constants, but got {lhs.args[1]}")
+                      a, b = self.solver_vars(lhs.args)
+                      self.grb_model.addLConstr(a / b, GRB.EQUAL, grbrhs)
 
-                        if lhs.name == 'min':
-                            self.grb_model.addGenConstrMin(grbrhs, self.solver_vars(lhs.args))
-                        elif lhs.name == 'max':
-                            self.grb_model.addGenConstrMax(grbrhs, self.solver_vars(lhs.args))
-                        elif lhs.name == 'abs':
-                            self.grb_model.addGenConstrAbs(grbrhs, self.solver_var(lhs.args[0]))
-                        elif lhs.name == 'pow':
-                            x, a = self.solver_vars(lhs.args)
-                            self.grb_model.addGenConstrPow(x, grbrhs, a)
-                        else:
-                            raise NotImplementedError(
-                                "Not a known supported gurobi comparison '{}' {}".format(lhs.name, cpm_expr))
-                else:
-                    raise NotImplementedError(
-                        "Not a known supported gurobi comparison '{}' {}".format(lhs.name, cpm_expr))
+                  else:
+                      # General constraints
+                      # grbrhs should be a variable for gurobi in the subsequent, fake it
+                      if is_num(grbrhs):
+                          grbrhs = self.solver_var(intvar(lb=grbrhs, ub=grbrhs))
 
-            elif isinstance(cpm_expr, Operator) and cpm_expr.name == "->":
-                # Indicator constraints
-                # Take form bvar -> sum(x,y,z) >= rvar
-                cond, sub_expr = cpm_expr.args
-                assert isinstance(cond, _BoolVarImpl), f"Implication constraint {cpm_expr} must have BoolVar as lhs"
-                assert isinstance(sub_expr, Comparison), "Implication must have linear constraints on right hand side"
-                if isinstance(cond, NegBoolView):
-                    cond, bool_val = self.solver_var(cond._bv), False
-                else:
-                    cond, bool_val = self.solver_var(cond), True
+                      if lhs.name == 'min':
+                          self.grb_model.addGenConstrMin(grbrhs, self.solver_vars(lhs.args))
+                      elif lhs.name == 'max':
+                          self.grb_model.addGenConstrMax(grbrhs, self.solver_vars(lhs.args))
+                      elif lhs.name == 'abs':
+                          self.grb_model.addGenConstrAbs(grbrhs, self.solver_var(lhs.args[0]))
+                      elif lhs.name == 'pow':
+                          x, a = self.solver_vars(lhs.args)
+                          self.grb_model.addGenConstrPow(x, grbrhs, a)
+                      else:
+                          raise NotImplementedError(
+                              "Not a known supported gurobi comparison '{}' {}".format(lhs.name, cpm_expr))
+              else:
+                  raise NotImplementedError(
+                      "Not a known supported gurobi comparison '{}' {}".format(lhs.name, cpm_expr))
 
-                lhs, rhs = sub_expr.args
-                if isinstance(lhs, _NumVarImpl) or lhs.name == "sum" or lhs.name == "wsum":
-                    lin_expr = self._make_numexpr(lhs)
-                else:
-                    raise Exception(
-                        f"Unknown linear expression {lhs} on right side of indicator constraint: {cpm_expr}")
-                if sub_expr.name == "<=":
-                    self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.LESS_EQUAL, self.solver_var(rhs))
-                elif sub_expr.name == ">=":
-                    self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.GREATER_EQUAL,
-                                                         self.solver_var(rhs))
-                elif sub_expr.name == "==":
-                    self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.EQUAL, self.solver_var(rhs))
-                else:
-                    raise Exception(f"Unknown linear expression {sub_expr} name")
+          elif isinstance(cpm_expr, Operator) and cpm_expr.name == "->":
+              # Indicator constraints
+              # Take form bvar -> sum(x,y,z) >= rvar
+              cond, sub_expr = cpm_expr.args
+              assert isinstance(cond, _BoolVarImpl), f"Implication constraint {cpm_expr} must have BoolVar as lhs"
+              assert isinstance(sub_expr, Comparison), "Implication must have linear constraints on right hand side"
+              if isinstance(cond, NegBoolView):
+                  cond, bool_val = self.solver_var(cond._bv), False
+              else:
+                  cond, bool_val = self.solver_var(cond), True
 
-            # True or False
-            elif isinstance(cpm_expr, BoolVal):
-                self.grb_model.addConstr(cpm_expr.args[0])
+              lhs, rhs = sub_expr.args
+              if isinstance(lhs, _NumVarImpl) or lhs.name == "sum" or lhs.name == "wsum":
+                  lin_expr = self._make_numexpr(lhs)
+              else:
+                  raise Exception(
+                      f"Unknown linear expression {lhs} on right side of indicator constraint: {cpm_expr}")
+              if sub_expr.name == "<=":
+                  self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.LESS_EQUAL, self.solver_var(rhs))
+              elif sub_expr.name == ">=":
+                  self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.GREATER_EQUAL,
+                                                       self.solver_var(rhs))
+              elif sub_expr.name == "==":
+                  self.grb_model.addGenConstrIndicator(cond, bool_val, lin_expr, GRB.EQUAL, self.solver_var(rhs))
+              else:
+                  raise Exception(f"Unknown linear expression {sub_expr} name")
 
-            # a direct constraint, pass to solver
-            elif isinstance(cpm_expr, DirectConstraint):
-                cpm_expr.callSolver(self, self.grb_model)
+          # True or False
+          elif isinstance(cpm_expr, BoolVal):
+              self.grb_model.addConstr(cpm_expr.args[0])
 
-            else:
-                raise NotImplementedError(cpm_expr)  # if you reach this... please report on github
+          # a direct constraint, pass to solver
+          elif isinstance(cpm_expr, DirectConstraint):
+              cpm_expr.callSolver(self, self.grb_model)
 
-        return self
+          else:
+              raise NotImplementedError(cpm_expr)  # if you reach this... please report on github
+
+      return self
 
     __add__ = add  # avoid redirect in superclass
 
