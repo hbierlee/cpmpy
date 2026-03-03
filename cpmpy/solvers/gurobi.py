@@ -295,7 +295,7 @@ class CPM_gurobi(SolverInterface):
         return [self.ivarmap[x.name] for x in X], cons
 
     def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY,
-                 reduce=False, order=Order.INPUT, hashtable=True, named=False, output_stats=False, short_channel=False,
+                 reduce=False, order=Order.INPUT, hashtable=True, named=False, output_stats=False, short_channel=False, encode_obj=False,
                  **kwargs):
         """
         Constructor of the native solver object
@@ -1112,11 +1112,11 @@ class CPM_gurobi(SolverInterface):
 
           :return: self
         """
-        from gurobipy import GRB
+      from gurobipy import GRB
 
       # add new user vars to the set
       if get_user_vars:
-          get_variables(cpm_expr_orig, collect=self.user_vars)
+        get_variables(cpm_expr_orig, collect=self.user_vars)
 
         if self.verbose:
             cp.transformations.int2bool.IntVarEnc.NAMED = True
