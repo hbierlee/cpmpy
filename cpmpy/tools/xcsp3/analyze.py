@@ -635,7 +635,7 @@ def save_plot(fig, path, name):
     print(f"Plot saved to {plot_path}.{{png,svg}}")
 
 
-def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=False, small=None, glob_alias=None, glob_instance=None):
+def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=False, small=None, glob_alias=None, exclude_alias=None, glob_instance=None):
     """
     Load and process CSV files containing benchmark results.
 
@@ -751,7 +751,9 @@ def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=
     # Filter by alias
     if glob_alias:
         df = df[df['alias'].map(lambda g: any(g_ in g for g_ in glob_alias))].copy()
-    # df = df[~df['alias'].str.contains("mdd", na=False)]
+    # Exclude by alias
+    if exclude_alias:
+        df = df[~df['alias'].map(lambda g: any(g_ in g for g_ in exclude_alias))].copy()
 
     # Filter by instance
     if glob_instance:
@@ -822,6 +824,7 @@ def main():
     parser.add_argument('-i', '--intermediate', action='store_true', help='Only show instances which occur for all solvers (intermediate mode)')
     parser.add_argument('--small', type=int, help='Threshold for filtering by largest table size (default: 25)')
     parser.add_argument('-g', '--glob-alias', type=str, nargs="*", default=None, help='Glob alias')
+    parser.add_argument('-x', '--exclude-alias', type=str, nargs="*", default=None, help='Exclude solvers matching these patterns')
     parser.add_argument('--glob-instance', type=str, nargs="*", default=None, help='Glob instance')
     parser.add_argument('--sort-legend', type=str, choices=['alpha', 'performance'], default='alpha',
                         help='Sort order for legend/lines: alpha (lexicographic, default) or performance (by instances solved)')
@@ -834,7 +837,7 @@ def main():
     args = parser.parse_args()
     analyze(**vars(args))
 
-def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, intermediate=False, small=None, glob_alias=None, glob_instance=None, tex=None, sort_legend='alpha', compare=None, metric='t_solv_p2', paper=False):
+def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_errors=False, save=False, intermediate=False, small=None, glob_alias=None, exclude_alias=None, glob_instance=None, tex=None, sort_legend='alpha', compare=None, metric='t_solv_p2', paper=False):
 
     # Set font sizes for publication-ready plots
     if paper:
@@ -865,6 +868,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         intermediate=intermediate,
         small=small,
         glob_alias=glob_alias,
+        exclude_alias=exclude_alias,
         glob_instance=glob_instance
     )
 
@@ -1119,6 +1123,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     for track in tracks:
                         # Filter by track if applicable
                         if track is not None:
+                            # Skip tracks that don't have baseline data
+                            if track not in baseline_data.index.get_level_values('track'):
+                                continue
                             track_diff = diff_.xs(track, level='track')
                             track_baseline = baseline_data.xs(track, level='track')
                         else:
@@ -1296,51 +1303,74 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 solv=('solved', 'sum'),
                 t_solv_p2=('time_solve_p2', 'mean'),
             )
-            # Calculate cons and cuts only for solved instances
+            # Calculate cons only for instances posted by all solvers
+            n_solvers = groups['alias'].nunique()
+            posted_by_all = groups[groups['post']].groupby(['problem', 'instance']).filter(
+                lambda g: g['alias'].nunique() == n_solvers
+            )
+            cons_groups = posted_by_all.groupby('alias').agg(
+                cons=('constraints', 'mean'),
+            )
+            # Calculate cuts only for solved instances
             solved_groups = groups[groups['solved']].groupby('alias').agg(
-                cons=('constraints', 'meae'),
                 cuts=('cuts', 'mean'),
             )
-            tex_df = tex_df.join(solved_groups)
-            # Create combined cons+cuts column (numeric for comparison, string for display)
-            tex_df['cons+cuts_num'] = tex_df['cons'] + tex_df['cuts']
+            tex_df = tex_df.join(cons_groups).join(solved_groups)
             # tex_df = tex_df.rename(index=rename_idx)
             print(tex_df)
 
             # Create a copy for formatting with bold best values
             tex_df_formatted = tex_df.copy()
 
-            # Define which columns to bold and whether higher or lower is better
+            # Helper to get section for an alias
+            def get_section(alias):
+                alias_lower = alias.lower()
+                if 'base' in alias_lower:
+                    return 'base'
+                elif 'lazy' in alias_lower:
+                    return 'lazy'
+                elif 'ortools' in alias_lower:
+                    return 'ortools'
+                return 'other'
+
+            # Define which columns to bold/italic and whether higher or lower is better
             bold_cols = {
                 'solv': 'max',
                 'feas': 'max',
                 'post': 'max',
                 't_solv_p2': 'min',
-                'cons+cuts_num': 'min',
             }
 
             for col, best in bold_cols.items():
                 if col in tex_df_formatted.columns:
-                    if best == 'max':
-                        best_val = tex_df_formatted[col].max()
-                    else:
-                        best_val = tex_df_formatted[col].min()
+                    # Global best
+                    global_best = tex_df_formatted[col].max() if best == 'max' else tex_df_formatted[col].min()
 
-                    # Format column: bold the best value(s)
-                    def format_val(x, best_val=best_val, col=col):
+                    # Section bests
+                    section_bests = {}
+                    for idx in tex_df_formatted.index:
+                        section = get_section(idx)
+                        section_df = tex_df_formatted[[get_section(i) == section for i in tex_df_formatted.index]]
+                        section_bests[idx] = section_df[col].max() if best == 'max' else section_df[col].min()
+
+                    # Format column: bold global best, italic section best
+                    formatted_col = []
+                    for idx in tex_df_formatted.index:
+                        x = tex_df_formatted.loc[idx, col]
                         if pd.isna(x):
-                            return ""
-                        if col in ['solv', 'feas', 'post']:
-                            formatted = f"{x:.0f}"
-                        elif col == 'cons+cuts_num':
-                            formatted = f"{x/1000:.1f}"  # Show in thousands
+                            formatted_col.append("")
                         else:
-                            formatted = f"{x:.1f}"
-                        if x == best_val:
-                            return f"\\textbf{{{formatted}}}"
-                        return formatted
-
-                    tex_df_formatted[col] = tex_df_formatted[col].apply(format_val)
+                            if col in ['solv', 'feas', 'post']:
+                                formatted = f"{x:.0f}"
+                            else:
+                                formatted = f"{x:.1f}"
+                            if x == global_best:
+                                formatted_col.append(f"\\textbf{{{formatted}}}")
+                            elif x == section_bests[idx]:
+                                formatted_col.append(f"\\underline{{{formatted}}}")
+                            else:
+                                formatted_col.append(formatted)
+                    tex_df_formatted[col] = formatted_col
 
             # Format other columns normally
             for col in tex_df_formatted.columns:
@@ -1353,19 +1383,39 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                         return f"{x:.1f}"
                     tex_df_formatted[col] = tex_df_formatted[col].apply(format_other)
 
-            # Create cons+cuts display column: "cons + cuts = total" in thousands with bold on total
-            # Don't show for ortools approach
-            def make_cons_cuts_str(row):
-                alias = row.name.lower()
-                if 'ortools' in alias:
-                    return ""
-                cons = tex_df.loc[row.name, 'cons']
-                cuts = tex_df.loc[row.name, 'cuts']
-                if pd.isna(cuts):
-                    return f"{cons/1000:.1f}"
-                total_formatted = row['cons+cuts_num']  # Already formatted with bold if best
-                return f"{cons/1000:.1f} + {cuts/1000:.1f} = {total_formatted}"
-            tex_df_formatted['cons+cuts'] = tex_df_formatted.apply(make_cons_cuts_str, axis=1)
+            # Format cons and cuts columns (in thousands, empty for ortools)
+            for col in ['cons', 'cuts']:
+                def format_cons_cuts(x, alias, col=col):
+                    if 'ortools' in alias.lower():
+                        return ""
+                    if pd.isna(x):
+                        return ""
+                    return f"{x/1000:.1f}"
+                tex_df_formatted[col] = [format_cons_cuts(tex_df.loc[idx, col], idx) for idx in tex_df.index]
+
+            # Sort by approach type (base first, then lazy, then ortools)
+            def get_approach_order(alias):
+                alias_lower = alias.lower()
+                match alias_lower:
+                    case s if 'base' in s:
+                        return (0, alias)
+                    case s if 'lazy' in s:
+                        return (1, alias)
+                    case s if 'ortools' in s:
+                        return (2, alias)
+                    case _:
+                        return (3, alias)
+            tex_df_formatted = tex_df_formatted.iloc[sorted(range(len(tex_df_formatted)),
+                                                           key=lambda i: get_approach_order(tex_df_formatted.index[i]))]
+
+            # Track approach boundaries for hlines
+            approach_boundaries = []
+            prev_approach = None
+            for i, alias in enumerate(tex_df_formatted.index):
+                curr_approach = get_approach_order(alias)[0]
+                if prev_approach is not None and curr_approach != prev_approach:
+                    approach_boundaries.append(i)
+                prev_approach = curr_approach
 
             # Escape underscores in alias names for LaTeX
             tex_df_formatted.index = tex_df_formatted.index.map(lambda x: x.replace('_', r'\_'))
@@ -1375,27 +1425,35 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 [
                     *(["unk", "mem", "post"]),
                     *(["feas"] if is_cop else []),
-                    *(["solv", "t_solv_p2", "cons+cuts"])
+                    *(["solv", "t_solv_p2", "cons", "cuts"])
                 ]
             ].to_latex(
                 na_rep="",
                 header=[
                     *(["\\unk", "\\mem", "\\pst"]),
                     *(["\\sat"] if is_cop else []),
-                    *(["\\sol", "time [s]", "cons + cuts [k]"]),
+                    *(["\\sol", "time [s]", "cons [k]", "cuts [k]"]),
                 ],
                 escape=False,  # Don't escape so \textbf works
                 index_names=False,
             )
 
-            # Extract just the tabular environment (remove table wrapper if present)
+            # Extract just the tabular environment and insert hlines between approach groups
             lines = tabular_output.split('\n')
             tabular_lines = []
             in_tabular = False
+            data_row_idx = -1  # Start at -1 to skip the header row
             for line in lines:
                 if '\\begin{tabular}' in line:
                     in_tabular = True
                 if in_tabular:
+                    # Check if this is a data row (contains & and ends with \\)
+                    is_data_row = '&' in line and line.rstrip().endswith('\\\\')
+                    if is_data_row:
+                        # Insert hline before this row if it's at an approach boundary
+                        if data_row_idx in approach_boundaries:
+                            tabular_lines.append('\\hline')
+                        data_row_idx += 1
                     tabular_lines.append(line)
                 if '\\end{tabular}' in line:
                     in_tabular = False
@@ -1412,12 +1470,20 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 elif 'ortools' in alias.lower():
                     solv_values['ortools'] = int(tex_df.loc[alias, 'solv'])
 
+            # Calculate table metadata statistics (per unique instance)
+            unique_instances = groups.drop_duplicates(subset=['problem', 'instance'])
+            metadata_stats = {
+                'mean_rows': unique_instances['rows'].median(),
+                'stdev_rows': unique_instances['rows'].std(),
+            }
+
             # Collect subtable info for combined output
             track_subtables.append({
                 'track': track,
                 'n_instances': n_instances,
                 'tabular': tabular_content,
                 'solv_values': solv_values,
+                'metadata': metadata_stats,
             })
 
         # Determine which plots to generate and show
@@ -1451,7 +1517,6 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 save_plot(fig_cactus, plot, f"cactus-{track}")
 
         # Generate scatter plot(s) if --compare option is provided
-        fig_scatters = []
         aliases = sorted(groups["alias"].unique())
         if compare is not None:
             # Find baseline solver
@@ -1528,7 +1593,11 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         for i, subtable in enumerate(track_subtables):
             combined_lines.append(r'    \begin{subtable}{\textwidth}')
             combined_lines.append(r'        \centering')
-            combined_lines.append(f"        \\caption{{{subtable['n_instances']} {subtable['track']} instances}}")
+            meta = subtable.get('metadata', {})
+            mean_rows = meta.get('mean_rows', 0)
+            stdev_rows = meta.get('stdev_rows', 0)
+            caption = f"{subtable['n_instances']} {subtable['track']} instances (mean rows: {mean_rows:,.0f}, stdev: {stdev_rows:,.0f})"
+            combined_lines.append(f"        \\caption{{{caption}}}")
             combined_lines.append(f"        \\label{{tbl:res:{subtable['track'].lower()}}}")
             # Indent the tabular content
             for line in subtable['tabular'].split('\n'):
