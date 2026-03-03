@@ -1295,9 +1295,15 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 feas=('feasible', 'sum'),
                 solv=('solved', 'sum'),
                 t_solv_p2=('time_solve_p2', 'mean'),
-                cuts=('cuts', 'mean'),
-                cb_rel=('cb_rel', 'mean'),
             )
+            # Calculate cons and cuts only for solved instances
+            solved_groups = groups[groups['solved']].groupby('alias').agg(
+                cons=('constraints', 'meae'),
+                cuts=('cuts', 'mean'),
+            )
+            tex_df = tex_df.join(solved_groups)
+            # Create combined cons+cuts column (numeric for comparison, string for display)
+            tex_df['cons+cuts_num'] = tex_df['cons'] + tex_df['cuts']
             # tex_df = tex_df.rename(index=rename_idx)
             print(tex_df)
 
@@ -1310,7 +1316,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 'feas': 'max',
                 'post': 'max',
                 't_solv_p2': 'min',
-                'cuts': 'min',
+                'cons+cuts_num': 'min',
             }
 
             for col, best in bold_cols.items():
@@ -1324,8 +1330,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     def format_val(x, best_val=best_val, col=col):
                         if pd.isna(x):
                             return ""
-                        if col in ['solv', 'feas']:
+                        if col in ['solv', 'feas', 'post']:
                             formatted = f"{x:.0f}"
+                        elif col == 'cons+cuts_num':
+                            formatted = f"{x/1000:.1f}"  # Show in thousands
                         else:
                             formatted = f"{x:.1f}"
                         if x == best_val:
@@ -1345,6 +1353,20 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                         return f"{x:.1f}"
                     tex_df_formatted[col] = tex_df_formatted[col].apply(format_other)
 
+            # Create cons+cuts display column: "cons + cuts = total" in thousands with bold on total
+            # Don't show for ortools approach
+            def make_cons_cuts_str(row):
+                alias = row.name.lower()
+                if 'ortools' in alias:
+                    return ""
+                cons = tex_df.loc[row.name, 'cons']
+                cuts = tex_df.loc[row.name, 'cuts']
+                if pd.isna(cuts):
+                    return f"{cons/1000:.1f}"
+                total_formatted = row['cons+cuts_num']  # Already formatted with bold if best
+                return f"{cons/1000:.1f} + {cuts/1000:.1f} = {total_formatted}"
+            tex_df_formatted['cons+cuts'] = tex_df_formatted.apply(make_cons_cuts_str, axis=1)
+
             # Escape underscores in alias names for LaTeX
             tex_df_formatted.index = tex_df_formatted.index.map(lambda x: x.replace('_', r'\_'))
 
@@ -1353,14 +1375,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 [
                     *(["unk", "mem", "post"]),
                     *(["feas"] if is_cop else []),
-                    *(["solv", "t_solv_p2", "cuts", "cb_rel"])
+                    *(["solv", "t_solv_p2", "cons+cuts"])
                 ]
             ].to_latex(
                 na_rep="",
                 header=[
                     *(["\\unk", "\\mem", "\\pst"]),
                     *(["\\sat"] if is_cop else []),
-                    *(["\\sol", "time [s]", "cuts", "CB [\\%]"]),
+                    *(["\\sol", "time [s]", "cons + cuts [k]"]),
                 ],
                 escape=False,  # Don't escape so \textbf works
                 index_names=False,
@@ -1522,7 +1544,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
         combined_output = '\n'.join(combined_lines)
 
-        with open(tex / "table-combined.tex", 'w') as f:
+        with open(tex / "tables.tex", 'w') as f:
             f.write(combined_output)
         print(f"Combined LaTeX table saved to {tex / 'table-combined.tex'}")
 
