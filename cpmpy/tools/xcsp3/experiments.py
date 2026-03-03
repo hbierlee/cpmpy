@@ -139,7 +139,15 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                         if encoding_ is Encoding.MDD
                         else [None]
                     )
-                    for order in (Order if encoding_ is Encoding.MDD else [None])
+                    for order in (
+                        [
+                            Order.INPUT,
+                            Order.DOM_INCR,
+                            Order.FIEDLER,
+                        ]
+                        if encoding_ is Encoding.MDD
+                        else [None]
+                    )
                     for hashtable in (
                         [
                             True,
