@@ -545,14 +545,7 @@ def with_constraints(model, with_alldiff=False, with_min=True):
 
 def get_envs():
 
-    debug_env = {
-        "verbosity": VERBOSITY,
-        "debug": 1,
-        "max_iterations": 5000,
-        "seed": 42,
-        "checked": CHECKED
-
-    }
+    debug_env = {"verbosity": VERBOSITY, "debug": 1, "max_iterations": 5000, "seed": 42, "checked": CHECKED}
 
     if False:
         yield {
@@ -628,10 +621,10 @@ class TestTables:
                 X_enc = X_enc[COLS]
 
             print(" ", np.array(X_enc))
-            
+
             if env["negatives"]:
                 n = len(A_enc) // 2
-                tbl = TableData(X_enc[:n], T_enc[:,:n], parts[:n], None, slv)
+                tbl = TableData(X_enc[:n], T_enc[:, :n], parts[:n], None, slv)
             else:
                 tbl = TableData(X_enc, T_enc, parts, None, slv)
             explanation = tbl.explain(A_enc, frm=frm)
@@ -994,7 +987,10 @@ FILTER_PRESETS = {
     "dev": [
         (
             "alias",
-            ("best","mdd-reduce-fiedler"),
+            (
+                "best",
+                # "mdd-reduce-fiedler",
+            ),
         )
     ],
     "all": [],
@@ -1180,7 +1176,6 @@ def benchmark_table_constraints(
             env["solver_kwargs"]["env"]["choices"] = [int(i) for i in choices] if choices is not None else None
         else:
             env["solver_kwargs"]["verbose"] = verbosity >= 1
-
 
         for name, model in test_cases:
             # TODO ?
@@ -1466,6 +1461,7 @@ if __name__ == "__main__":
     xcsp3_glob = None
     if args.xcsp3:
         import glob as glob_module
+
         pattern = f"2025/**/*{args.xcsp3}*.xml*"
         matches = sorted(glob_module.glob(pattern, recursive=True))
         if not matches:

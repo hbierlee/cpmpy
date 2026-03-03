@@ -400,9 +400,8 @@ class TableData:
 
                 # V <- {p(i)}
                 part = parts[choice]  # p(i)
-                choices = np.zeros(len(T_enc.T), dtype=bool)
-                choices[parts == part] = True  # only choose from current part
-                choices[choice] = False  # except for i
+                choices = np.ones(len(T_enc.T), dtype=bool)
+                choices[parts == part] = False  # DON'T choose from current part
 
                 # X <- {i}
                 X = np.zeros(len(T_enc.T), dtype=bool)
@@ -416,18 +415,10 @@ class TableData:
 
                 if self.solver.env["negatives"]:
                     if part > 0:
-                        choices[parts == -part] = True  # can also select neg. cols
-                        choices[choice + self.cols()] = False  # except the counterpart
+                        choices[parts == -part] = False  # also disable this part for negatives
                     else:
                         assert False
                         choices[choice - self.cols()] = False
-                    # assert is_pos
-
-                # # actually, the opposite part cannot be chosen?
-                # # also allowed to choose from opposite part
-                # choices[parts == -part] = True
-                # choices[choice - self.cols()] = False
-                # # X[-choice] = False  # TODO redundant
 
                 if self.env["example_frac"]:
                     assert_example(X, [2])
@@ -464,12 +455,22 @@ class TableData:
 
             part = parts[choice]
 
-            choice_parts = parts == part
+            choice_parts = parts == part  # l
             R = R & T_enc[:, choice]
+
+            if self.env["negatives"]:
+                if none(X[(parts == part) | (parts == -part)]):
+                    if self.env["verbosity"]:
+                        self.solver.log(f"new int {part}", verbosity=2)
+                    k += 1
+            else:
+                if self.env["verbosity"]:
+                    self.solver.log(f"new int {part}", verbosity=2)
+                k += 1
 
             # remove from choices
             if part > 0:  # pos choice
-                k += 1
+                # k += 1
                 # remove current and negative choice
                 choices[parts == -part] = False
                 choices[choice_parts] = False
@@ -478,8 +479,8 @@ class TableData:
                 X[choice_parts & A_enc_pos] = True
             else:
                 # if this is the first of the part
-                if not X[parts == part].any():
-                    k += 1
+                # if not X[parts == part].any():
+                # k += 1
 
                 # remove current and positive choice
                 choices[choice] = False
