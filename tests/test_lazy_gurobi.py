@@ -16,6 +16,7 @@ import sys
 import cpmpy as cp
 from cpmpy.expressions.utils import argvals
 from cpmpy.transformations.get_variables import get_variables, get_variables_model
+from cpmpy.expressions.variables import _IntVarImpl, _BoolVarImpl
 from cpmpy.tools.xcsp3 import read_xcsp3
 from cpmpy.expressions.utils import show_assignment, dom_size
 from cpmpy.solvers.lazy_gurobi import CPM_lazy_gurobi, normalize_table, Heuristic, Coverlift, TableData
@@ -69,7 +70,7 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
     def _generate():
         a, b = hardness
 
-        # yield ("stillife_bug", _load_xcsp3("2025/COP22to25/StillLife-05-05_c24.xml"))
+        # yield ("spotbug", _load_xcsp3("2025/COP22to25/Spot5-0054_c22.xml"))
         # # yield ("bug", _load_xcsp3("2025/COP22to25/DC-rijndael-xor5-d1-t0-r04-keysize7-plainsize4_c22.xml"))
         # yield ("bug", _load_xcsp3("2025/COP22to25/AircraftLanding-table-airland08_c22.xml"))
         # return
@@ -993,7 +994,7 @@ FILTER_PRESETS = {
     "dev": [
         (
             "alias",
-            ("negatives",),
+            ("best","mdd-reduce-fiedler"),
         )
     ],
     "all": [],
@@ -1177,11 +1178,17 @@ def benchmark_table_constraints(
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
             env["solver_kwargs"]["env"]["debug"] = debug
             env["solver_kwargs"]["env"]["choices"] = [int(i) for i in choices] if choices is not None else None
+        else:
+            env["solver_kwargs"]["verbose"] = verbosity >= 1
+
 
         for name, model in test_cases:
             # TODO ?
             for x in get_variables_model(model):
                 x._occurs = False
+
+            _BoolVarImpl.counter = 0  # don't try this at home
+            _IntVarImpl.counter = 0  # don't try this at home
 
             print(f"Running {name} with {env_alias}...")
             print(env)

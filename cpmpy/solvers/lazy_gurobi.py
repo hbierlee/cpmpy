@@ -768,7 +768,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         super().__init__(
             name="lazy_gurobi",
             cpm_model=cpm_model,
-            verbose=self.env["verbosity"] >= 4,
+            verbose=self.env["verbosity"] >= 1,
             short_channel=self.env["short_channel"],
             **kwargs,
         )
@@ -1394,6 +1394,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 return [cp.BoolVal(False)]
             assert len(set(X)) == len(X), f"Dup. int vars in table for {cpm_expr}"
 
+            # TODO maybe unneccesary to pass through TF?
             X_enc, T_enc, cons, parts = self.encode_table_constraint(X, T)
 
             if self.env["verbosity"]:
