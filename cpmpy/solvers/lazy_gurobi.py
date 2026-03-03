@@ -488,7 +488,8 @@ class TableData:
                 # if only one choice remains in this part, remove it too
                 remaining = np.flatnonzero(choices & choice_parts)
                 if len(remaining) == 1:
-                    solver.log("RM remaining")
+                    if self.env["verbosity"]:
+                        solver.log("RM remaining")
                     choices[remaining[0]] = False
                     choices[remaining[0] - self.cols()] = False
                     # TODO maybe add i/o X[choice] add X[remaining[0]]
