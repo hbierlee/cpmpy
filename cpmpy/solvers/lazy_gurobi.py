@@ -238,14 +238,15 @@ class TableData:
                 # )
 
                 # how many additional rows will be removed (high is good)
-                H = (~T_enc[np.ix_(R, choices)]).sum(0)
+                # H = (~T_enc[np.ix_(R, choices)]).sum(0)
+                H = T_enc[np.ix_(R, choices)].sum(0)  # number of 1's
                 if self.solver.env["verbosity"]:
                     self.solver.log("H", show_table(H), verbosity=2)
                 if self.solver.env["negatives"]:
                     densities = self.densities
                     B = densities[choices]
-                    HB = H + 1 * B  # lex obj since 0<B<1 (no constant cols)
-                    h = np.argmax(HB)
+                    HB = H - B  # lex obj since 0<B<1 (no constant cols)
+                    h = np.argmin(HB)
 
                     if self.solver.env["verbosity"]:
                         self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
