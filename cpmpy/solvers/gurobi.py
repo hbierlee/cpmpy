@@ -234,20 +234,12 @@ class CPM_gurobi(SolverInterface):
                     np.delete(T_enc, i)
                 offset += x_width
 
-        X_enc = []
-        cons = []
-        parts = []
-        for i, x in enumerate(X, start=1):
-            x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
-                self.ivarmap, x, "direct", csemap=self._csemap
-            )
-            expr, k = x_enc.encode_term()
-            # TODO if only BV, then need to assign (but no need to assign if decoding constraint present)
-            # Note: do not use self += [..] to avoid poluting user_vars (and transformation is not really necesary either)
-            cons += exactly_one_con
-            if x._occurs:
-                cons += [cp.sum(c * b for c, b in expr) - x == -k]
 
+        X_encs, cons = self.encode_table_expr(X)
+
+        X_enc = []
+        parts = []
+        for i, x_enc in enumerate(X_encs, start=1):
             xs = list(x_enc._xs)
             X_enc += xs
             parts += [i] * len(xs)
@@ -271,6 +263,11 @@ class CPM_gurobi(SolverInterface):
 
         return X_enc, T_enc, cons, parts
 
+    def encode_int_var(self, x):
+        x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(self.ivarmap, x, "direct", csemap=self._csemap)
+        return x_enc, exactly_one_con + (x_enc.encode_channelling_constraint(csemap=self._csemap) if x._occurs else [])
+
+
     def boolvar(self, name=None, **kwargs):
         """Wrap cp.boolvar with safe debug names if enabled"""
         if self.named and name is not None:
@@ -281,6 +278,17 @@ class CPM_gurobi(SolverInterface):
             return cp.boolvar(**kwargs)
 
     def encode_table_expr(self, X):
+        x_encs = []
+        cons = []
+        for i, x in enumerate(X, start=1):
+            x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(self.ivarmap, x, "direct", csemap=self._csemap)
+            x_encs.append(x_enc)
+            cons += exactly_one_con
+            if x._occurs:
+                cons += x_enc.encode_channelling_constraint(csemap=self._csemap)
+        return x_encs, cons
+
+
         cons = []
         for x in X:
             x_enc, exactly_one_con = cp.transformations.int2bool._encode_int_var(
@@ -734,8 +742,8 @@ class CPM_gurobi(SolverInterface):
                 raise Exception(f"TODO: {encoding}")
 
         if verbose:
-            self.encoding_path = pathlib.Path(f"/tmp/encoding_{name}.txt") if self.verbose else None
-            pathlib.Path(self.encoding_path).unlink(missing_ok=True)
+            self.encoding_path = pathlib.Path(f"/tmp/encoding_{name}.txt")
+            self.encoding_path.unlink(missing_ok=True)
         else:
             self.encoding_path = None
 
