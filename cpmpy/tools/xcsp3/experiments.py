@@ -44,7 +44,10 @@ DEFAULTS = [
             "track": track,
             "glob_instance": None,
         }
-        for track in ["CSP22to25", "COP22to25"]
+        for track in [
+            "CSP22to25",
+            "COP22to25",
+        ]
     ],
 ]
 
@@ -170,6 +173,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                     (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.FIEDLER, "reduce": True})
                     for alias, env in ablate(features, add_none=add_none, add_all=add_all)
                     + [("best", enable_all(features) | {"shrink": False})]
+                    + [("best_no_cutoff", enable_all(features) | {"shrink": False, "cutoff": 0})]
                 ]
             ],
         ],
