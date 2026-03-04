@@ -506,6 +506,7 @@ class TableData:
                 self.show_cut(X, k, verbosity=1)
                 self.solver.log("c ==", (choice_parts & A_enc_pos).sum(), verbosity=2)
                 solver.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
+                solver.log(f"V = {np.unique(parts[X])}")
                 solver.log(
                     f"chosen {'pos' if is_pos else 'neg'} col. {show_ind(choice)} of part {parts[choice]}",
                     verbosity=3,
@@ -1115,7 +1116,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def check_explanation(self, expr, X_enc, A_enc, T_enc, parts, frm):
 
-        if frm == "MIPSOL":
+        if frm == "MIPSOL" or True:
 
             def value(expr, value):
                 # TODO account for parts
@@ -1133,7 +1134,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
             for i, T_enc_i in enumerate(T_enc):
                 assert value(expr, {x_j: a_i_j for x_j, a_i_j in zip(X_enc, T_enc_i)}) is True, (
-                    f"Cut off row {show(i)} for case:\n\n{case}\n\n{show_table(T_enc_i)}"
+                        f"Cut off row {show(i)}\n\n{show_nz(T_enc[i,:])}\n{parts[T_enc[i,:]]}\n\n\nfor case:\n\n{case}\n\n{show_table(T_enc_i)}"
                 )
 
         if "cut" not in self.env["cuts"][-1]:
