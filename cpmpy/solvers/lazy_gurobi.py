@@ -1118,26 +1118,24 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
     def check_explanation(self, expr, X_enc, A_enc, T_enc, parts, frm):
 
-        if frm == "MIPSOL" or True:
+        def value(expr, value):
+            # TODO account for parts
+            if is_true_cst(expr):
+                return True
+            (expr,) = only_positive_bv([expr])
+            ws, xs, k = terms(expr)  # sum(ws*xs) <= k
+            lhs = sum(w * value[x] for w, x in zip(ws, xs))
+            return bool(self.is_le(lhs, k))  # np -> python bool
 
-            def value(expr, value):
-                # TODO account for parts
-                if is_true_cst(expr):
-                    return True
-                (expr,) = only_positive_bv([expr])
-                ws, xs, k = terms(expr)  # sum(ws*xs) <= k
-                lhs = sum(w * value[x] for w, x in zip(ws, xs))
-                return bool(self.is_le(lhs, k))  # np -> python bool
+        case = f"The explanation\n\n{expr}\n==\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
 
-            case = f"The explanation\n\n{expr}\n==\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
+        if not is_true_cst(expr):
+            assert value(expr, {x: x.value() for x in X_enc}) is False, f"Did not cut off assignment:\n\n{case}"
 
-            if not is_true_cst(expr):
-                assert value(expr, {x: x.value() for x in X_enc}) is False, f"Did not cut off assignment:\n\n{case}"
-
-            for i, T_enc_i in enumerate(T_enc):
-                assert value(expr, {x_j: a_i_j for x_j, a_i_j in zip(X_enc, T_enc_i)}) is True, (
-                        f"Cut off row {show(i)}\n\n{show_nz(T_enc[i,:])}\n{parts[T_enc[i,:]]}\n\n\nfor case:\n\n{case}\n\n{show_table(T_enc_i)}"
-                )
+        for i, T_enc_i in enumerate(T_enc):
+            assert value(expr, {x_j: a_i_j for x_j, a_i_j in zip(X_enc, T_enc_i)}) is True, (
+                f"Cut off row {show(i)}\n\n{show_nz(T_enc[i, :])}\n{parts[T_enc[i, :]]}\n\n\nfor case:\n\n{case}\n\n{show_table(T_enc_i)}"
+            )
 
         if "cut" not in self.env["cuts"][-1]:
             return
