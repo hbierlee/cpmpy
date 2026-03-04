@@ -250,15 +250,10 @@ class TableData:
                 if self.solver.env["negatives"]:
                     densities = self.densities
 
-                    # TOOD should be MEAN?
-                    B = np.add.reduceat(
-                        # get only the relevant rows and columns
-                        densities[choices],
-                        # for the columns of each part
-                        parts_,
-                        # # see if there is any 1 in the row
-                        # axis=1,
-                    )
+                    segment_lengths = np.diff(parts_, append=len(densities[choices]))
+                    B = np.add.reduceat(densities[choices], parts_) / segment_lengths
+                    if self.env["debug"]:
+                        assert ((0 < B) & (B < 1)).all()
 
                     HB = H - B  # lex obj since 0<B<1 (no constant cols)
 
