@@ -161,10 +161,21 @@ class TableData:
             # TODO !!
             # self.parts = np.concatenate([self.parts, self.parts])
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
-            self.parts = np.concatenate([self.parts, -self.parts], dtype=int) if self.parts.size else self.parts
+            # self.parts = np.concatenate([self.parts, -self.parts], dtype=int) if self.parts.size else self.parts
+            self.parts = (
+                np.concatenate([self.parts, np.arange(self.cols()) + self.parts.max() + 1], dtype=int)
+                if self.parts.size
+                else self.parts
+            )
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
             # TODO concat
             self.densities = self.T_enc.mean(axis=0)
+            self.part_counts = np.unique_counts(self.parts)
+            if self.parts.size:
+                self.part_count_lookup = np.zeros(self.parts.max() + 1, dtype=int)
+                self.part_count_lookup[self.part_counts.values] = self.part_counts.counts
+            else:
+                self.part_count_lookup = np.array([], dtype=int)
 
     @property
     def env(self):
@@ -199,6 +210,13 @@ class TableData:
         )
         self.solver.log(self.X_enc.value(), indent=2, verbosity=3)
 
+        if self.solver.env["negatives"]:
+            indices = np.flatnonzero(C_enc)
+            pos_indices = indices[indices < self.cols()]
+            neg_indices = indices[indices >= self.cols()] - self.cols()
+            duplicates = np.intersect1d(pos_indices, neg_indices)
+            assert len(duplicates) == 0, f"Both b_{show(duplicates)} and (1 - b_{show(duplicates)}) in cut"
+
     def choose(self, choices, R, A_enc, heuristic=Heuristic.GREEDY):
         T_enc = self.T_enc
         parts = self.parts
@@ -226,12 +244,9 @@ class TableData:
                     self.solver.log(show_table(T_enc[np.ix_(R, choices)]), "T_enc[R,choices]", verbosity=3)
                 # print(show_table(parts_), "parts_")
 
-                parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
-                if self.env["negatives"]:
-                    choice_parts = parts[choices & (parts > 0)]
-                    parts_ = np.add.accumulate(np.unique_counts(choice_parts).counts)
-                    parts_ = np.concatenate([parts_, np.arange((parts[choices] < 0).sum()) + parts_.max(initial=0) + 1])
-
+                choice_parts = parts[choices]
+                counts = np.unique_counts(choice_parts)
+                parts_ = np.add.accumulate(counts.counts)
                 parts_ -= parts_[0]
 
                 H = np.bitwise_or.reduceat(
@@ -239,7 +254,7 @@ class TableData:
                     T_enc[np.ix_(R, choices)],
                     # for the columns of each part
                     parts_,
-                    # see if there is any 1 in the row
+                    # see if there is any 1 in the col
                     axis=1,
                 ).sum(0)
 
@@ -250,11 +265,8 @@ class TableData:
                 if self.solver.env["negatives"]:
                     densities = self.densities
 
-                    segment_lengths = np.diff(parts_, append=len(densities[choices]))
-                    B = np.add.reduceat(densities[choices], parts_) / segment_lengths
-                    if self.env["debug"]:
-                        assert ((0 < B) & (B < 1)).all()
-
+                    B = 1 / (1 + self.part_count_lookup[counts.values])
+                    assert ((0 < B) & (B < 1)).all(), f"B values out of range: {B}"
                     HB = H - B  # lex obj since 0<B<1 (no constant cols)
 
                     h = np.argmin(HB)
@@ -263,8 +275,6 @@ class TableData:
                         self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
                         self.solver.log("H", H, verbosity=2)
                         self.solver.log("B", B, verbosity=2)
-                        self.solver.log("P", parts_, verbosity=2)
-                        self.solver.log("P", parts[parts_], verbosity=2)
                         self.solver.log("HB", HB, verbosity=2)
                         self.solver.log("C", show_nz(choices), verbosity=2)
                         self.solver.log("h", show(h), show_nz(choices), show(np.flatnonzero(choices)[h]), verbosity=2)
@@ -290,7 +300,7 @@ class TableData:
                     #     self.solver.log("B", B, verbosity=3)
 
                 else:
-                    h = np.argmax(H)
+                    h = np.argmin(H)
 
                     if self.solver.env["verbosity"]:
                         self.solver.log("H", H, verbosity=3)
@@ -349,10 +359,10 @@ class TableData:
             solver.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
             solver.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
 
-        if self.env["debug"]:
-            for p in np.unique(parts):
-                assert A_enc[parts == p].any(), f"Zero part {p} in {A_enc}, {parts}, {self.X_enc}"
-                assert solver.is_ge(A_enc[parts], 0.0).any(), A_enc
+        # if self.env["debug"]:
+        #     for p in np.unique(parts):
+        #         assert A_enc[parts == p].any(), f"Zero part {p} in {A_enc}, {parts}, {self.X_enc}"
+        #         assert solver.is_ge(A_enc[parts], 0.0).any(), A_enc
 
         self.env["cuts"].append({"from": frm})
 
@@ -391,7 +401,7 @@ class TableData:
 
                 # i = choice
                 choices = U & A_enc_pos
-                choices &= parts > 0
+                # choices &= parts > 0
                 if none(choices):
                     return True  # TODO allow neg. choices
                 choice = self.choose(choices, R, A_enc, heuristic=self.env["heuristic"])
@@ -419,10 +429,10 @@ class TableData:
                     solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
 
                 if self.solver.env["negatives"]:
-                    if part > 0:
-                        choices[parts == -part] = False  # also disable this part for negatives
+                    # Exclude the counterpart of the chosen column
+                    if choice < self.cols():
+                        choices[choice + self.cols()] = False
                     else:
-                        assert False
                         choices[choice - self.cols()] = False
 
                 if self.env["example_frac"]:
@@ -462,41 +472,20 @@ class TableData:
 
             choice_parts = parts == part  # l
 
+            choices[choice_parts] = False
+            added = choice_parts & A_enc_pos
 
-            # remove from choices
-            if part > 0:  # pos choice
-                # k += 1
-                # remove current and negative choice
-                choices[parts == -part] = False
-                choices[choice_parts] = False
-                if self.env["negatives"]:
-                    choices[choice + self.cols()] = False
-                added = choice_parts & A_enc_pos
-                k += 1
-                X[added] = True
-                R = R & T_enc[:, added].any(1)
-            else:
-                # if this is the first of the part
-                # if not X[parts == part].any():
-                # k += 1
+            if self.env["negatives"]:
+                if is_pos:
+                    choices[np.flatnonzero(choice_parts) + self.cols()] = False
+                else:
+                    choices[np.flatnonzero(choice_parts) - self.cols()] = False
 
-                # remove current and positive choice
-                choices[choice] = False
-                choices[choice - self.cols()] = False
-
-                # # if only one choice remains in this part, remove it too
-                # remaining = np.flatnonzero(choices & choice_parts)
-                # if len(remaining) == 1:
-                #     if self.env["verbosity"]:
-                #         solver.log("RM remaining")
-                #     choices[remaining[0]] = False
-                #     choices[remaining[0] - self.cols()] = False
-                #     # TODO maybe add i/o X[choice] add X[remaining[0]]
-
-                X[choice] = True
-                R = R & T_enc[:, choice]
-                k += 1
-
+            if self.env["debug"]:
+                assert is_pos or added.sum() == 1
+            k += 1
+            X[added] = True
+            R = R & T_enc[:, added].any(1)
             solver.check_max_iterations(iteration)
 
             if self.env["verbosity"]:
@@ -979,7 +968,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if self.env["verbosity"]:
                 self.log(f"EXPR  == {expr}", indent=2, verbosity=1)
                 self.log(show_table(X_enc[X]), indent=2, verbosity=3)
-                self.log(show_table(X_enc[X].value()), indent=2, verbosity=1)
+                self.log(show_table(X_enc[X].value()), indent=2, verbosity=2)
 
         if isinstance(expr, (bool, np.bool_)):
             expr = cp.BoolVal(expr)
@@ -1200,11 +1189,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 self.log(remaining, verbosity=3)
                 self.log(self.env["checker"], verbosity=4)
                 self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
-                self.log(expected_solutions, verbosity=3, indent=2)
+                self.log(expected_solutions, verbosity=4, indent=2)
                 self.log(f"ACTUAL ({len(actual_solutions)})", verbosity=2)
-                self.log(actual_solutions, verbosity=3, indent=2)
+                self.log(actual_solutions, verbosity=4, indent=2)
                 self.log(f"TO REMOVE ({len(remaining)})", verbosity=2)
-                self.log(remaining, verbosity=3)
+                self.log(remaining, verbosity=4)
 
             # assert repeated or strength
             assert strength or len(self.tables) > 1
@@ -1273,7 +1262,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 if self.env["verbosity"]:
                     self.log("SOLS", len(self.env["expected_solutions"]))
                     # self.log("NON_SOLS", len(self.env["remain"]), verbosity=2)
-                    self.log("TO REMOVE\n", self.env["remain"], verbosity=3)
+                    self.log("TO REMOVE\n", self.env["remain"], verbosity=4)
                 for iteration in itertools.count():
                     if time_limit is not None and time.time() - dt > time_limit:
                         raise TimeoutError
