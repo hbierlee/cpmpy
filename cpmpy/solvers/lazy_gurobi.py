@@ -230,7 +230,7 @@ class TableData:
                 if self.env["negatives"]:
                     choice_parts = parts[choices & (parts > 0)]
                     parts_ = np.add.accumulate(np.unique_counts(choice_parts).counts)
-                    parts_ = np.concatenate([parts_, np.arange((parts[choices] < 0).sum()) + parts_.max(initial=1)])
+                    parts_ = np.concatenate([parts_, np.arange((parts[choices] < 0).sum()) + parts_.max(initial=0) + 1])
 
                 parts_ -= parts_[0]
 
