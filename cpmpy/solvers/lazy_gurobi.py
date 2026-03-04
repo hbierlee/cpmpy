@@ -154,6 +154,7 @@ class TableData:
         self.parts = parts
         self.cpm_expr = cpm_expr
         self.solver = solver
+        self.pos = parts.max(initial=0)
 
         if self.env["negatives"]:
             self.T_enc = np.concatenate([self.T_enc, ~self.T_enc], axis=1, dtype=bool)
@@ -199,7 +200,8 @@ class TableData:
         terms = []
         for i, c in enumerate(C_enc):
             if c:
-                if self.solver.env["negatives"] and i >= self.cols():
+                if self.solver.env["negatives"] and not self.is_pos(self.parts[i]):
+                    # Negative column i maps to positive counterpart at i - cols
                     terms.append(f"{c} * (1 - b_{show(i - self.cols())})")
                 else:
                     terms.append(f"{c} * b_{show(i)}")
@@ -228,7 +230,10 @@ class TableData:
         # print(show_table(densities), "dens")
 
         if self.solver.env["verbosity"]:
-            self.solver.log(f"Choose from {show_nz(choices)} to allow remaining rows R=\n{show_nz(R)}", verbosity=3)
+            self.solver.log(
+                f"Choose from {show_nz(choices)} = {np.unique(parts[choices])} to allow remaining rows R=\n{show_nz(R)}",
+                verbosity=3,
+            )
             self.solver.log(show_table(T_enc[R, :]), "T_enc[R,:]", verbosity=3)
             self.solver.log("", parts, "parts", verbosity=3)
             self.solver.log("", show_table(A_enc), "A_enc", verbosity=3)
@@ -247,8 +252,8 @@ class TableData:
 
                 choice_parts = parts[choices]
                 counts = np.unique_counts(choice_parts)
-                parts_ = np.add.accumulate(counts.counts)
-                parts_ -= parts_[0]
+                # Segment start indices for reduceat: [0, count[0], count[0]+count[1], ...]
+                parts_ = np.concatenate([[0], counts.counts.cumsum()[:-1]])
 
                 H = np.bitwise_or.reduceat(
                     # get only the relevant rows and columns
@@ -307,7 +312,11 @@ class TableData:
                     if self.solver.env["verbosity"]:
                         self.solver.log("H", H, verbosity=3)
 
-                return np.flatnonzero(choices)[h]
+                expected_R = H[h]
+                # h is index into parts, map back to column index
+                # chosen_part = counts.values[h]
+                # return np.flatnonzero(choices & (parts == chosen_part))[0]
+                return counts.values[h], expected_R
 
             case Heuristic.REDUCE:
                 assert False
@@ -317,6 +326,23 @@ class TableData:
                 #     default=None,  # TODO [?] check this edge-case
                 # )
                 # return choice if choice is not None else self.solver.choose(A, T_enc, R, heuristic=Heuristic.GREEDY)
+
+    def is_pos(self, part):
+        return part < self.pos
+
+    def counterpart(self, part):
+        """Map part to its counterpart part(s).
+        Positive part -> multiple negative parts (one per column with that part)
+        Negative part -> single positive part
+        """
+        if self.is_pos(part):
+            # Find columns with this part, return their negative counterpart parts
+            cols_with_part = np.flatnonzero(self.parts[: self.cols()] == part)
+            return self.parts[cols_with_part + self.cols()]
+        else:
+            # Negative part is unique to one column, find its positive counterpart's part
+            neg_col_idx = part - self.pos  # 0-based index into negative half
+            return self.parts[neg_col_idx]
 
     def explain(self, A_enc, frm=None, is_integer=None):
         """The `explain_frac2` alg."""
@@ -406,7 +432,7 @@ class TableData:
                 # choices &= parts > 0
                 if none(choices):
                     return True  # TODO allow neg. choices
-                choice = self.choose(choices, R, A_enc, heuristic=self.env["heuristic"])
+                part, expected_R = self.choose(choices, R, A_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
@@ -416,18 +442,19 @@ class TableData:
                     choice = 2 - 1
 
                 # V <- {p(i)}
-                part = parts[choice]  # p(i)
                 choices = np.ones(len(T_enc.T), dtype=bool)
                 choices[parts == part] = False  # DON'T choose from current part
 
                 # X <- {i}
                 X = np.zeros(len(T_enc.T), dtype=bool)
+                choice = np.argmax(parts == part)
                 X[choice] = True
                 R = T_enc[:, choice]
+
                 k = 0
 
                 if self.env["verbosity"]:
-                    solver.log(f"intially chosen from U; {show(choice)}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"intially chosen from U; {show(part)}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
 
                 if self.solver.env["negatives"]:
@@ -462,15 +489,14 @@ class TableData:
             if none(R):
                 break
 
-            choice = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
-            if choice is None:
+            part, expected_R = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
+            if part is None:
+                assert False, "no part"
                 return True
 
-            assert choice is not None and not X[choice], choice
+            # assert choice is not None and not X[part], choice
 
-            is_pos = choice < self.cols()
-
-            part = parts[choice]
+            is_pos = self.is_pos(part)
 
             choice_parts = parts == part  # l
 
@@ -487,7 +513,10 @@ class TableData:
                 assert is_pos or added.sum() == 1
             k += 1
             X[added] = True
+            if self.env["debug"]:
+                R_ = R.sum()
             R = R & T_enc[:, added].any(1)
+
             solver.check_max_iterations(iteration)
 
             if self.env["verbosity"]:
@@ -496,18 +525,21 @@ class TableData:
                 solver.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
                 solver.log(f"V = {np.unique(parts[X])}")
                 solver.log(
-                    f"chosen {'pos' if is_pos else 'neg'} col. {show_ind(choice)} of part {parts[choice]}",
+                    f"chosen {'pos' if self.is_pos(part) else 'neg'} part {part}",
                     verbosity=3,
                     indent=solver.indent + 2,
                 )
+                solver.log(f"added {show_nz(added)}", verbosity=3, indent=solver.indent + 2)
                 solver.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
                 if F.any():
                     solver.log("FRAC", frm, verbosity=2, indent=solver.indent + 2)
-                solver.log(
-                    f"R choice = {'+' if is_pos else '-'}b_{show(choice)} -> ({R.sum()})", verbosity=2, indent=solver.indent + 2
-                )
-                solver.log(f"R = {show_nz(R)}", verbosity=3, indent=solver.indent + 3)
+                solver.log(f"R ({R.sum()}) ({expected_R})", verbosity=1, indent=solver.indent + 3)
+                solver.log(f"  = {show_nz(R)} ", verbosity=3, indent=solver.indent + 3)
                 solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
+
+            if self.env["debug"]:
+                assert R.sum() < R_
+                assert R.sum() == expected_R, f"{R.sum()} {expected_R}"
 
         C_enc = np.zeros(len(X), dtype=int)
         C_enc[X] = 1
@@ -1113,7 +1145,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             lhs = sum(w * value[x] for w, x in zip(ws, xs))
             return bool(self.is_le(lhs, k))  # np -> python bool
 
-        case = f"The explanation\n\n{expr}\n==\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_table(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
+        case = f"The explanation\n\n{expr}\n==\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_nz(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
 
         if not is_true_cst(expr):
             assert value(expr, {x: x.value() for x in X_enc}) is False, f"Did not cut off assignment:\n\n{case}"

@@ -665,6 +665,43 @@ class TestTables:
         assert len(set(c.args[0])) == len(c.args[0])
         assert c.args[1] == [[2, 3], [3, 3]]
 
+    def test_counterpart_parts(self, env):
+        """Test that counterpart_parts correctly maps parts to their counterparts."""
+
+        # Create a mock table with parts [1,1,1,2,2,2,3,4] for 8 columns
+        T_enc = np.eye(8, dtype=bool)
+        parts = np.array([1, 1, 1, 2, 2, 2, 3, 4])
+        X_enc = cp.boolvar(shape=8, name="x")
+
+        class MockSolver:
+            env = {"negatives": True}
+
+        tbl = cp.solvers.lazy_gurobi.TableData(X_enc, T_enc, parts, True, MockSolver())
+
+        # After negatives extension:
+        # - Positive parts: [1,1,1,2,2,2,3,4] (columns 0-7)
+        # - Negative parts: [5,6,7,8,9,10,11,12] (columns 8-15, each unique)
+
+        # Positive part 1 (columns 0,1,2) -> negative parts 5,6,7
+        counterparts = tbl.counterpart(1)
+        assert (counterparts == [5, 6, 7]).all(), f"Expected [5,6,7], got {counterparts}"
+
+        # Positive part 2 (columns 3,4,5) -> negative parts 8,9,10
+        counterparts = tbl.counterpart(2)
+        assert (counterparts == [8, 9, 10]).all(), f"Expected [8,9,10], got {counterparts}"
+
+        # Positive part 3 (column 6) -> negative part 11
+        counterparts = tbl.counterpart(3)
+        assert (counterparts == [11]).all(), f"Expected [11], got {counterparts}"
+
+        # Negative part 5 (column 8) -> positive part 1 (column 0's part)
+        counterpart = tbl.counterpart(5)
+        assert counterpart == 1, f"Expected 1, got {counterpart}"
+
+        # Negative part 8 (column 11) -> positive part 2 (column 3's part)
+        counterpart = tbl.counterpart(8)
+        assert counterpart == 2, f"Expected 2, got {counterpart}"
+
     #
     # 0100 100 100
     # 0010 010 010
@@ -988,7 +1025,7 @@ FILTER_PRESETS = {
         (
             "alias",
             (
-                "best",
+                "best_no_cutoff",
                 # "mdd-reduce-fiedler",
             ),
         )
@@ -1172,7 +1209,7 @@ def benchmark_table_constraints(
             env["solver_kwargs"]["env"]["verbosity"] = verbosity
             env["solver_kwargs"]["env"]["checked"] = checked
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
-            env["solver_kwargs"]["env"]["debug"] = debug
+            env["solver_kwargs"]["env"]["debug"] = checked
             env["solver_kwargs"]["env"]["choices"] = [int(i) for i in choices] if choices is not None else None
         else:
             env["solver_kwargs"]["verbose"] = verbosity >= 1
@@ -1442,6 +1479,13 @@ if __name__ == "__main__":
         help="Fix choices",
     )
     parser.add_argument(
+        "--debug",
+        "-d",
+        action="store_true",
+        default=False,
+        help="Enable debug mode with extra assertions",
+    )
+    parser.add_argument(
         "--time-limit",
         "-t",
         type=int,
@@ -1485,6 +1529,7 @@ if __name__ == "__main__":
     print(f"  Max iterations: {args.max_iterations}")
     print(f"  Track memory: {args.track_memory}")
     print(f"  Checked: {args.checked}")
+    print(f"  Debug: {args.debug}")
     print(f"  Time limit: {args.time_limit}")
     if args.glob:
         print(f"  Glob: {args.glob}")
@@ -1499,6 +1544,7 @@ if __name__ == "__main__":
         max_iterations=args.max_iterations,
         track_memory=args.track_memory,
         checked=args.checked if args.checked else None,
+        debug=args.debug if args.debug else None,
         time_limit=args.time_limit,
         choices=args.choices,
         xcsp3_path=xcsp3_glob,

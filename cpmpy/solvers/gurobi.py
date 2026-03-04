@@ -253,8 +253,8 @@ class CPM_gurobi(SolverInterface):
             if polarity:
                 cons += [x >= 1 for x in X_enc[cols]]
                 # cols |= parts == parts[cols]
-                for p in np.unique(parts[cols]):
-                    cols |= (parts == p)
+                # for p in np.unique(parts[cols]):
+                #     cols |= (parts == p)
             else:
                 cons += [x <= 0 for x in X_enc[cols]]
             T_enc = T_enc[:, ~cols]
