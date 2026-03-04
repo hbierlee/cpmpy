@@ -192,6 +192,7 @@ class TableData:
         return cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
     def show_cut(self, X, k, C_enc=None, frm=None, verbosity=2):
+        assert self.env["verbosity"]
         if C_enc is None:
             C_enc = X.astype(int)
 
@@ -266,7 +267,8 @@ class TableData:
                     densities = self.densities
 
                     B = 1 / (1 + self.part_count_lookup[counts.values])
-                    assert ((0 < B) & (B < 1)).all(), f"B values out of range: {B}"
+                    if self.env["debug"]:
+                        assert ((0 < B) & (B < 1)).all(), f"B values out of range: {B}"
                     HB = H - B  # lex obj since 0<B<1 (no constant cols)
 
                     h = np.argmin(HB)
