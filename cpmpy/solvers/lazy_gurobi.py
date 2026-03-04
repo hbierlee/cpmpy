@@ -221,25 +221,31 @@ class TableData:
             case Heuristic.INPUT:
                 return np.argmax(choices)
             case Heuristic.GREEDY:
-                # parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
-                # parts_ -= parts_[0]
                 # map back to the right part index
                 if self.solver.env["verbosity"]:
                     self.solver.log(show_table(T_enc[np.ix_(R, choices)]), "T_enc[R,choices]", verbosity=3)
                 # print(show_table(parts_), "parts_")
 
-                # heur = np.bitwise_or.reduceat(
-                #     # get only the relevant rows and columns
-                #     T_enc[np.ix_(R, choices)],
-                #     # for the columns of each part
-                #     parts_,
-                #     # see if there is any 1 in the row
-                #     axis=1,
-                # )
+                parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
 
-                # how many additional rows will be removed (high is good)
-                # H = (~T_enc[np.ix_(R, choices)]).sum(0)
-                H = T_enc[np.ix_(R, choices)].sum(0)  # number of 1's
+                # if self.env["negatives"]:
+                #     parts_ = np.add.accumulate(np.unique_counts(parts[choices & (parts > 0)]).counts)
+                #     # print('pp', parts_, np.arange(len(parts_)) + len(parts_) + 1)
+                #     parts_ += np.concat(parts_, np.arange(len(parts_)) + len(parts_) + 1)
+
+                parts_ -= parts_[0]
+                # print(parts_)
+                H = np.bitwise_or.reduceat(
+                    # get only the relevant rows and columns
+                    T_enc[np.ix_(R, choices)],
+                    # for the columns of each part
+                    parts_,
+                    # see if there is any 1 in the row
+                    axis=1,
+                ).sum(0)
+
+                # how many rows will be kept (low is good)
+                # H = T_enc[np.ix_(R, choices)].sum(0)  # number of 1's
                 if self.solver.env["verbosity"]:
                     self.solver.log("H", show_table(H), verbosity=2)
                 if self.solver.env["negatives"]:
@@ -281,15 +287,6 @@ class TableData:
 
                     if self.solver.env["verbosity"]:
                         self.solver.log("H", H, verbosity=3)
-
-                # H = (
-                #     # sum the number of 0s for each choice (how mnay it will remove)
-                #     (~T_enc[np.ix_(R, choices)]).sum(0)
-                # )
-                # self.solver.log("H", H, verbosity=3)
-                # H = H * (densities[choices])
-                # self.solver.log("H", H, verbosity=3)
-                # h = H.argmax()
 
                 return np.flatnonzero(choices)[h]
 
