@@ -240,10 +240,10 @@ class TableData:
             self.solver.log("", choices.astype(int), "choices", verbosity=3)
 
         if none(choices):
-            return None
+            return None, None
         match heuristic:
             case Heuristic.INPUT:
-                return np.argmax(choices)
+                return np.argmax(choices), None
             case Heuristic.GREEDY:
                 # map back to the right part index
                 if self.solver.env["verbosity"]:
