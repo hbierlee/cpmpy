@@ -227,14 +227,13 @@ class TableData:
                 # print(show_table(parts_), "parts_")
 
                 parts_ = np.add.accumulate(np.unique_counts(parts[choices]).counts)
-
-                # if self.env["negatives"]:
-                #     parts_ = np.add.accumulate(np.unique_counts(parts[choices & (parts > 0)]).counts)
-                #     # print('pp', parts_, np.arange(len(parts_)) + len(parts_) + 1)
-                #     parts_ += np.concat(parts_, np.arange(len(parts_)) + len(parts_) + 1)
+                if self.env["negatives"]:
+                    choice_parts = parts[choices & (parts > 0)]
+                    parts_ = np.add.accumulate(np.unique_counts(choice_parts).counts)
+                    parts_ = np.concatenate([parts_, np.arange((parts[choices] < 0).sum()) + parts_.max() + 1])
 
                 parts_ -= parts_[0]
-                # print(parts_)
+
                 H = np.bitwise_or.reduceat(
                     # get only the relevant rows and columns
                     T_enc[np.ix_(R, choices)],
@@ -250,14 +249,27 @@ class TableData:
                     self.solver.log("H", show_table(H), verbosity=2)
                 if self.solver.env["negatives"]:
                     densities = self.densities
-                    B = densities[choices]
+
+                    # TOOD should be MEAN?
+                    B = np.add.reduceat(
+                        # get only the relevant rows and columns
+                        densities[choices],
+                        # for the columns of each part
+                        parts_,
+                        # # see if there is any 1 in the row
+                        # axis=1,
+                    )
+
                     HB = H - B  # lex obj since 0<B<1 (no constant cols)
+
                     h = np.argmin(HB)
 
                     if self.solver.env["verbosity"]:
                         self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
                         self.solver.log("H", H, verbosity=2)
                         self.solver.log("B", B, verbosity=2)
+                        self.solver.log("P", parts_, verbosity=2)
+                        self.solver.log("P", parts[parts_], verbosity=2)
                         self.solver.log("HB", HB, verbosity=2)
                         self.solver.log("C", show_nz(choices), verbosity=2)
                         self.solver.log("h", show(h), show_nz(choices), show(np.flatnonzero(choices)[h]), verbosity=2)
@@ -455,15 +467,6 @@ class TableData:
 
             choice_parts = parts == part  # l
 
-            if self.env["negatives"]:
-                if none(X[(parts == part) | (parts == -part)]):
-                    if self.env["verbosity"]:
-                        self.solver.log(f"new int {part}", verbosity=2)
-                    k += 1
-            else:
-                if self.env["verbosity"]:
-                    self.solver.log(f"new int {part}", verbosity=2)
-                k += 1
 
             # remove from choices
             if part > 0:  # pos choice
@@ -474,6 +477,7 @@ class TableData:
                 if self.env["negatives"]:
                     choices[choice + self.cols()] = False
                 added = choice_parts & A_enc_pos
+                k += 1
                 X[added] = True
                 R = R & T_enc[:, added].any(1)
             else:
@@ -485,17 +489,18 @@ class TableData:
                 choices[choice] = False
                 choices[choice - self.cols()] = False
 
-                # if only one choice remains in this part, remove it too
-                remaining = np.flatnonzero(choices & choice_parts)
-                if len(remaining) == 1:
-                    if self.env["verbosity"]:
-                        solver.log("RM remaining")
-                    choices[remaining[0]] = False
-                    choices[remaining[0] - self.cols()] = False
-                    # TODO maybe add i/o X[choice] add X[remaining[0]]
+                # # if only one choice remains in this part, remove it too
+                # remaining = np.flatnonzero(choices & choice_parts)
+                # if len(remaining) == 1:
+                #     if self.env["verbosity"]:
+                #         solver.log("RM remaining")
+                #     choices[remaining[0]] = False
+                #     choices[remaining[0] - self.cols()] = False
+                #     # TODO maybe add i/o X[choice] add X[remaining[0]]
 
                 X[choice] = True
                 R = R & T_enc[:, choice]
+                k += 1
 
             solver.check_max_iterations(iteration)
 
