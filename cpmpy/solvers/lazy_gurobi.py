@@ -457,7 +457,6 @@ class TableData:
             part = parts[choice]
 
             choice_parts = parts == part  # l
-            R = R & T_enc[:, choice]
 
             if self.env["negatives"]:
                 if none(X[(parts == part) | (parts == -part)]):
@@ -477,7 +476,9 @@ class TableData:
                 choices[choice_parts] = False
                 if self.env["negatives"]:
                     choices[choice + self.cols()] = False
-                X[choice_parts & A_enc_pos] = True
+                added = choice_parts & A_enc_pos
+                X[added] = True
+                R = R & T_enc[:, added].any(1)
             else:
                 # if this is the first of the part
                 # if not X[parts == part].any():
@@ -497,6 +498,7 @@ class TableData:
                     # TODO maybe add i/o X[choice] add X[remaining[0]]
 
                 X[choice] = True
+                R = R & T_enc[:, choice]
 
             solver.check_max_iterations(iteration)
 
