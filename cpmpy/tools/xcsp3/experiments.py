@@ -65,8 +65,8 @@ FEATURES = [
         "coverlift",
         (
             Coverlift.No,
-            Coverlift.INPUT,
-            Coverlift.COM_MIN,
+            # Coverlift.INPUT,
+            # Coverlift.COM_MIN,
             Coverlift.COM_MAX,
         ),
     ),
@@ -146,6 +146,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                         [
                             Order.INPUT,
                             Order.DOM_INCR,
+                            Order.DOM_DECR,
                             Order.FIEDLER,
                         ]
                         if encoding_ is Encoding.MDD
@@ -170,7 +171,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                 }
                 for solver in ["lazy_gurobi"]
                 for alias, solver_kwargs in [
-                    (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.FIEDLER, "reduce": True})
+                    (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.DOM_INCR, "reduce": True})
                     for alias, env in ablate(features, add_none=add_none, add_all=add_all)
                     + [("best", enable_all(features) | {})]
                     + [("best_no_cutoff", enable_all(features) | {})]
