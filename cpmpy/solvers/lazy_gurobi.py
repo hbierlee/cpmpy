@@ -190,6 +190,8 @@ class TableData:
         return (len(self.T_enc.T) // 2) if self.env["negatives"] else len(self.T_enc.T)
 
     def get_expr(self, X, C_enc, k):
+        if self.solver.env["negatives"]:
+            X, C_enc, k = self.revert_cut(X, C_enc, k)
         return cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
     def show_cut(self, X, k, C_enc=None, frm=None, verbosity=2):
@@ -200,11 +202,12 @@ class TableData:
         terms = []
         for i, c in enumerate(C_enc):
             if c:
-                if self.solver.env["negatives"] and not self.is_pos(self.parts[i]):
+                p = self.parts[i]
+                if self.solver.env["negatives"] and not self.is_pos(p):
                     # Negative column i maps to positive counterpart at i - cols
-                    terms.append(f"{c} * (1 - b_{show(i - self.cols())})")
+                    terms.append(f"{c} * (1 - b_{show(self.counterpart(p))}_{show(i)})")
                 else:
-                    terms.append(f"{c} * b_{show(i)}")
+                    terms.append(f"{c} * b_{p}_{show(i)}")
         cut_str = " + ".join(terms)
         self.solver.log(
             f"cut {frm if frm is not None else ''}== {cut_str} <= {k}",
@@ -212,29 +215,29 @@ class TableData:
             verbosity=verbosity,
         )
         self.solver.log(self.X_enc.value(), indent=2, verbosity=3)
+        self.solver.log(self.get_expr(X, C_enc, k), indent=2, verbosity=3)
+        # assert C_enc.sum() < 5
 
-        if self.solver.env["negatives"]:
-            indices = np.flatnonzero(C_enc)
-            pos_indices = indices[indices < self.cols()]
-            neg_indices = indices[indices >= self.cols()] - self.cols()
-            duplicates = np.intersect1d(pos_indices, neg_indices)
-            assert len(duplicates) == 0, f"Both b_{show(duplicates)} and (1 - b_{show(duplicates)}) in cut"
+        # if self.solver.env["negatives"]:
+        #     indices = np.flatnonzero(C_enc)
+        #     pos_indices = indices[indices < self.cols()]
+        #     neg_indices = indices[indices >= self.cols()] - self.cols()
+        #     duplicates = np.intersect1d(pos_indices, neg_indices)
+        #     assert len(duplicates) == 0, f"Both b_{show(duplicates)} and (1 - b_{show(duplicates)}) in cut"
 
     def choose(self, choices, R, A_enc, heuristic=Heuristic.GREEDY):
         T_enc = self.T_enc
         parts = self.parts
-
-        # if R.sum() <= self.env["negatives"]:
-        #     choices[: (len(T_enc.T) // 2)] = False
-
-        # print(show_table(densities), "dens")
 
         if self.solver.env["verbosity"]:
             self.solver.log(
                 f"Choose from {show_nz(choices)} = {np.unique(parts[choices])} to allow remaining rows R=\n{show_nz(R)}",
                 verbosity=3,
             )
-            self.solver.log(show_table(T_enc[R, :]), "T_enc[R,:]", verbosity=3)
+            # self.solver.log(self.cpm_expr)
+            self.solver.log(
+                show_table(T_enc[np.ix_(R, choices)], full=self.env["verbosity"] >= 4), "T_enc[R,choices]", verbosity=3
+            )
             self.solver.log("", parts, "parts", verbosity=3)
             self.solver.log("", show_table(A_enc), "A_enc", verbosity=3)
             self.solver.log("", choices.astype(int), "choices", verbosity=3)
@@ -246,8 +249,6 @@ class TableData:
                 return np.argmax(choices), None
             case Heuristic.GREEDY:
                 # map back to the right part index
-                if self.solver.env["verbosity"]:
-                    self.solver.log(show_table(T_enc[np.ix_(R, choices)]), "T_enc[R,choices]", verbosity=3)
                 # print(show_table(parts_), "parts_")
 
                 choice_parts = parts[choices]
@@ -266,8 +267,6 @@ class TableData:
 
                 # how many rows will be kept (low is good)
                 # H = T_enc[np.ix_(R, choices)].sum(0)  # number of 1's
-                if self.solver.env["verbosity"]:
-                    self.solver.log("H", show_table(H), verbosity=2)
                 if self.solver.env["negatives"]:
                     densities = self.densities
 
@@ -279,12 +278,15 @@ class TableData:
                     h = np.argmin(HB)
 
                     if self.solver.env["verbosity"]:
-                        self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
-                        self.solver.log("H", H, verbosity=2)
+                        # self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
+                        self.solver.log(f"H {R.sum()} ->", H, verbosity=2)
                         self.solver.log("B", B, verbosity=2)
                         self.solver.log("HB", HB, verbosity=2)
                         self.solver.log("C", show_nz(choices), verbosity=2)
-                        self.solver.log("h", show(h), show_nz(choices), show(np.flatnonzero(choices)[h]), verbosity=2)
+                        self.solver.log("h", show(h))
+
+                    if self.env["debug"]:
+                        assert H.min() < R.sum()
 
                     # if self.solver._vary():
                     #     # log(a) / (2^(C-1) * (1 - d))  == log₂(a) - (C-1) - log₂(1 - d)
@@ -383,7 +385,7 @@ class TableData:
 
         if self.env["verbosity"]:
             solver.log(f"Explain frm={frm}/is_integer={is_integer}", end="\n", verbosity=1)
-            solver.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc, "A_enc", verbosity=3, indent=0)
+            solver.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else show_nz(self.solver.is_gt(A_enc, 0.0)), "A_enc", verbosity=3, indent=0)
             solver.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
             solver.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
 
@@ -429,9 +431,6 @@ class TableData:
 
                 # i = choice
                 choices = U & A_enc_pos
-                # choices &= parts > 0
-                if none(choices):
-                    return True  # TODO allow neg. choices
                 part, expected_R = self.choose(choices, R, A_enc, heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
@@ -459,10 +458,8 @@ class TableData:
 
                 if self.solver.env["negatives"]:
                     # Exclude the counterpart of the chosen column
-                    if choice < self.cols():
-                        choices[choice + self.cols()] = False
-                    else:
-                        choices[choice - self.cols()] = False
+                    if self.is_pos(part):
+                        choices[self.counterpart(part)] = False
 
                 if self.env["example_frac"]:
                     assert_example(X, [2])
@@ -504,13 +501,9 @@ class TableData:
             added = choice_parts & A_enc_pos
 
             if self.env["negatives"]:
-                if is_pos:
-                    choices[np.flatnonzero(choice_parts) + self.cols()] = False
-                else:
-                    choices[np.flatnonzero(choice_parts) - self.cols()] = False
+                if self.is_pos(part):
+                    choices[self.counterpart(part)] = False
 
-            if self.env["debug"]:
-                assert is_pos or added.sum() == 1
             k += 1
             X[added] = True
             if self.env["debug"]:
@@ -538,8 +531,8 @@ class TableData:
                 solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
 
             if self.env["debug"]:
-                assert R.sum() < R_
                 assert R.sum() == expected_R, f"{R.sum()} {expected_R}"
+                assert R.sum() < R_
 
         C_enc = np.zeros(len(X), dtype=int)
         C_enc[X] = 1
