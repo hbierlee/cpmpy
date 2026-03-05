@@ -385,7 +385,13 @@ class TableData:
 
         if self.env["verbosity"]:
             solver.log(f"Explain frm={frm}/is_integer={is_integer}", end="\n", verbosity=1)
-            solver.log("", np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else show_nz(self.solver.is_gt(A_enc, 0.0)), "A_enc", verbosity=3, indent=0)
+            solver.log(
+                "",
+                np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else show_nz(self.solver.is_gt(A_enc, 0.0)),
+                "A_enc",
+                verbosity=3,
+                indent=0,
+            )
             solver.log(np.astype(T_enc, int), "T_enc", verbosity=3, indent=0)
             solver.log(f"p{np.astype(parts, int)}", "parts", verbosity=3, indent=0)
 
