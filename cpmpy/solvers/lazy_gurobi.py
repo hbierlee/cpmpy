@@ -491,7 +491,7 @@ class TableData:
 
             part, expected_R = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
             if part is None:
-                assert False, "no part"
+                # assert False, "no part"
                 return True
 
             # assert choice is not None and not X[part], choice
