@@ -194,7 +194,7 @@ class TableData:
             X, C_enc, k = self.revert_cut(X, C_enc, k)
         return cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
-    def show_cut(self, X, k, C_enc=None, frm=None, verbosity=2):
+    def show_cut(self, X, k, C_enc=None, frm=None, A_enc=None, verbosity=2, check=0):
         assert self.env["verbosity"]
         if C_enc is None:
             C_enc = X.astype(int)
@@ -215,8 +215,29 @@ class TableData:
             verbosity=verbosity,
         )
         self.solver.log(self.X_enc.value(), indent=2, verbosity=3)
-        self.solver.log(self.get_expr(X, C_enc, k), indent=2, verbosity=3)
+        expr = self.get_expr(X, C_enc, k)
+        self.solver.log(expr, indent=2, verbosity=3)
         # assert C_enc.sum() < 5
+
+        if check > 0:
+            # expr = self.solver.explanation_to_expr((X, C_enc, k), A_enc, self.X_enc, self.T_enc, frm)
+            expr = self.get_expr(X, C_enc, k)
+            if self.env["debug"] or self.env["checked"]:
+                # if self.solver.env["negatives"]:
+                #     X, C_enc, k = self.revert_cut(X, C_enc, k)
+                print("x", self.X_enc, self.X_enc[: self.cols()])
+                self.solver.check_explanation(
+                    expr,
+                    self.X_enc[: self.cols()],
+                    A_enc[: self.cols()],
+                    self.T_enc[:, : self.cols()],
+                    self.parts[: self.cols()],
+                    frm,
+                    check=check,
+                )
+
+        # if self.env["debug"] or self.env["checked"]:
+        #     self.solver.check_explanation(expr, self.X_enc, A_enc, self.T_enc, self.parts, frm)
 
         # if self.solver.env["negatives"]:
         #     indices = np.flatnonzero(C_enc)
@@ -231,7 +252,7 @@ class TableData:
 
         if self.solver.env["verbosity"]:
             self.solver.log(
-                f"Choose from {show_nz(choices)} = {np.unique(parts[choices])} to allow remaining rows R=\n{show_nz(R)}",
+                f"Choose from vars {show_nz(choices)} / parts {np.unique(parts[choices])} to allow remaining rows R=\n{show_nz(R)}",
                 verbosity=3,
             )
             # self.solver.log(self.cpm_expr)
@@ -433,6 +454,7 @@ class TableData:
                 return True
             else:
                 # TODO remove
+                cols = len(T_enc.T)
                 R = np.ones(m, dtype=bool)
 
                 # i = choice
@@ -447,25 +469,28 @@ class TableData:
                     choice = 2 - 1
 
                 # V <- {p(i)}
-                choices = np.ones(len(T_enc.T), dtype=bool)
+                choices = np.ones(cols, dtype=bool)
                 choices[parts == part] = False  # DON'T choose from current part
 
                 # X <- {i}
-                X = np.zeros(len(T_enc.T), dtype=bool)
                 choice = np.argmax(parts == part)
+                X = np.zeros(cols, dtype=bool)
                 X[choice] = True
+
+                # R <- T_i
                 R = T_enc[:, choice]
 
                 k = 0
 
                 if self.env["verbosity"]:
-                    solver.log(f"intially chosen from U; {show(part)}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"intially chosen from U; partition {part}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
+                    self.show_cut(X, k, A_enc=A_enc, verbosity=1, frm=frm, check=1)
 
-                if self.solver.env["negatives"]:
-                    # Exclude the counterpart of the chosen column
-                    if self.is_pos(part):
-                        choices[self.counterpart(part)] = False
+                # if self.solver.env["negatives"]:
+                #     # Exclude the counterpart of the chosen column
+                #     if self.is_pos(part):
+                #         choices[self.counterpart(part)] = False
 
                 if self.env["example_frac"]:
                     assert_example(X, [2])
@@ -506,9 +531,13 @@ class TableData:
             choices[choice_parts] = False
             added = choice_parts & A_enc_pos
 
-            if self.env["negatives"]:
-                if self.is_pos(part):
-                    choices[self.counterpart(part)] = False
+            # if self.env["negatives"]:
+            #     if self.is_pos(part):
+            #         print("PPP", part, self.counterpart(part))
+            #         choices[self.counterpart(part)] = False
+            #     else:
+            #         # TODO choices[added] = False
+            #         pass
 
             k += 1
             X[added] = True
@@ -519,7 +548,7 @@ class TableData:
             solver.check_max_iterations(iteration)
 
             if self.env["verbosity"]:
-                self.show_cut(X, k, verbosity=1)
+                self.show_cut(X, k, A_enc=A_enc, verbosity=1, frm=frm, check=1)
                 self.solver.log("c ==", (choice_parts & A_enc_pos).sum(), verbosity=2)
                 solver.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
                 solver.log(f"V = {np.unique(parts[X])}")
@@ -547,7 +576,7 @@ class TableData:
             solver.log(f"by explanation of size ({sum(X)})", verbosity=2)
             solver.log(show_nz(X), verbosity=3)
             solver.log("C_enc", C_enc, verbosity=3)
-            self.show_cut(X, k, C_enc=C_enc, verbosity=1)
+            self.show_cut(X, k, C_enc=C_enc, A_enc=A_enc, verbosity=1, frm=frm)
 
         if self.env["shrink"]:
             C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
@@ -565,10 +594,10 @@ class TableData:
                 add = X.sum() - Xl
                 solver.log("coverlift added ", add, "of", Xl, verbosity=2)
                 if add:
-                    self.show_cut(X, k, C_enc=C_enc, frm=frm)
+                    self.show_cut(X, k, C_enc=C_enc, frm=frm, A_enc=A_enc)
 
         if self.env["verbosity"]:
-            self.show_cut(X, k, C_enc=C_enc, frm=frm, verbosity=1)
+            self.show_cut(X, k, C_enc=C_enc, frm=frm, A_enc=A_enc, verbosity=1)
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -577,6 +606,10 @@ class TableData:
     def revert_cut(self, S, C_enc, k):
         if self.solver.env["negatives"]:
             n = len(S) // 2
+            # if self.env["debug"]:
+            #     duplicates = np.flatnonzero(S[:n] & S[n:])
+            #     self.show_cut(S, C_enc, k)
+            #     assert len(duplicates) == 0, f"Both b_{duplicates} and (1 - b_{duplicates}) in cut"
             return S[:n] | S[n:], C_enc[:n] - C_enc[n:], k - sum(C_enc[n:])
         else:
             return S, C_enc, k
@@ -715,7 +748,7 @@ class TableData:
 
             assert X[j], f"{show(j)} not chosen in {X}"
             if self.env["verbosity"]:
-                self.show_cut(S, k, C_enc=C_enc)
+                self.show_cut(S, k, C_enc=C_enc, A_enc=A_enc)
 
         return S, C_enc, k
 
@@ -1133,7 +1166,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             sorted=True,
         )[1]
 
-    def check_explanation(self, expr, X_enc, A_enc, T_enc, parts, frm):
+    def check_explanation(self, expr, X_enc, A_enc, T_enc, parts, frm, check=0):
 
         def value(expr, value):
             # TODO account for parts
@@ -1146,13 +1179,15 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         case = f"The explanation\n\n{expr}\n==\n\n from assignment {frm}\n\n{show_assignment(X_enc)}\n\nfor A_enc:\n\n{show_nz(A_enc)}\n\n for tables:\n\n{show_table(T_enc)}\n\n  "
 
-        if not is_true_cst(expr):
-            assert value(expr, {x: x.value() for x in X_enc}) is False, f"Did not cut off assignment:\n\n{case}"
+        if check >= 1:
+            if not is_true_cst(expr):
+                assert value(expr, {x: x.value() for x in X_enc}) is False, f"Did not cut off assignment:\n\n{case}"
 
-        for i, T_enc_i in enumerate(T_enc):
-            assert value(expr, {x_j: a_i_j for x_j, a_i_j in zip(X_enc, T_enc_i)}) is True, (
-                f"Cut off row {show(i)}\n\n{show_nz(T_enc[i, :])}\n{parts[T_enc[i, :]]}\n\n\nfor case:\n\n{case}\n\n{show_table(T_enc_i)}"
-            )
+        if check >= 2:
+            for i, T_enc_i in enumerate(T_enc):
+                assert value(expr, {x_j: a_i_j for x_j, a_i_j in zip(X_enc, T_enc_i)}) is True, (
+                    f"Cut off row {show(i)}\n\n{show_nz(T_enc[i, :])}\n{parts[T_enc[i, :]]}\n\n\nfor case:\n\n{case}\n\n{show_table(T_enc_i)}"
+                )
 
         if "cut" not in self.env["cuts"][-1]:
             return
