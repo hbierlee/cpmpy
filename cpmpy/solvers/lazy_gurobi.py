@@ -409,8 +409,8 @@ class TableData:
             solver.log(f"Explain frm={frm}/is_integer={is_integer}", end="\n", verbosity=1)
             solver.log(
                 "",
-                np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else show_nz(self.solver.is_gt(A_enc, 0.0)),
-                "A_enc",
+                np.astype(A_enc > 0.5, int) if frm == "MIPSOL" else A_enc,
+                "A_enc ",
                 verbosity=3,
                 indent=0,
             )
@@ -460,7 +460,8 @@ class TableData:
 
                 # i = choice
                 choices = U & A_enc_pos
-                part, expected_R = self.choose(choices, R, A_enc, parts=np.arange(cols), heuristic=self.env["heuristic"])
+                choice, expected_R = self.choose(choices, R, A_enc, parts=np.arange(cols), heuristic=self.env["heuristic"])
+                part = parts[choice]
                 choice_parts = parts == part
 
                 if self.env["example_frac"]:
@@ -476,7 +477,6 @@ class TableData:
 
                 # X <- {i}
                 X = np.zeros(cols, dtype=bool)
-                choice = np.argmax(choice_parts & A_enc_pos)
                 X[choice] = True
 
                 # R <- T_i
@@ -485,7 +485,11 @@ class TableData:
                 k = 0
 
                 if self.env["verbosity"]:
-                    solver.log(f"intially chosen from U; partition {part} -> choice {choice}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(
+                        f"intially chosen from U; partition {part} -> choice {show(choice)}",
+                        verbosity=3,
+                        indent=solver.indent + 2,
+                    )
                     solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"V = {np.unique(parts[X])}")
@@ -571,7 +575,7 @@ class TableData:
 
             if self.env["debug"]:
                 assert R.sum() == expected_R, f"{R.sum()} {expected_R}"
-                assert R.sum() < R_
+                assert R.sum() < R_, f"Did not reduce rows, curr={R.sum()}, prev={R_}"
 
         C_enc = np.zeros(len(X), dtype=int)
         C_enc[X] = 1
