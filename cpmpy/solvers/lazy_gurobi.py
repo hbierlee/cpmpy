@@ -232,10 +232,9 @@ class TableData:
                     check=check,
                 )
 
-    def choose(self, choices, R, A_enc, heuristic=Heuristic.GREEDY, parts=None):
+    def choose(self, choices, R, A_enc, single_choice=False, heuristic=Heuristic.GREEDY):
         T_enc = self.T_enc
-        if parts is None:
-            parts = self.parts
+        parts = self.parts
 
         if self.solver.env["verbosity"]:
             self.solver.log(
@@ -255,19 +254,24 @@ class TableData:
             case Heuristic.INPUT:
                 return np.argmax(choices), None
             case Heuristic.GREEDY:
-                # map back to the right part index
-                # print(show_table(parts_), "parts_")
+                if not single_choice or self.env["negatives"]:
+                    choice_parts = parts[choices]
+                    counts = np.unique_counts(choice_parts)
 
-                choice_parts = parts[choices]
-                counts = np.unique_counts(choice_parts)
-                # Segment start indices for reduceat: [0, count[0], count[0]+count[1], ...]
-                parts_ = np.concatenate([[0], counts.counts.cumsum()[:-1]])
+                if single_choice:
+                    reindex = np.flatnonzero(choices)
+                    indices = np.arange(len(reindex))
+                else:
+                    # Segment start indices for reduceat: [0, count[0], count[0]+count[1], ...]
+                    indices = counts.counts.cumsum()
+                    indices = np.concatenate([[0], indices[:-1]])
+                    reindex = counts.values
 
                 H = np.bitwise_or.reduceat(
                     # get only the relevant rows and columns
                     T_enc[np.ix_(R, choices)],
                     # for the columns of each part
-                    parts_,
+                    indices,
                     # see if there is any 1 in the col
                     axis=1,
                 ).sum(0)
@@ -281,6 +285,9 @@ class TableData:
                     if self.env["debug"]:
                         assert ((0 < B) & (B < 1)).all(), f"B values out of range: {B}"
                     HB = H - B  # lex obj since 0<B<1 (no constant cols)
+
+                    # TODO try!
+                    # HB = H
 
                     h = np.argmin(HB)
 
@@ -325,7 +332,7 @@ class TableData:
                 # h is index into parts, map back to column index
                 # chosen_part = counts.values[h]
                 # return np.flatnonzero(choices & (parts == chosen_part))[0]
-                return counts.values[h], expected_R
+                return reindex[h], expected_R
 
             case Heuristic.REDUCE:
                 assert False
@@ -445,7 +452,7 @@ class TableData:
 
                 # i = choice
                 choices = U & A_enc_pos
-                choice, expected_R = self.choose(choices, R, A_enc, parts=np.arange(cols), heuristic=self.env["heuristic"])
+                choice, expected_R = self.choose(choices, R, A_enc, single_choice=True, heuristic=self.env["heuristic"])
                 part = parts[choice]
                 choice_parts = parts == part
 
@@ -510,9 +517,9 @@ class TableData:
             if none(R):
                 break
 
-            part, expected_R = self.choose(choices & A_enc_pos, R, A_enc, parts=parts, heuristic=self.env["heuristic"])
+            part, expected_R = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
             if part is None:
-                # assert False, "no part"
+                assert False, "no part"
                 return True
 
             # assert choice is not None and not X[part], choice
