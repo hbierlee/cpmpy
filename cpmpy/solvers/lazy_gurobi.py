@@ -461,6 +461,7 @@ class TableData:
                 # i = choice
                 choices = U & A_enc_pos
                 part, expected_R = self.choose(choices, R, A_enc, parts=np.arange(cols), heuristic=self.env["heuristic"])
+                choice_parts = parts == part
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
@@ -471,11 +472,11 @@ class TableData:
 
                 # V <- {p(i)}
                 choices = np.ones(cols, dtype=bool)
-                choices[parts == part] = False  # DON'T choose from current part
+                choices[choice_parts] = False  # DON'T choose from current part
 
                 # X <- {i}
                 X = np.zeros(cols, dtype=bool)
-                choice = np.argmax(parts == part & A_enc_pos)
+                choice = np.argmax(choice_parts & A_enc_pos)
                 X[choice] = True
 
                 # R <- T_i
@@ -484,8 +485,10 @@ class TableData:
                 k = 0
 
                 if self.env["verbosity"]:
-                    solver.log(f"intially chosen from U; partition {part}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"intially chosen from U; partition {part} -> choice {choice}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
+                    solver.log(f"V = {np.unique(parts[X])}")
                     self.show_cut(X, k, A_enc=A_enc, verbosity=1, frm=frm, check=1)
 
                 # if self.solver.env["negatives"]:
@@ -518,7 +521,7 @@ class TableData:
             if none(R):
                 break
 
-            part, expected_R = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
+            part, expected_R = self.choose(choices & A_enc_pos, R, A_enc, parts=parts, heuristic=self.env["heuristic"])
             if part is None:
                 # assert False, "no part"
                 return True
