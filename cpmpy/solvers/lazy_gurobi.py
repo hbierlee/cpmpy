@@ -246,9 +246,10 @@ class TableData:
         #     duplicates = np.intersect1d(pos_indices, neg_indices)
         #     assert len(duplicates) == 0, f"Both b_{show(duplicates)} and (1 - b_{show(duplicates)}) in cut"
 
-    def choose(self, choices, R, A_enc, heuristic=Heuristic.GREEDY):
+    def choose(self, choices, R, A_enc, heuristic=Heuristic.GREEDY, parts=None):
         T_enc = self.T_enc
-        parts = self.parts
+        if parts is None:
+            parts = self.parts
 
         if self.solver.env["verbosity"]:
             self.solver.log(
@@ -459,7 +460,7 @@ class TableData:
 
                 # i = choice
                 choices = U & A_enc_pos
-                part, expected_R = self.choose(choices, R, A_enc, heuristic=self.env["heuristic"])
+                part, expected_R = self.choose(choices, R, A_enc, parts=np.arange(cols), heuristic=self.env["heuristic"])
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
