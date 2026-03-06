@@ -474,8 +474,8 @@ class TableData:
                 choices[parts == part] = False  # DON'T choose from current part
 
                 # X <- {i}
-                choice = np.argmax(parts == part)
                 X = np.zeros(cols, dtype=bool)
+                choice = np.argmax(parts == part & A_enc_pos)
                 X[choice] = True
 
                 # R <- T_i
