@@ -96,6 +96,8 @@ class Order(Feature):
     DOM_INCR = "dom-incr"
     DOM_DECR = "dom-decr"
     FIEDLER = "fiedler"
+    GREEDY = "greedy"
+    BIDIRECTIONAL = "bidirectional"
 
 
 def trivial_decomposition(arr, tab):
@@ -150,6 +152,75 @@ def spectral_order_edges(arr):
     column_order = np.argsort(-score)
 
     return list(column_order)
+
+
+def add_column(full_table, table, col):
+    if table.size == 0:
+        return full_table[:,col][:,None]
+    else:
+        return np.column_stack((table, full_table[:,col]))
+
+def greedy_ordering(arr):
+    n_cols = arr.shape[1]
+    if n_cols == 1:
+        return [0]
+    remaining_cols = list(range(n_cols))
+    existing_table = np.array([])
+    column_order = []
+    while len(remaining_cols) > 0:
+        partitions_dict = {}
+        for col in remaining_cols:
+            partitions_dict[col] = np.unique(add_column(arr, existing_table, col), axis=0).shape[0]
+        best_col = min(partitions_dict, key=partitions_dict.get)
+        if partitions_dict[best_col] == arr.shape[0]:
+            column_order.extend(remaining_cols)
+            break
+        column_order.append(best_col)
+        remaining_cols.remove(best_col)
+        existing_table = add_column(arr, existing_table, best_col)
+    return column_order
+
+
+def bidirectional_ordering(arr):
+    n_cols = arr.shape[1]
+    if n_cols == 1:
+        return [0]
+    remaining_cols = list(range(n_cols))
+    existing_table_left = np.array([])
+    existing_table_right = np.array([])
+    column_order_left = []
+    column_order_right = []
+
+    left_break = False
+    right_break = False
+
+    while len(remaining_cols) > 1 and not (left_break and right_break):
+        if not left_break:
+            partitions_dict = {}
+            for col in remaining_cols:
+                partitions_dict[col] = np.unique(add_column(arr, existing_table_left, col), axis=0).shape[0]
+            best_col = min(partitions_dict, key=partitions_dict.get)
+            if partitions_dict[best_col] == arr.shape[0]:
+                left_break = True
+            else:
+                column_order_left.append(best_col)
+                remaining_cols.remove(best_col)
+                existing_table_left = add_column(arr, existing_table_left, best_col)
+
+        if not right_break:
+            partitions_dict = {}
+            for col in remaining_cols:
+                partitions_dict[col] = np.unique(add_column(arr, existing_table_right, col), axis=0).shape[0]
+
+            best_col = min(partitions_dict, key=partitions_dict.get)
+            if partitions_dict[best_col] == arr.shape[0]:
+                right_break = True
+            else:
+                column_order_right.insert(0, best_col)
+                remaining_cols.remove(best_col)
+                existing_table_right = add_column(arr, existing_table_right, best_col)
+
+    return column_order_left + remaining_cols + column_order_right
 
 
 try:
@@ -303,7 +374,7 @@ class CPM_gurobi(SolverInterface):
         return [self.ivarmap[x.name] for x in X], cons
 
     def __init__(self, name="gurobi", cpm_model=None, subsolver=None, verbose=False, encoding=Encoding.CPMPY,
-                 reduce=False, order=Order.INPUT, hashtable=True, named=False, output_stats=False, short_channel=False, encode_obj=False,
+                 reduce=False, order=Order.INPUT, combined=False, named=False, output_stats=False, short_channel=False, encode_obj=False,
                  **kwargs):
         """
         Constructor of the native solver object
@@ -410,8 +481,9 @@ class CPM_gurobi(SolverInterface):
                     def __repr__(self):
                         return f"Prefix(node_id={self.prefix})"
 
-                    def __init__(self, prefix):
+                    def __init__(self, prefix, counter=1):
                         self.prefix = prefix
+                        self.counter = counter
 
 
 
@@ -419,13 +491,16 @@ class CPM_gurobi(SolverInterface):
                         if not isinstance(other, Prefix):
                             return False
                         else:
-                            return self.prefix == other.prefix
+                            return self.prefix == other.prefix and self.counter == other.counter
 
                     def __hash__(self):
                         return hash((self.prefix))
 
                     def __deepcopy__(self):
                         return Prefix(self.prefix)
+
+                    def incr(self):
+                        return Prefix(self.prefix, self.counter+1)
 
 
                 class MDD_node:
@@ -535,40 +610,39 @@ class CPM_gurobi(SolverInterface):
 
                     temp = None
 
-                    if hashtable:
-                        key = MDD_node_key(G)
-                        lookups = mdd.MDD_cache_reverse.get(key, set())
+                    key = MDD_node_key(G)
+                    lookups = mdd.MDD_cache_reverse.get(key, set())
 
-                        for lookup in lookups:
-                            if lookup.prefix in mdd.repeated_keys:
-                                return Prefix(lookup.prefix).__deepcopy__()
-                            else:
-                                temp = lookup.prefix
 
-                        if temp is not None:
-                            mdd.repeated_keys.add(temp)
-                            return Prefix(temp).__deepcopy__()
+                    for lookup in lookups:
+                        if lookup.prefix in mdd.repeated_keys:
+                            return Prefix(lookup.prefix).__deepcopy__()
+                        else:
+                            temp = lookup.prefix
 
-                    else:
-                        for (G_key, G_elem) in mdd.MDD_cache.items():
-                            if G_key.prefix != mdd_node.prefix:
-                                if G_elem == G:
-                                    if G_elem.prefix in mdd.repeated_keys:
-                                        return Prefix(G_elem.prefix).__deepcopy__()
-                                    else:
-                                        temp = G_elem.prefix
+                    if temp is not None:
+                        mdd.repeated_keys.add(temp)
+                        return Prefix(temp).__deepcopy__()
 
-                        if temp is not None:
-                            mdd.repeated_keys.add(temp)
-                            return Prefix(temp).__deepcopy__()
 
                     mdd.MDD_cache[Prefix(mdd_node.prefix)] = G
 
+                    if combined:
+                        key = MDD_node_key(G)
+                        mdd.MDD_cache_reverse[key].add(Prefix(mdd_node.prefix))
+
                     return Prefix(mdd_node.prefix)
 
-                def add_row_to_mdd(row, mdd_node, mdd, level=0):
+                def add_row_to_mdd(row, mdd_node, mdd, level=0, new_val=False):
                     mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
                     tuple_key = Prefix(tuple(row[:level]))
+
+                    if combined:
+                        if mdd_node.prefix in mdd.repeated_keys:
+                            prev_node = mdd.MDD_cache[tuple_key].deepcopy()
+                            mdd.MDD_cache[tuple_key] = prev_node
+                            mdd.MDD_cache_reverse[prev_node].append(tuple_key)
+                            tuple_key = tuple_key.incr()
 
                     if level == len(row):
                         return TerminatingState.SNK
@@ -576,13 +650,26 @@ class CPM_gurobi(SolverInterface):
                     value = row[level]
 
                     if value not in mdd_node.transition:
+
                         mdd_node.transition[value] = add_row_to_mdd(row,
                                                                     MDD_node(tuple(row[:(level + 1)]), level + 1, {}),
-                                                                    mdd, level + 1)
+                                                                    mdd, level + 1, new_val=True)
+
+                        if reduce and combined:
+                            if not new_val:
+                                for key in mdd_node.transition:
+                                    if key < value:
+                                        reduced_mdd = reduce_mdd(mdd_node.transition[key], mdd, level + 1)
+                                        mdd_node.transition[key] = reduced_mdd
 
                     else:
                         mdd_node.transition[value] = add_row_to_mdd(row, mdd_node.transition[value], mdd, level + 1)
+
+
                     mdd.MDD_cache[tuple_key] = mdd_node
+                    if combined:
+                        key = MDD_node_key(mdd_node)
+                        mdd.MDD_cache_reverse[key].add(tuple_key)
                     return tuple_key
 
                 def construct_mdd(table):
@@ -597,11 +684,10 @@ class CPM_gurobi(SolverInterface):
                         row = table[i]
                         mdd_node = add_row_to_mdd(row, mdd_node, mdd, 0)
 
-                    if reduce:
-                        if hashtable:
-                            for lookup, node in mdd.MDD_cache.items():
-                                key = MDD_node_key(node)
-                                mdd.MDD_cache_reverse[key].add(lookup)
+                    if reduce and not combined:
+                        for lookup, node in mdd.MDD_cache.items():
+                            key = MDD_node_key(node)
+                            mdd.MDD_cache_reverse[key].add(lookup)
                         mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
                         for key in mdd_node.transition.keys():
                             reduced_mdd = reduce_mdd(mdd_node.transition[key], mdd, 1)
@@ -681,7 +767,9 @@ class CPM_gurobi(SolverInterface):
                             (k for k in flow if k not in excluded),
                             key=lambda k: len(k.prefix)
                     ):
-                        if (len(flow[key].flow_in) == 1 and len(flow[key].flow_out) == 1
+                        if (len(flow[key].flow_in) == 0) or (len(flow[key].flow_out) == 0):
+                            continue
+                        elif (len(flow[key].flow_in) == 1 and len(flow[key].flow_out) == 1
                                 and column_counter[flow[key].flow_in[0][0]] > 1 and column_counter[
                                     flow[key].flow_out[0][0]] > 1):
                             substitution[flow[key].flow_out[0]] = substitution[flow[key].flow_in[0]]
@@ -718,15 +806,20 @@ class CPM_gurobi(SolverInterface):
                             ordering = np.argsort([-dom_size(x) for x in X])
                         case Order.FIEDLER:
                             ordering = np.array(spectral_order_edges(Tb))
+                        case Order.GREEDY:
+                            ordering = np.array(greedy_ordering(Tb))
+                        case Order.BIDIRECTIONAL:
+                            ordering = np.array(bidirectional_ordering(Tb))
                         case _:
                             raise ValueError(order)
 
                     reordered_Tb = Tb[:, ordering]
 
-                    # sorted_T = reordered_Tb[np.lexsort(reordered_Tb.T[::-1])]
-                    # mdd_cache = construct_mdd(sorted_T)
-
-                    mdd_cache = construct_mdd(reordered_Tb)
+                    if combined:
+                        sorted_T = reordered_Tb[np.lexsort(reordered_Tb.T[::-1])]
+                        mdd_cache = construct_mdd(sorted_T)
+                    else:
+                        mdd_cache = construct_mdd(reordered_Tb)
 
                     X_reordered = [X[i] for i in ordering]
 
