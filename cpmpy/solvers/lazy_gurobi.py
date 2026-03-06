@@ -220,12 +220,8 @@ class TableData:
         # assert C_enc.sum() < 5
 
         if check > 0:
-            # expr = self.solver.explanation_to_expr((X, C_enc, k), A_enc, self.X_enc, self.T_enc, frm)
             expr = self.get_expr(X, C_enc, k)
             if self.env["debug"] or self.env["checked"]:
-                # if self.solver.env["negatives"]:
-                #     X, C_enc, k = self.revert_cut(X, C_enc, k)
-                print("x", self.X_enc, self.X_enc[: self.cols()])
                 self.solver.check_explanation(
                     expr,
                     self.X_enc[: self.cols()],
@@ -235,16 +231,6 @@ class TableData:
                     frm,
                     check=check,
                 )
-
-        # if self.env["debug"] or self.env["checked"]:
-        #     self.solver.check_explanation(expr, self.X_enc, A_enc, self.T_enc, self.parts, frm)
-
-        # if self.solver.env["negatives"]:
-        #     indices = np.flatnonzero(C_enc)
-        #     pos_indices = indices[indices < self.cols()]
-        #     neg_indices = indices[indices >= self.cols()] - self.cols()
-        #     duplicates = np.intersect1d(pos_indices, neg_indices)
-        #     assert len(duplicates) == 0, f"Both b_{show(duplicates)} and (1 - b_{show(duplicates)}) in cut"
 
     def choose(self, choices, R, A_enc, heuristic=Heuristic.GREEDY, parts=None):
         T_enc = self.T_enc
@@ -260,9 +246,8 @@ class TableData:
             self.solver.log(
                 show_table(T_enc[np.ix_(R, choices)], full=self.env["verbosity"] >= 4), "T_enc[R,choices]", verbosity=3
             )
-            self.solver.log("", parts, "parts", verbosity=3)
-            self.solver.log("", show_table(A_enc), "A_enc", verbosity=3)
-            self.solver.log("", choices.astype(int), "choices", verbosity=3)
+            self.solver.log("", parts[choices], "parts[choices]", verbosity=3)
+            self.solver.log("", show_table(A_enc[choices]), "A_enc[choices]", verbosity=3)
 
         if none(choices):
             return None, None
