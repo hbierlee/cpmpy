@@ -549,6 +549,8 @@ class CPM_gurobi(SolverInterface):
 
                         return new_node
 
+                    __hash__ = object.__hash__
+
 
                 class MDD_node_key:
 
@@ -638,11 +640,13 @@ class CPM_gurobi(SolverInterface):
                     tuple_key = Prefix(tuple(row[:level]))
 
                     if combined:
-                        if mdd_node.prefix in mdd.repeated_keys:
-                            prev_node = mdd.MDD_cache[tuple_key].deepcopy()
-                            mdd.MDD_cache[tuple_key] = prev_node
-                            mdd.MDD_cache_reverse[prev_node].append(tuple_key)
-                            tuple_key = tuple_key.incr()
+                        if isinstance(mdd_node, MDD_node):
+                            if mdd_node.prefix in mdd.repeated_keys:
+                                prev_node = mdd.MDD_cache[tuple_key].deepcopy()
+                                mdd.MDD_cache[tuple_key] = prev_node
+                                key = MDD_node_key(prev_node)
+                                mdd.MDD_cache_reverse[key].add(tuple_key)
+                                tuple_key = tuple_key.incr()
 
                     if level == len(row):
                         return TerminatingState.SNK
