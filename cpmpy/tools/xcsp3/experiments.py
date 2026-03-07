@@ -118,7 +118,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                     "solver": CPM_gurobi,
                     "alias": f"base_gurobi-{encoding}"
                     + (
-                        f"-{f'reduce' if reduce else 'noreduce'}-{order}-{f'hashtable' if hashtable else 'nohashtable'}"
+                        f"-{f'reduce' if reduce else 'noreduce'}-{order}-{f'combined' if combined else 'nocombined'}"
                         if encoding is Encoding.MDD
                         else ""
                     ),
@@ -126,18 +126,18 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                         "encoding": encoding,
                         "reduce": reduce,
                         "order": order,
-                        "hashtable": hashtable,
+                        "combined" : combined,
                         "output_stats": True,
                     },
                     "solve_kwargs": {"Seed": SEED},
                 }
-                for encoding, reduce, order, hashtable in [
-                    (encoding_, reduce, order, hashtable)
+                for encoding, reduce, order, combined in [
+                    (encoding_, reduce, order, combined)
                     for encoding_ in [Encoding.GLEB, Encoding.BOOL, Encoding.MDD]
                     for reduce in (
                         [
                             True,
-                            # False,
+                            False,
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
@@ -146,20 +146,22 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                         [
                             Order.INPUT,
                             Order.DOM_INCR,
-                            Order.DOM_DECR,
-                            Order.FIEDLER,
+                            Order.GREEDY,
+                            Order.BIDIRECTIONAL
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
                     )
-                    for hashtable in (
+
+                    for combined in (
                         [
                             True,
-                            # False,
+                            False
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
                     )
+
                 ]
             ],
             *[
