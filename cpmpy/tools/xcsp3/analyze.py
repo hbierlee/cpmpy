@@ -307,8 +307,8 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
             marker=problem_markers[problem],
             label=f"{problem} ({n_instances})",
             norm=LogNorm(
-                vmin=inst_metric_range[0] if inst_metric_range else inst_metrics.min(),
-                vmax=inst_metric_range[1] if inst_metric_range else inst_metrics.max(),
+                vmin=inst_metric_range[0] if paper else inst_metrics.min(),
+                vmax=inst_metric_range[1] if paper else inst_metrics.max(),
             ),
         )
         scatter_plots.append(scatter)
@@ -1052,8 +1052,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         if "rows" in groups_:
             groups_["rows"] = groups_["rows"].map(lambda x: f"{x:.1e}")
 
-        print(f"\n== {grouping_type} ==")
-        print(groups_)
+        if not paper:
+            print(f"\n== {grouping_type} ==")
+            print(groups_)
 
 
         if compare:
@@ -1082,7 +1083,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
             # Update baseline_data after filtering
             baseline_data = groups.xs(baseline, level='alias')[diff_cols]
-            print(baseline_data)
+            if not paper:
+                print(baseline_data)
 
             # Compute diff against baseline for each solver
             diff_ = groups.copy()
@@ -1094,8 +1096,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             # Drop the baseline itself from the diff
             diff_ = diff_.drop(index=baseline, level="alias", errors='ignore')
 
-            print(f"DIFF (relative to baseline {baseline})")
-            print(diff_)
+            if not paper:
+                print(f"DIFF (relative to baseline {baseline})")
+                print(diff_)
 
             # Compute correlations for each solver separately
             if grouping_type == "per_instance":
@@ -1107,9 +1110,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     raise ValueError(f"Metric '{metric}' not found in data. Available metrics: {diff_.columns.tolist()}")
                 time_cols = [metric]
 
-                # Select available columns
-                available_metadata = [col for col in METADATA_COLS if col in diff_.columns and col != 'method']
-                # available_metadata = ["rows"]
+                # Select available columns from groups (not diff_) since metadata is instance-level
+                # Map METADATA_COLS to actual column names (min/max renamed to min_/max_)
+                metadata_col_map = {'min': 'min_', 'max': 'max_'}
+                available_metadata = [
+                    metadata_col_map.get(col, col)
+                    for col in METADATA_COLS
+                    if metadata_col_map.get(col, col) in groups.columns and col != 'method'
+                ]
                 available_time = [col for col in time_cols if col in diff_.columns]
                 corr_cols = available_time + available_metadata
 
@@ -1151,8 +1159,18 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                             solvers_to_plot = []
 
                         for solver in sorted(solvers_to_plot):
-                            # Get data for this solver
-                            solver_data = track_diff.xs(solver, level='alias')
+                            # Get diff data (time metrics) for this solver
+                            solver_diff = track_diff.xs(solver, level='alias')
+                            # Get original data (metadata) from groups
+                            if track is not None:
+                                solver_orig = groups.xs(track, level='track').xs(solver, level='alias')
+                            else:
+                                solver_orig = groups.xs(solver, level='alias')
+                            # Combine: use original metadata values, diff for time metrics
+                            solver_data = solver_diff.copy()
+                            for meta_col in available_metadata:
+                                if meta_col in solver_orig.columns:
+                                    solver_data[meta_col] = solver_orig[meta_col]
 
                             # Compute correlation for this solver
                             correlation = solver_data[corr_cols].corr()
@@ -1164,6 +1182,28 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                             print(f"\n== Correlation Matrix for {solver} (diff vs baseline) ==")
                             with pd.option_context('display.float_format', '{:.6f}'.format):
                                 print(correlation_masked)
+
+                            # Show correlations with time metric, sorted by strength
+                            for time_col in time_cols:
+                                if time_col in correlation.columns:
+                                    time_corrs = correlation[time_col].drop(time_col).sort_values(key=abs, ascending=False)
+                                    print(f"\n== Correlations with {time_col} (sorted by |r|) ==")
+                                    print(time_corrs.to_string())
+
+                            # Multiple regression analysis
+                            try:
+                                import statsmodels.api as sm
+                                for time_col in time_cols:
+                                    reg_data = solver_data[available_metadata + [time_col]].dropna()
+                                    if len(reg_data) > len(available_metadata) + 1:  # Need more samples than predictors
+                                        X = reg_data[available_metadata]
+                                        y = reg_data[time_col]
+                                        X = sm.add_constant(X)
+                                        model = sm.OLS(y, X).fit()
+                                        print(f"\n== Multiple Regression: {time_col} ~ {' + '.join(available_metadata)} ==")
+                                        print(model.summary())
+                            except ImportError:
+                                print("(Install statsmodels for regression analysis: pip install statsmodels)")
 
                             # Create scatter plots with fitted lines for t_solv_p2 correlations
                             for time_col in time_cols:
@@ -1270,6 +1310,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
     # Compute global inst_metric range for consistent colorbar across plots (only solved instances)
     inst_metric_col = "rows"
+    # inst_metric_col = "median"
     solved_df = df[df['solved']]
     inst_metric_range = (solved_df[inst_metric_col].min(), solved_df[inst_metric_col].max())
 
@@ -1301,6 +1342,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 post=('post', 'sum'),
                 feas=('feasible', 'sum'),
                 solv=('solved', 'sum'),
+                t_post_p2=('time_post_p2', 'mean'),
                 t_solv_p2=('time_solve_p2', 'mean'),
             )
             # Calculate cons only for instances posted by all solvers
@@ -1311,11 +1353,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             cons_groups = posted_by_all.groupby('alias').agg(
                 cons=('constraints', 'mean'),
             )
-            # Calculate cuts only for solved instances
-            solved_groups = groups[groups['solved']].groupby('alias').agg(
-                cuts=('cuts', 'mean'),
-            )
-            tex_df = tex_df.join(cons_groups).join(solved_groups)
+
+            # # Calculate cuts only for solved instances
+            # solved_groups = groups[groups['solved']].groupby('alias').agg(
+            #     cuts=('cuts', 'mean'),
+            # )
+            tex_df = tex_df.join(cons_groups)
+            # .join(solved_groups)
+
             # tex_df = tex_df.rename(index=rename_idx)
             print(tex_df)
 
@@ -1339,6 +1384,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 'feas': 'max',
                 'post': 'max',
                 't_solv_p2': 'min',
+                't_post_p2': 'min',
             }
 
             for col, best in bold_cols.items():
@@ -1384,7 +1430,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     tex_df_formatted[col] = tex_df_formatted[col].apply(format_other)
 
             # Format cons and cuts columns (in thousands, empty for ortools)
-            for col in ['cons', 'cuts']:
+            for col in ['cons',
+                        # 'cuts',
+                        ]:
                 def format_cons_cuts(x, alias, col=col):
                     if 'ortools' in alias.lower():
                         return ""
@@ -1399,12 +1447,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 match alias_lower:
                     case s if 'base' in s:
                         return (0, alias)
-                    case s if 'lazy' in s:
+                    case s if 'cutoff' in s:
                         return (1, alias)
-                    case s if 'ortools' in s:
+                    case s if 'lazy' in s:
                         return (2, alias)
-                    case _:
+                    case s if 'ortools' in s:
                         return (3, alias)
+                    case _:
+                        return (4, alias)
             tex_df_formatted = tex_df_formatted.iloc[sorted(range(len(tex_df_formatted)),
                                                            key=lambda i: get_approach_order(tex_df_formatted.index[i]))]
 
@@ -1425,14 +1475,18 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 [
                     *(["unk", "mem", "post"]),
                     *(["feas"] if is_cop else []),
-                    *(["solv", "t_solv_p2", "cons", "cuts"])
+                    *(["solv", "t_solv_p2", "cons",
+                       # "cuts",
+                       ])
                 ]
             ].to_latex(
                 na_rep="",
                 header=[
                     *(["\\unk", "\\mem", "\\pst"]),
                     *(["\\sat"] if is_cop else []),
-                    *(["\\sol", "time [s]", "cons [k]", "cuts [k]"]),
+                    *(["\\sol", "time [s]", "cons [k]",
+                       # "cuts [k]",
+                       ]),
                 ],
                 escape=False,  # Don't escape so \textbf works
                 index_names=False,
@@ -1555,7 +1609,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     solver2=solver2,
                     metric=scatter_metric,
                     time_limit=time_limit,
-                    inst_metric="rows",
+                    inst_metric=inst_metric_col,
+                    # inst_metric="rows",
+                    # inst_metric="median",
+                    # inst_metric="max",
                     track=track,
                     inst_metric_range=inst_metric_range,
                     paper=paper,

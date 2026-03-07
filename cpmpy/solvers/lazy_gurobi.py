@@ -254,15 +254,14 @@ class TableData:
             case Heuristic.INPUT:
                 return np.argmax(choices), None
             case Heuristic.GREEDY:
-                if not single_choice or self.env["negatives"]:
-                    choice_parts = parts[choices]
-                    counts = np.unique_counts(choice_parts)
 
                 if single_choice:
                     reindex = np.flatnonzero(choices)
                     indices = np.arange(len(reindex))
                 else:
                     # Segment start indices for reduceat: [0, count[0], count[0]+count[1], ...]
+                    choice_parts = parts[choices]
+                    counts = np.unique_counts(choice_parts)
                     indices = counts.counts.cumsum()
                     indices = np.concatenate([[0], indices[:-1]])
                     reindex = counts.values
@@ -278,7 +277,7 @@ class TableData:
 
                 # how many rows will be kept (low is good)
                 # H = T_enc[np.ix_(R, choices)].sum(0)  # number of 1's
-                if self.solver.env["negatives"]:
+                if self.solver.env["negatives"] and not single_choice:
                     densities = self.densities
 
                     B = 1 / (1 + self.part_count_lookup[counts.values])
