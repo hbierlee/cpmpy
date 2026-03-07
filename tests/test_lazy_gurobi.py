@@ -577,6 +577,8 @@ def get_envs():
             e["solver_kwargs"]["env"] |= debug_env
         elif "base" in e["alias"]:
             e["solver_kwargs"] |= {"named": True, "verbose": True}
+            if (e["solver_kwargs"].get("combined", False)):
+                continue
             cp.transformations.int2bool.IntVarEnc.NAMED = True
         yield e
 
