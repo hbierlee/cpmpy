@@ -16,6 +16,8 @@ from cpmpy.solvers.gurobi import CPM_gurobi, Feature
 from cpmpy.expressions.variables import NegBoolView, _BoolVarImpl
 from cpmpy.transformations.linearize import only_positive_bv
 
+from line_profiler import profile as line_profile
+
 CHECKER_TIME_LIMIT = None
 
 
@@ -232,6 +234,7 @@ class TableData:
                     check=check,
                 )
 
+    @line_profile
     def choose(self, choices, R, A_enc, single_choice=False, heuristic=Heuristic.GREEDY):
         T_enc = self.T_enc
         parts = self.parts
@@ -359,6 +362,7 @@ class TableData:
             neg_col_idx = part - self.pos  # 0-based index into negative half
             return self.parts[neg_col_idx]
 
+    @line_profile
     def explain(self, A_enc, frm=None, is_integer=None):
         """The `explain_frac2` alg."""
         T_enc = self.T_enc
