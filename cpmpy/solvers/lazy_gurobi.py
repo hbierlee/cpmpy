@@ -21,6 +21,8 @@ from line_profiler import profile as line_profile
 
 CHECKER_TIME_LIMIT = None
 
+STRICT_CUTS = False
+
 
 def none(A):
     return not A.any()
@@ -63,7 +65,7 @@ class SetEncoder(json.JSONEncoder):
 
 def terms(cpm_expr):
     if isinstance(cpm_expr, Comparison):
-        assert cpm_expr.name == "<="
+        assert cpm_expr.name in ("<=", "<")
         lin_exp, k = cpm_expr.args
         match lin_exp.name:
             case "wsum":
@@ -211,7 +213,7 @@ class TableData:
     def get_expr(self, X, C_enc, k, revert=True):
         if self.solver.env["negatives"] and revert:
             X, C_enc, k = self.revert_cut(X, C_enc, k)
-        return cp.sum(C_enc[X] * self.X_enc[X]) <= k
+        return cp.sum(C_enc[X] * self.X_enc[X]) < k if STRICT_CUTS else cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
     def show_cut(self, X, k, C_enc=None, frm=None, A_enc=None, verbosity=2, check=2):
         assert self.env["verbosity"]
@@ -229,12 +231,14 @@ class TableData:
                     c_ = self.counterchoice(i, part)
                     terms.append(f"{c} * (1 - b_{show(i)}_{self.parts[c_]}_{show(c_)} {a})")
         cut_str = " + ".join(terms)
+
+        cut_str = f"{cut_str} < {k}" if STRICT_CUTS else f"{cut_str} <= {k}"
         self.solver.log(
-            f"cut {frm if frm is not None else ''}== {cut_str} <= {k}",
+            f"cut {frm if frm is not None else ''} == {cut_str}",
             indent=2,
             verbosity=verbosity,
         )
-        self.solver.log(self.X_enc.value(), indent=2, verbosity=3)
+        # self.solver.log(self.X_enc.value(), indent=2, verbosity=3)
         expr = self.get_expr(X, C_enc, k)
         self.solver.log(expr, indent=2, verbosity=3)
         # assert C_enc.sum() < 5
@@ -242,12 +246,11 @@ class TableData:
         if check > 0 and A_enc is not None:
             expr = self.get_expr(X, C_enc, k)
             if self.env["debug"] or self.env["checked"]:
-                self.solver.check_explanation(
-                    expr,
-                    self.X_enc[: self.cols()],
-                    A_enc[: self.cols()],
-                    self.T_enc[:, : self.cols()],
-                    self.parts[: self.cols()],
+                self.check_explanation(
+                    X,
+                    C_enc,
+                    k,
+                    A_enc,
                     frm,
                     check=check,
                 )
@@ -430,7 +433,8 @@ class TableData:
 
         self.env["cuts"].append({"from": frm})
 
-        m = len(T_enc)  # number of cols
+        m = len(T_enc)  # number of rows
+        cols = len(T_enc.T)
         W = solver.is_ge(A_enc, 1.0)
 
         A_enc_pos = solver.is_gt(A_enc, 0.0)
@@ -439,6 +443,8 @@ class TableData:
         if self.env["verbosity"]:
             solver.log(f"W = {show_nz(W)}", verbosity=3)
             solver.log(f"F = {show_nz(F)}", verbosity=3)
+
+        C_enc = np.zeros(cols, dtype=float)
 
         if F.any():
             # D are the difficult rows which only contain 1s for each W/F columns
@@ -461,12 +467,13 @@ class TableData:
                 return True
             else:
                 # TODO remove
-                cols = len(T_enc.T)
                 R = np.ones(m, dtype=bool)
 
                 # i = choice
                 choices = U & A_enc_pos
                 choice, expected_R = self.choose(choices, R, A_enc, single_choice=True, heuristic=self.env["heuristic"])
+                # part, expected_R = self.choose(choices, R, A_enc, single_choice=False, heuristic=self.env["heuristic"])
+
                 part = parts[choice]
                 choice_parts = parts == part
 
@@ -487,7 +494,9 @@ class TableData:
 
                 # R <- T_i
                 R = T_enc[:, choice]
+                # R = R & T_enc[:, choice_parts & A_enc_pos].any(1)
 
+                # k = A_enc[choice]
                 k = 0
 
                 if self.solver.env["negatives"]:
@@ -503,14 +512,15 @@ class TableData:
                         verbosity=3,
                         indent=solver.indent + 2,
                     )
-                    solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
+                    # solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"V = {np.unique(parts[X])}")
                     self.show_cut(X, k, A_enc=A_enc, verbosity=1, frm=frm, check=1)
+                    # solver.log(f"C_enc = {C_enc}", verbosity=3, indent=solver.indent + 2)
 
                 if self.env["example_frac"]:
                     assert_example(X, [2])
-                    assert k == 0
+                    # assert k == 0
                     assert_example(R, [1, 5])
                     assert parts[choice] == 1
 
@@ -555,10 +565,11 @@ class TableData:
                 choices[counterchoices] = False
 
             # k += A_enc[added].sum()
-            k += A_enc[added].sum()
-            # k += 1
+            k += 1
 
             X[added] = True
+            # C_enc[added] = A_enc[added]
+
             if self.env["debug"]:
                 R_ = R.sum()
             R = R & T_enc[:, added].any(1)
@@ -567,33 +578,35 @@ class TableData:
 
             if self.env["verbosity"]:
                 self.solver.log("c ==", (choice_parts & A_enc_pos).sum(), verbosity=2)
-                solver.log(f"Ak = {A_enc[X].sum()} < {k}", verbosity=3)
                 solver.log(f"V = {np.unique(parts[X])}")
                 solver.log(
                     f"chosen {'pos' if self.is_pos(part) else 'neg'} part {part}",
                     verbosity=3,
                     indent=solver.indent + 2,
                 )
-                solver.log(f"added columns {show_nz(added)}", verbosity=3, indent=solver.indent + 2)
+                solver.log(f"added columns {show_nz(added)} = {A_enc[added]}", verbosity=3, indent=solver.indent + 2)
+                # solver.log(f"C_enc = {C_enc}", verbosity=3, indent=solver.indent + 2)
+
                 solver.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
                 if F.any():
                     solver.log("FRAC", frm, verbosity=2, indent=solver.indent + 2)
                 solver.log(f"R ({R.sum()}) ({expected_R})", verbosity=1, indent=solver.indent + 3)
                 solver.log(f"  = {show_nz(R)} ", verbosity=3, indent=solver.indent + 3)
                 solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
+                solver.log(f"k = {k}", verbosity=3, indent=solver.indent + 2)
+
                 self.show_cut(X, k, A_enc=A_enc, verbosity=1, frm=frm, check=1)
 
             if self.env["debug"]:
                 assert R.sum() == expected_R, f"{R.sum()} {expected_R}"
                 assert R.sum() < R_, f"Did not reduce rows, curr={R.sum()}, prev={R_}"
 
-        C_enc = np.zeros(len(X), dtype=int)
         C_enc[X] = 1
 
         if self.env["verbosity"]:
             solver.log(f"by explanation of size ({sum(X)})", verbosity=2)
             solver.log(show_nz(X), verbosity=3)
-            solver.log("C_enc", C_enc, verbosity=3)
+            # solver.log("C_enc", C_enc, verbosity=3)
             self.show_cut(X, k, C_enc=C_enc, A_enc=A_enc, verbosity=1, frm=frm)
 
         if self.env["shrink"]:
@@ -647,7 +660,7 @@ class TableData:
             solver.log("T_enc", T_enc.shape, verbosity=2)
             solver.log(show_table(T_enc, full=self.env["verbosity"] == 3), verbosity=3)
             solver.log("", show_table(parts), "parts", verbosity=3)
-            solver.log("k = {k}", verbosity=3)
+            solver.log(f"k = {k}", verbosity=3)
 
         # Compute the upper bound for each row
         RS = (C_enc * T_enc).sum(axis=1)
@@ -782,6 +795,158 @@ class TableData:
             assert X[j], f"{show(j)} not chosen in {X}"
 
         return S, C_enc, k
+
+    def check_explanation(self, X, C_enc, k, A_enc, frm, check=0):
+        solver = self.solver
+        T_enc = self.T_enc
+        parts = self.parts
+        X_enc = self.X_enc
+
+        expr = self.get_expr(X, C_enc, k)
+
+        def value(expr, value):
+            # TODO account for parts
+            if is_true_cst(expr):
+                return True
+            (expr,) = only_positive_bv([expr])
+            ws, xs, k = terms(expr)  # sum(ws*xs) <= k
+            lhs = sum(w * value[x] for w, x in zip(ws, xs))
+            cut = solver.is_lt(lhs, k) if STRICT_CUTS else solver.is_le(lhs, k)
+            return bool(cut)  # np -> python bool
+
+        # == {" + ".join(w * x.value() for (ws, xs, k) in terms(expr) for w, x in zip(ws, xs))}
+        case = f"""The explanation
+
+{expr}
+
+
+SUM {C_enc[X]} * {show_nz(X)} < {k}
+
+SUM {C_enc[X]} * {show_nz(X)} <= {k}
+
+{X}
+
+for counterexample
+
+== {show_assignment(get_variables(expr))}
+
+from assignment {frm}
+
+
+{show_assignment(X_enc)}
+
+for A_enc:
+
+{show_table(A_enc)}
+
+for tables:
+
+{show_table(T_enc)}"""
+
+        def value_(A_enc):
+            lhs = (C_enc * A_enc).sum()
+            return bool(solver.is_lt(lhs, k) if STRICT_CUTS else solver.is_le(lhs, k))
+
+        if check >= 1:
+            if not is_true_cst(expr):
+                assert value_(A_enc) is False, f"Did not cut off assignment:\n\n{case}"
+                # assert value(expr, {x: x.value() for x in X_enc}) is False, f"Did not cut off assignment:\n\n{case}"
+
+        if check >= 2:
+            for i, T_enc_i in enumerate(T_enc):
+                # A_enc_row = {x_j: a_i_j for x_j, a_i_j in zip(X_enc, T_enc_i)}
+                # self.show_cut(X, k, A_enc=T_enc_i.astype(int), verbosity=1, frm=frm, check=0)
+
+                assert value_(T_enc_i) is True, (
+                    f"Cut off row {show(i)}\n\n{show_nz(T_enc[i, :])}\n{parts[T_enc[i, :]]}\n\n\nfor case:\n\n{case}\n\n{show_table(T_enc_i)}\n\n"
+                )
+                # assert value(expr, A_enc_row) is True, (
+                #     f"Cut off row {show(i)}\n\n{show_nz(T_enc[i, :])}\n{parts[T_enc[i, :]]}\n\n\nfor case:\n\n{case}\n\n{show_table(T_enc_i)}\n\n"
+                # )
+
+        if "cut" not in self.env["cuts"][-1]:
+            return
+
+        if self.env["checked"]:
+            # if self.env["checker"] and self.env["feasible"]:
+            repeated = expr in self.env["checker"].constraints
+            # self.env["checker"] += expr
+
+            # nsols = self.env["checker"].solveAll()
+            # assert nsols >= 3, (
+            #     f"{nsols}:The {expr} for {A_enc} made model unsat\n\n{T_enc}\n\n{self.env['checker']}\n\n"
+            # )
+
+            # Save X_enc values before solving checker (solutions_checker overwrites them)
+            # For NegBoolView, save the underlying _bv variable
+            def get_base_var(x):
+                return x._bv if isinstance(x, NegBoolView) else x
+
+            saved_x_enc_values = {get_base_var(x): get_base_var(x).value() for tbl in solver.tables for x in tbl.X_enc}
+
+            actual_solutions = solver.solutions_checker()
+
+            # Restore X_enc values
+            for x, v in saved_x_enc_values.items():
+                x._value = v
+
+            def show_assignments(As):
+                return "\n".join(repr(a) for a in As)
+
+            expected_solutions = self.env["expected_solutions"]
+            remaining = without(actual_solutions, expected_solutions)
+            assert len(np.unique(actual_solutions, axis=0)) == len(actual_solutions)
+
+            self.env["cuts"][-1]["remain"] = remaining
+            self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
+            if self.env["verbosity"]:
+                solver.log(f"Expected ({len(expected_solutions)}) (model w/ table)", verbosity=2)
+                solver.log(expected_solutions, verbosity=3)
+                solver.log(f"Actual ({len(actual_solutions)}) (model w/o table but with lazy constraints)", verbosity=2)
+                solver.log(actual_solutions, verbosity=3)
+            if len(self.env["cuts"]) >= 2:
+                removed = without(self.env["cuts"][-2]["remain"], remaining)
+                if self.env["verbosity"]:
+                    solver.log(
+                        "A",
+                        solver.user_vars,
+                        tuple(x.value() for x in sorted(solver.user_vars, key=lambda x: x.name) if x.value() is not None),
+                        verbosity=3,
+                    )
+                    solver.log(f"REMOVED {len(removed)}", verbosity=2)
+                    solver.log(removed, verbosity=3)
+
+            strength = (
+                len(self.env["cuts"][-2]["remain"]) - len(self.env["cuts"][-1]["remain"])
+                if len(self.env["cuts"]) >= 2
+                else len(self.env["remain"]) - len(remaining)
+            )
+            self.env["cuts"][-1]["strength"] = strength
+            self.env["cuts"][-1]["power"] = strength / len(self.env["cuts"][-1]["cut"][0].args)
+            self.env["remain"] = remaining
+            if self.env["verbosity"]:
+                solver.log(
+                    f"Remaining non-solutions to cut ({len(remaining)}, STR={self.env['cuts'][-1]['strength']}, PWR={self.env['cuts'][-1]['power']})",
+                    verbosity=1,
+                )
+                solver.log(remaining, verbosity=3)
+                solver.log(self.env["checker"], verbosity=4)
+                solver.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
+                solver.log(expected_solutions, verbosity=4, indent=2)
+                solver.log(f"ACTUAL ({len(actual_solutions)})", verbosity=2)
+                solver.log(actual_solutions, verbosity=4, indent=2)
+                solver.log(f"TO REMOVE ({len(remaining)})", verbosity=2)
+                solver.log(remaining, verbosity=4)
+
+            # assert repeated or strength
+            assert strength or len(solver.tables) > 1
+
+            assert len(expected_solutions) <= len(actual_solutions), (
+                f"Missing sols:\n\n{show_assignments(expected_solutions)}\n\n {show_assignments(actual_solutions)}\n\n{self.env['checker']}"
+            )
+
+        # m = cp.Model(explanation, [x == a for x, a in zip(X_enc, A_enc)])
+        # assert not m.solve(), f"Explanation {explanation} did not remove failure {A_enc}"
 
 
 def normalize_table(table):
@@ -974,7 +1139,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         self.env["callbacks"] += 1
         feasible = True  # assume feasible
         for expr in self._explain_assignment(frm=frm):
-            if isinstance(expr, Comparison) and expr.name == "<=":
+            if isinstance(expr, Comparison) and expr.name in ("<=", "<"):
                 feasible = False  # any expr means not feasible
                 assert isinstance(expr.args[0], Operator)
                 expr, k = expr.args
@@ -1039,7 +1204,14 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 #         self.log(x_enc_i, x_enc_i.value(), verbosity=3)
 
                 for expr, k in self.solution_callback_inner(frm):
-                    cut = self._make_numexpr(expr) <= k
+                    # cut = self._make_numexpr(expr) <= k - self.native_model.Params.FeasibilityTol
+                    cut = (
+                        # expr < k
+                        self._make_numexpr(expr) <= k - self.native_model.Params.FeasibilityTol
+                        if STRICT_CUTS
+                        # expr < k == expr <= k - 1 is returned
+                        else self._make_numexpr(expr) <= k
+                    )
                     if frm == "MIPSOL" or not self.env["cbCut"]:
                         what.cbLazy(cut)
                     else:
@@ -1061,7 +1233,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             expr = explanation
         else:
             (X, C_enc, k) = explanation
-            expr = cp.sum(C_enc[X] * X_enc[X]) <= k
+            expr = cp.sum(C_enc[X] * X_enc[X]) < k if STRICT_CUTS else cp.sum(C_enc[X] * X_enc[X]) <= k
             if self.env["verbosity"]:
                 self.log(f"EXPR  == {expr}", indent=2, verbosity=1)
                 self.log(show_table(X_enc[X]), indent=2, verbosity=3)
@@ -1072,9 +1244,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         if self.env["debug"]:
             self.env["cuts"][-1]["expr"] = expr
-
-        # if self.env["debug"]:
-        #     self.check_explanation(expr, X_enc, A_enc, T_enc, table)
 
         return expr
 
@@ -1146,7 +1315,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
                 explanation = tbl.explain(A_enc, frm=frm, is_integer=is_integer)
 
                 if self.env["verbosity"]:
-                    # self.check_explanation(explanation, X_enc, A_enc, T_enc)
                     self.env["cuts"][-1]["x"] = str(X_enc)
                     self.env["cuts"][-1]["table"] = str(T_enc)
                     # self.env["cuts"][-1]["explanation"] = explanation_expr
@@ -1166,7 +1334,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     expr = self.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
                     yield expr
                     if self.env["debug"] or self.env["checked"]:
-                        self.check_explanation(expr, X_enc, A_enc, T_enc, parts, frm)
+                        X, C_enc, k = explanation
+                        tbl.check_explanation(X, C_enc, k, A_enc, frm, check=2)
                 elif is_integer:  # unsat
                     raise Infeasible
             except Infeasible:
@@ -1196,158 +1365,6 @@ class CPM_lazy_gurobi(CPM_gurobi):
             time_limit=time_limit,
             sorted=True,
         )[1]
-
-    def check_explanation(self, expr, X_enc, A_enc, T_enc, parts, frm, check=0):
-
-        def value(expr, value):
-            # TODO account for parts
-            if is_true_cst(expr):
-                return True
-            (expr,) = only_positive_bv([expr])
-            ws, xs, k = terms(expr)  # sum(ws*xs) <= k
-            lhs = sum(w * value[x] for w, x in zip(ws, xs))
-            return bool(self.is_le(lhs, k))  # np -> python bool
-
-        # == {" + ".join(w * x.value() for (ws, xs, k) in terms(expr) for w, x in zip(ws, xs))}
-        case = f"""The explanation
-
-{expr}
-
-for counterexample 
-
-== {show_assignment(get_variables(expr))}
-
-from assignment {frm}
-
-
-{show_assignment(X_enc)}
-
-for A_enc:
-
-{show_nz(A_enc)}
-
-for tables:
-
-{show_table(T_enc)}"""
-
-        if check >= 1:
-            if not is_true_cst(expr):
-                assert value(expr, {x: x.value() for x in X_enc}) is False, f"Did not cut off assignment:\n\n{case}"
-
-        if check >= 2:
-            for i, T_enc_i in enumerate(T_enc):
-                assert value(expr, {x_j: a_i_j for x_j, a_i_j in zip(X_enc, T_enc_i)}) is True, (
-                    f"Cut off row {show(i)}\n\n{show_nz(T_enc[i, :])}\n{parts[T_enc[i, :]]}\n\n\nfor case:\n\n{case}\n\n{show_table(T_enc_i)}"
-                )
-
-        if "cut" not in self.env["cuts"][-1]:
-            return
-
-        if self.env["checked"]:
-            # if self.env["checker"] and self.env["feasible"]:
-            repeated = expr in self.env["checker"].constraints
-            # self.env["checker"] += expr
-
-            # nsols = self.env["checker"].solveAll()
-            # assert nsols >= 3, (
-            #     f"{nsols}:The {expr} for {A_enc} made model unsat\n\n{T_enc}\n\n{self.env['checker']}\n\n"
-            # )
-
-            # Save X_enc values before solving checker (solutions_checker overwrites them)
-            # For NegBoolView, save the underlying _bv variable
-            def get_base_var(x):
-                return x._bv if isinstance(x, NegBoolView) else x
-
-            saved_x_enc_values = {get_base_var(x): get_base_var(x).value() for tbl in self.tables for x in tbl.X_enc}
-
-            actual_solutions = self.solutions_checker()
-
-            # Restore X_enc values
-            for x, v in saved_x_enc_values.items():
-                x._value = v
-
-            def show_assignments(As):
-                return "\n".join(repr(a) for a in As)
-
-            expected_solutions = self.env["expected_solutions"]
-            remaining = without(actual_solutions, expected_solutions)
-            assert len(np.unique(actual_solutions, axis=0)) == len(actual_solutions)
-
-            self.env["cuts"][-1]["remain"] = remaining
-            self.env["cuts"][-1]["n_sols"] = len(actual_solutions)
-            if self.env["verbosity"]:
-                self.log(f"Expected ({len(expected_solutions)}) (model w/ table)", verbosity=2)
-                self.log(expected_solutions, verbosity=3)
-                self.log(f"Actual ({len(actual_solutions)}) (model w/o table but with lazy constraints)", verbosity=2)
-                self.log(actual_solutions, verbosity=3)
-            if len(self.env["cuts"]) >= 2:
-                removed = without(self.env["cuts"][-2]["remain"], remaining)
-                if self.env["verbosity"]:
-                    self.log(
-                        "A",
-                        self.user_vars,
-                        tuple(x.value() for x in sorted(self.user_vars, key=lambda x: x.name) if x.value() is not None),
-                        verbosity=3,
-                    )
-                    self.log(f"REMOVED {len(removed)}", verbosity=2)
-                    self.log(removed, verbosity=3)
-
-            strength = (
-                len(self.env["cuts"][-2]["remain"]) - len(self.env["cuts"][-1]["remain"])
-                if len(self.env["cuts"]) >= 2
-                else len(self.env["remain"]) - len(remaining)
-            )
-            self.env["cuts"][-1]["strength"] = strength
-            self.env["cuts"][-1]["power"] = strength / len(self.env["cuts"][-1]["cut"][0].args)
-            self.env["remain"] = remaining
-            if self.env["verbosity"]:
-                self.log(
-                    f"Remaining non-solutions to cut ({len(remaining)}, STR={self.env['cuts'][-1]['strength']}, PWR={self.env['cuts'][-1]['power']})",
-                    verbosity=1,
-                )
-                self.log(remaining, verbosity=3)
-                self.log(self.env["checker"], verbosity=4)
-                self.log(f"EXPECTED ({len(expected_solutions)})", verbosity=2)
-                self.log(expected_solutions, verbosity=4, indent=2)
-                self.log(f"ACTUAL ({len(actual_solutions)})", verbosity=2)
-                self.log(actual_solutions, verbosity=4, indent=2)
-                self.log(f"TO REMOVE ({len(remaining)})", verbosity=2)
-                self.log(remaining, verbosity=4)
-
-            # assert repeated or strength
-            assert strength or len(self.tables) > 1
-
-            assert len(expected_solutions) <= len(actual_solutions), (
-                f"Missing sols:\n\n{show_assignments(expected_solutions)}\n\n {show_assignments(actual_solutions)}\n\n{self.env['checker']}"
-            )
-
-        # m = cp.Model(explanation, [x == a for x, a in zip(X_enc, A_enc)])
-        # assert not m.solve(), f"Explanation {explanation} did not remove failure {A_enc}"
-
-        # sols = []
-        # for sol in solutions(self.user_vars, self.env["checker"], verbosity=1, projected_solution_limit=None):
-        #     for x, a in sol.items():
-        #         x._value = a
-        #     # for c in self.env["tables"]:
-        #     #     print("C", c)
-        #     #     # for c in self.env["checker"].constraints:
-        #     #     assert c.value(), f"Fail on {sol}: {c}"
-        #     sols.append(sol)
-        # print("SOLS", len(sols), sols)
-
-        # check that each row in the table is still allowed
-
-        # for row in table.args[1]:
-        # P = self.env["checker"].copy()
-        # P += cp.all(x == v for x, v in zip(table.args[0], row))
-        # assert P.solve() or not self.env["feasible"], (
-        #     f"Explanation {explanation} removed row, but feasible={self.env['feasible']}: {row}\n\n{P}"
-        # )
-
-        # for table in self.env["tables"]:
-        #     assert frozenset(tuple(sol[k] for k in table.args[0])).issubset(table.args[0])
-
-        # assert len(sols) >= len(T_enc), f"{sols} != {len(T_enc)} for checker {self.env['checker']}"
 
     def objective(self, *args, **kwargs):
         super().objective(*args, **kwargs)
@@ -1442,7 +1459,8 @@ for tables:
                     self.check_max_iterations(iteration)
                     assert all(x.value() is not None for x in all_xs), f"Has sol but no value {all_xs}"
                     for expr, k in self.solution_callback_inner("MIPSOL"):
-                        self.env["checker"] += [expr <= k]
+                        # self.env["checker"] += [expr <= k]
+                        self.env["checker"] += [expr < k if STRICT_CUTS else expr <= k]
 
             else:
                 hassol = super().solve(

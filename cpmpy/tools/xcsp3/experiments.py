@@ -81,16 +81,16 @@ FEATURES = [
         "cutoff",
         (
             0,
-            200,
             500,
-            100,
+            1000,
+            2000,
         ),
     ),
     (
         "negatives",
         (
             False,
-            True,
+            # True,
         ),
     ),
 ]
@@ -126,7 +126,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                         "encoding": encoding,
                         "reduce": reduce,
                         "order": order,
-                        "combined" : combined,
+                        "combined": combined,
                         "output_stats": True,
                     },
                     "solve_kwargs": {"Seed": SEED},
@@ -147,21 +147,19 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                             Order.INPUT,
                             Order.DOM_INCR,
                             Order.GREEDY,
-                            Order.BIDIRECTIONAL
+                            Order.BIDIRECTIONAL,
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
                     )
-
                     for combined in (
                         [
                             True,
-                            False
+                            False,
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
                     )
-
                 ]
             ],
             *[
@@ -182,9 +180,10 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                             "dev",
                             enable_all(features)
                             | {
-                                "shrink": False,
+                                "shrink": True,
                                 "cutoff": 0,
                                 "fractional": True,
+                                "negatives": False,
                                 "coverlift": Coverlift.COM_MAX,
                             },
                         )

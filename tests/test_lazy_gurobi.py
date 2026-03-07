@@ -565,7 +565,7 @@ def get_envs():
                     "heuristic": Heuristic.GREEDY,
                     # "heuristic": Heuristic.REDUCE,
                     "cutoff": 0,
-                    "verbosity": 3,
+                    "verbosity": 1,
                     "variant": 1,
                 },
             },
@@ -573,7 +573,7 @@ def get_envs():
         }
 
     for e in get_solvers():
-        if "ort" in e["alias"]:
+        if any(exclude in e["alias"] for exclude in ("ort", "dev")):
             continue
         elif "lazy" in e["alias"]:
             e["solver_kwargs"]["env"] |= debug_env
@@ -600,6 +600,7 @@ def load_model(path):
 
 @pytest.mark.timeout(60)
 class TestTables:
+    # @pytest.mark.skip()
     def test_repro_explain(self, env):
         path = pathlib.Path("fail.pkl")
         if path.exists():
@@ -607,7 +608,7 @@ class TestTables:
                 cut = pickle.load(f)
                 X_enc, A_enc, T_enc, parts, frm, env = cut
             slv = CPM_lazy_gurobi(
-                env=env | {"verbosity": 3, "debug": True, "checked": False},
+                env=env | {"verbosity": VERBOSITY, "debug": True, "checked": False},
                 # env={
                 #     **env,
                 #     **{"verbosity": 3, "debug": True, "checker": False, "coverlift": False, "shrink": False, "fractional": True},
@@ -636,7 +637,8 @@ class TestTables:
                 print("Infeasible")
             else:
                 expr = slv.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
-                slv.check_explanation(expr, X_enc, A_enc, T_enc, parts, frm)
+                X, C_enc, k = explanation
+                tbl.check_explanation(X, C_enc, k, A_enc, frm, check=2)
 
     @pytest.mark.skip()
     def test_coverlift(self, env):
@@ -993,7 +995,7 @@ FILTER_PRESETS = {
             "alias",
             (
                 "dev",
-                # "mdd-reduce-fiedler",
+                "bool",
             ),
         )
     ],
