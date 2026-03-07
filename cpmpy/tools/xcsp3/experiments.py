@@ -176,7 +176,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                     (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.DOM_INCR, "reduce": True})
                     for alias, env in ablate(features, add_none=add_none, add_all=add_all)
                     + [("best", enable_all(features) | {})]
-                    + [("best_no_cutoff", enable_all(features) | {})]
+                    + [("best_no_cutoff", enable_all(features) | {"negatives": False, "cutoff": 0})]
                     + [
                         (
                             "dev",
