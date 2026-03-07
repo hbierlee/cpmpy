@@ -296,6 +296,8 @@ def generate_models_w_tables(hardness=(0, 2), glob=None):
             if a <= 4 <= b:
                 yield (f"t20x500x25{suffix}", with_constraints(generate_table_(20, 500, 25)))
                 yield (f"t25x1000x30{suffix}", with_constraints(generate_table_(25, 1000, 30)))
+                yield (f"t_huge_small_dom{suffix}", with_constraints(generate_table_(25, 1000, 5)))
+                yield (f"t_huge_large_dom{suffix}", with_constraints(generate_table_(25, 1000, 50)))
 
                 # yield (
                 #     f"big{suffix}",
@@ -577,7 +579,7 @@ def get_envs():
             e["solver_kwargs"]["env"] |= debug_env
         elif "base" in e["alias"]:
             e["solver_kwargs"] |= {"named": True, "verbose": True}
-            if (e["solver_kwargs"].get("combined", False)):
+            if e["solver_kwargs"].get("combined", False):
                 continue
             cp.transformations.int2bool.IntVarEnc.NAMED = True
         yield e
@@ -1027,7 +1029,7 @@ FILTER_PRESETS = {
         (
             "alias",
             (
-                "best_no_cutoff",
+                "dev",
                 # "mdd-reduce-fiedler",
             ),
         )
@@ -1069,7 +1071,7 @@ FILTER_PRESETS = {
                 "none",
                 "neg",
             ),
-        )
+        ),
     ],
     "shrink": [
         (
@@ -1107,6 +1109,15 @@ FILTER_PRESETS = {
             ),
         )
     ],
+    "combined": [
+        (
+            "alias",
+            (
+                "base_gurobi-mdd-reduce-dom-incr-nocombined",
+                "base_gurobi-mdd-reduce-dom-incr-combined",
+            ),
+        )
+    ],
 }
 
 
@@ -1119,6 +1130,7 @@ def benchmark_table_constraints(
     max_iterations=None,
     track_memory=False,
     checked=None,
+    debug=None,
     time_limit=None,
     choices=None,
     xcsp3_path=None,
@@ -1179,7 +1191,6 @@ def benchmark_table_constraints(
     else:
         if checked is None:
             checked = False
-        debug = False
         # max_iterations stays as provided (or None)
         if time_limit is None:
             time_limit = 60 if hardness[1] >= 3 else 10
@@ -1211,7 +1222,7 @@ def benchmark_table_constraints(
             env["solver_kwargs"]["env"]["verbosity"] = verbosity
             env["solver_kwargs"]["env"]["checked"] = checked
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
-            env["solver_kwargs"]["env"]["debug"] = checked
+            env["solver_kwargs"]["env"]["debug"] = debug
             env["solver_kwargs"]["env"]["choices"] = [int(i) for i in choices] if choices is not None else None
         else:
             env["solver_kwargs"]["verbose"] = verbosity >= 1
@@ -1234,17 +1245,17 @@ def benchmark_table_constraints(
                 # Create solver with the environment
                 if track_memory:
                     tracemalloc.start()
-                dt = time.time()
+                time_post = time.time()
                 slv = env["solver"](cpm_model=model, **env["solver_kwargs"], time_limit=time_limit)
-                dt = time.time() - dt
-                print("POSTED IN", dt)
+                time_post = time.time() - time_post
+                print("POSTED IN", time_post)
 
                 # Solve the model
-                solve_start = time.time()
-                if time_limit - dt < 0:
+                time_solve = time.time()
+                if time_limit - time_post < 0:
                     raise TimeoutError
-                has_sol = slv.solve(time_limit=time_limit - dt)
-                sdt = time.time() - solve_start
+                has_sol = slv.solve(time_limit=time_limit - time_post)
+                time_solve = time.time() - time_solve
 
                 # Verify solution satisfies all constraints
                 if has_sol:
@@ -1265,18 +1276,18 @@ def benchmark_table_constraints(
 
                 obj = slv.objective_value() if model.has_objective() else None
                 if has_sol is None:
-                    print(f"  TIMEOUT after {dt:.2f}s")
+                    print(f"  TIMEOUT after {time_post:.2f}s")
                     raise TimeoutError
                 else:
                     obj_str = f" | obj={obj}" if obj is not None else ""
                     if track_memory:
                         print(
-                            f"SOLVED IN {sdt:.2f}s{obj_str} | Mem: {peak_mem_mb:.1f}MB (Python) {grb_mem_mb:.1f}MB (Gurobi)"
+                            f"SOLVED IN {time_solve:.2f}s{obj_str} | Mem: {peak_mem_mb:.1f}MB (Python) {grb_mem_mb:.1f}MB (Gurobi)"
                             if grb_mem_mb
-                            else f"SOLVED IN {sdt:.2f}s{obj_str} | Mem: {peak_mem_mb:.1f}MB"
+                            else f"SOLVED IN {time_solve:.2f}s{obj_str} | Mem: {peak_mem_mb:.1f}MB"
                         )
                     else:
-                        print(f"SOLVED IN {sdt:.2f}s{obj_str}")
+                        print(f"SOLVED IN {time_solve:.2f}s{obj_str}")
 
                 # Get stats
                 stats = slv.stats()
@@ -1292,7 +1303,8 @@ def benchmark_table_constraints(
                     "name": name,
                     "status": slv.status().exitstatus,
                     "obj": obj,
-                    "time_solve": sdt,
+                    "time_solve": time_solve,
+                    "time_post": time_post,
                     **stats,
                 }
                 results.append(result)
@@ -1301,7 +1313,7 @@ def benchmark_table_constraints(
                 print("timeout")
                 pass
             except Exception as e:
-                raise e
+                # raise e
                 print(f"  ERROR: {e}")
                 traceback.print_exc()
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
@@ -1316,6 +1328,7 @@ def benchmark_table_constraints(
     cols = ["constraints", "n_cuts"]
 
     if verbosity == 0:
+        cols += ["time_post"]
         cols += ["time_solve"]
 
     for col in cols:
@@ -1361,6 +1374,7 @@ def benchmark_table_constraints(
             values += ["avg_power"]
 
         if not checked and verbosity == 0:
+            values += ["time_post"]
             if hardness[0] >= 5:
                 values += ["time_solve"]
             values += ["mem_python_mb"]
