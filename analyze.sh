@@ -4,8 +4,8 @@ res="/cw/dtailocal/henk/Projects/cpmpy/results/*"
 rsync -r himec03:$res ./results/himec03
 rsync -r himec04:$res ./results/himec04
 
-rm -f results/himec03/2026-03-05-lazy/xcsp3_2025_CSP22to25_lazy_gurobi-best_no_cutoff.csv
-rm -f results/himec03/2026-03-05-lazy/xcsp3_2025_COP22to25_lazy_gurobi-best_no_cutoff.csv
+# rm -f results/himec03/2026-03-05-lazy/xcsp3_2025_CSP22to25_lazy_gurobi-best_no_cutoff.csv
+# rm -f results/himec03/2026-03-05-lazy/xcsp3_2025_COP22to25_lazy_gurobi-best_no_cutoff.csv
 
 declare -a DIRS
 DIRS=(
@@ -15,17 +15,20 @@ DIRS=(
 # results/himec04/2026-02-29-remaining-base
 # results/himec04/2026-03-02-grb-13-bests-reduce
 results/himec03/2026-03-02-grb-13-base
-results/himec03/2026-03-05-lazy
-results/himec03/2026-03-06-no-neg/
+results/himec03/2026-03-07-ablation
+results/himec04/2026-03-07-cutoffs
+# results/himec03/2026-03-06-no-neg/
 #results/himec04/2026-03-05-cutoffs
 # results/himec04/2026-03-02-grb-13-bests/xcsp3_2025_CSP22to25_lazy_gurobi-best.csv
 # results/2026-02-30-grb-13/xcsp3_2025_COP22to25_lazy_gurobi-best-no_cutoff.csv
 # results/himec03/2026-03-05-lazy  # TODO in progr
+#
 )
 declare -a ARGS
 
 ARGS+=(--sort-legend alpha)
 # ARGS+=(--small 100)
+# ARGS+=(--small 1000)
 ARGS+=(--time-limit 600)
 # ARGS+=(--no-errors)
 #
@@ -34,7 +37,7 @@ ARGS+=(--time-limit 600)
 #
 
 # ARGS+=(--compare base_gurobi-mdd-reduce-dom-incr-hashtable best)
-ARGS+=(--compare base_gurobi-mdd-reduce-dom-incr-hashtable best_no_cutoff)
+ARGS+=(--compare base_gurobi-mdd-reduce-dom-incr-hashtable best_cutoff_0)
 # ARGS+=(--compare mdd-reduce-fiedler cutoff_1000)
 # ARGS+=(--compare mdd-reduce-fiedler cutoff_100)
 

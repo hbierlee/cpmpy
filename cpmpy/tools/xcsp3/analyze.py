@@ -1334,7 +1334,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 'base_gurobi-gleb': r'\baseGleb',
                 'base_gurobi-mdd-reduce-dom-incr-hashtable': r'\baseMddDomIncr',
                 'base_gurobi-mdd-reduce-input-hashtable': r'\baseMddInput',
-                'lazy_gurobi-none': r'\lazyNone',
+                'lazy_gurobi-none': r'\lazyGenerate',
                 'lazy_gurobi-shrink': r'\lazyShrink',
                 'lazy_gurobi-fractional': r'\lazyFractional',
                 'lazy_gurobi-coverlift_com_max': r'\lazyCutlift',

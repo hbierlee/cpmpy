@@ -5,7 +5,6 @@ import itertools
 import pathlib
 import pickle
 import random
-import traceback
 import tracemalloc
 
 import numpy as np
@@ -573,7 +572,13 @@ def get_envs():
         }
 
     for e in get_solvers():
-        if any(exclude in e["alias"] for exclude in ("ort", "dev")):
+        if any(
+            exclude in e["alias"]
+            for exclude in (
+                "ort",
+                # "dev",
+            )
+        ):
             continue
         elif "lazy" in e["alias"]:
             e["solver_kwargs"]["env"] |= debug_env
@@ -995,7 +1000,7 @@ FILTER_PRESETS = {
             "alias",
             (
                 "dev",
-                "bool",
+                # "bool",
             ),
         )
     ],
@@ -1099,6 +1104,7 @@ def benchmark_table_constraints(
     time_limit=None,
     choices=None,
     xcsp3_path=None,
+    raise_errors=False,
 ):
     """Benchmark all table constraints from generate_edge_case_tables() and print stats dataframe
 
@@ -1278,9 +1284,12 @@ def benchmark_table_constraints(
                 print("timeout")
                 pass
             except Exception as e:
-                # raise e
-                print(f"  ERROR: {e}")
-                traceback.print_exc()
+                if raise_errors:
+                    raise e
+                else:
+                    print(f"  ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
             finally:
                 if tracemalloc.is_tracing():
@@ -1339,7 +1348,7 @@ def benchmark_table_constraints(
             values += ["avg_power"]
 
         if not checked and verbosity == 0:
-            values += ["time_post"]
+            # values += ["time_post"]
             if hardness[0] >= 5:
                 values += ["time_solve"]
             values += ["mem_python_mb"]
@@ -1450,7 +1459,7 @@ if __name__ == "__main__":
         "--checked",
         "-c",
         action="store_true",
-        default=False,
+        default=None,
         help="Enable solution checking/verification",
     )
     parser.add_argument(
@@ -1463,7 +1472,7 @@ if __name__ == "__main__":
         "--debug",
         "-d",
         action="store_true",
-        default=False,
+        default=None,
         help="Enable debug mode with extra assertions",
     )
     parser.add_argument(
@@ -1478,6 +1487,12 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Find and run XCSP3 instance matching this pattern (searches in 2025/ directory)",
+    )
+    parser.add_argument(
+        "--raise-errors",
+        action="store_true",
+        default=False,
+        help="Raise exceptions instead of catching and logging them",
     )
 
     args = parser.parse_args()
@@ -1529,6 +1544,7 @@ if __name__ == "__main__":
         time_limit=args.time_limit,
         choices=args.choices,
         xcsp3_path=xcsp3_glob,
+        raise_errors=args.raise_errors,
     )
 
     df.to_csv(args.output, index=False)
