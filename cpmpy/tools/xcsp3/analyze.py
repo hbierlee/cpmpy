@@ -315,7 +315,8 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
 
     # Add colorbar using the first scatter plot
     cbar = plt.colorbar(scatter_plots[0], ax=ax)
-    cbar.set_label(f'table {inst_metric}', rotation=270, labelpad=20)
+    if not paper:
+        cbar.set_label(f'table {inst_metric}', rotation=270, labelpad=20)
 
     min_max = [0.1, PAR]
     padding = 1.5
@@ -337,8 +338,9 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
         ax.fill_between([min_max[0], time_limit], min_max[0], time_limit, color='white', zorder=-1)
 
     # Set plot properties
-    ax.set_xlabel(f'{solver1} - {metric} [seconds]')
-    ax.set_ylabel(f'{solver2} - {metric} [seconds]')
+    if not paper:
+        ax.set_xlabel(f'{solver1} - {metric} [seconds]')
+        ax.set_ylabel(f'{solver2} - {metric} [seconds]')
 
     # Get unique year-track combinations
     year_track_pairs = df[['year', 'track']].drop_duplicates()
@@ -1179,7 +1181,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                             mask = np.triu(np.ones_like(correlation, dtype=bool))
                             correlation_masked = correlation.mask(mask)
 
-                            print(f"\n== Correlation Matrix for {solver} (diff vs baseline) ==")
+                            print(f"\n== Correlation Matrix for {solver} (diff vs baseline) on {track} ==")
                             with pd.option_context('display.float_format', '{:.6f}'.format):
                                 print(correlation_masked)
 
@@ -1309,8 +1311,9 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     fig_scatters = []
 
     # Compute global inst_metric range for consistent colorbar across plots (only solved instances)
-    inst_metric_col = "rows"
-    # inst_metric_col = "median"
+    # inst_metric_col = "rows"
+    # inst_metric_col = "min"
+    inst_metric_col = "median"
     solved_df = df[df['solved']]
     inst_metric_range = (solved_df[inst_metric_col].min(), solved_df[inst_metric_col].max())
 
@@ -1325,15 +1328,28 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
             track = track[:3]
 
+            # Mapping from alias patterns to LaTeX macros
+            ALIAS_TO_LATEX = {
+                'base_gurobi-bool': r'\baseBool',
+                'base_gurobi-gleb': r'\baseGleb',
+                'base_gurobi-mdd-reduce-dom-incr-hashtable': r'\baseMddDomIncr',
+                'base_gurobi-mdd-reduce-input-hashtable': r'\baseMddInput',
+                'lazy_gurobi-none': r'\lazyNone',
+                'lazy_gurobi-shrink': r'\lazyShrink',
+                'lazy_gurobi-fractional': r'\lazyFractional',
+                'lazy_gurobi-coverlift_com_max': r'\lazyCutlift',
+                'lazy_gurobi-best_cutoff_0': r'\lazyBest',
+                'lazy_gurobi-best_cutoff_500': r'\lazyCutoff (500)',
+                'lazy_gurobi-best_cutoff_1000': r'\lazyCutoff (1000)',
+                'lazy_gurobi-best_cutoff_2000': r'\lazyCutoff (2000)',
+            }
+
             def rename_idx(x):
-                if "base" in x:
-                    return "\\baseline"
-                elif "cutoff" in x:
-                    return "\\cutoff"
-                elif "none" in x:
-                    return "\\explain"
-                else:
-                    return f"\\{x.split('-')[1:][0]}"
+                # Check for exact match first
+                if x in ALIAS_TO_LATEX:
+                    return ALIAS_TO_LATEX[x]
+                # Fallback: keep original with escaped underscores
+                return x.replace('_', r'\_')
 
             # Aggregate per alias for tex output
             tex_df = groups.groupby('alias').agg(
@@ -1354,14 +1370,21 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 cons=('constraints', 'mean'),
             )
 
-            # # Calculate cuts only for solved instances
-            # solved_groups = groups[groups['solved']].groupby('alias').agg(
-            #     cuts=('cuts', 'mean'),
-            # )
-            tex_df = tex_df.join(cons_groups)
-            # .join(solved_groups)
+            # Calculate cuts only for instances solved by all lazy approaches
+            lazy_groups = groups[groups['alias'].str.contains('lazy', case=False)]
+            n_lazy_solvers = lazy_groups['alias'].nunique()
+            solved_by_all_lazy = lazy_groups[lazy_groups['solved']].groupby(['problem', 'instance']).filter(
+                lambda g: g['alias'].nunique() == n_lazy_solvers
+            )
+            # Calculate cuts for all solvers, but only on instances solved by all lazy approaches
+            solved_instances = solved_by_all_lazy[['problem', 'instance']].drop_duplicates()
+            cuts_data = groups.merge(solved_instances, on=['problem', 'instance'], how='inner')
+            cuts_groups = cuts_data.groupby('alias').agg(
+                cuts=('cuts', 'mean'),
+            )
+            tex_df = tex_df.join(cons_groups).join(cuts_groups)
 
-            # tex_df = tex_df.rename(index=rename_idx)
+            tex_df = tex_df.rename(index=rename_idx)
             print(tex_df)
 
             # Create a copy for formatting with bold best values
@@ -1385,6 +1408,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 'post': 'max',
                 't_solv_p2': 'min',
                 't_post_p2': 'min',
+                'cons': 'min',
+                'cuts': 'min',
             }
 
             for col, best in bold_cols.items():
@@ -1392,12 +1417,12 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     # Global best
                     global_best = tex_df_formatted[col].max() if best == 'max' else tex_df_formatted[col].min()
 
-                    # Section bests
-                    section_bests = {}
-                    for idx in tex_df_formatted.index:
-                        section = get_section(idx)
-                        section_df = tex_df_formatted[[get_section(i) == section for i in tex_df_formatted.index]]
-                        section_bests[idx] = section_df[col].max() if best == 'max' else section_df[col].min()
+                    # # Section bests
+                    # section_bests = {}
+                    # for idx in tex_df_formatted.index:
+                    #     section = get_section(idx)
+                    #     section_df = tex_df_formatted[[get_section(i) == section for i in tex_df_formatted.index]]
+                    #     section_bests[idx] = section_df[col].max() if best == 'max' else section_df[col].min()
 
                     # Format column: bold global best, italic section best
                     formatted_col = []
@@ -1406,14 +1431,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                         if pd.isna(x):
                             formatted_col.append("")
                         else:
-                            if col in ['solv', 'feas', 'post']:
+                            if col in ['solv', 'feas', 'post', 'cons', 'cuts']:
                                 formatted = f"{x:.0f}"
                             else:
                                 formatted = f"{x:.1f}"
                             if x == global_best:
                                 formatted_col.append(f"\\textbf{{{formatted}}}")
-                            elif x == section_bests[idx]:
-                                formatted_col.append(f"\\underline{{{formatted}}}")
+                            # elif x == section_bests[idx]:
+                            #     formatted_col.append(f"\\underline{{{formatted}}}")
                             else:
                                 formatted_col.append(formatted)
                     tex_df_formatted[col] = formatted_col
@@ -1429,32 +1454,76 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                         return f"{x:.1f}"
                     tex_df_formatted[col] = tex_df_formatted[col].apply(format_other)
 
-            # Format cons and cuts columns (in thousands, empty for ortools)
-            for col in ['cons',
-                        # 'cuts',
-                        ]:
+            # Format cons and cuts columns (in thousands, empty for ortools/base)
+            for col in ['cons', 'cuts']:
                 def format_cons_cuts(x, alias, col=col):
                     if 'ortools' in alias.lower():
+                        return ""
+                    # cuts only applies to lazy approaches
+                    if col == 'cuts' and 'base' in alias.lower():
                         return ""
                     if pd.isna(x):
                         return ""
                     return f"{x/1000:.1f}"
                 tex_df_formatted[col] = [format_cons_cuts(tex_df.loc[idx, col], idx) for idx in tex_df.index]
 
-            # Sort by approach type (base first, then lazy, then ortools)
+            # Sort by approach type: base first, then lazy, then cutoff
+            # Within base section, order is: gleb, base, mdd-input, mdd-dom-incr
+            # Within lazy section, order is: none, shrink, fractional, coverlift
+            def get_base_suborder(alias):
+                alias_lower = alias.lower()
+                if 'gleb' in alias_lower:
+                    return 0
+                elif 'mddinput' in alias_lower or 'mdd-input' in alias_lower:
+                    return 2
+                elif 'mdddomincr' in alias_lower or 'mdd-dom-incr' in alias_lower or 'mdd-reduce-dom-incr' in alias_lower:
+                    return 3
+                elif 'mdd' in alias_lower:
+                    return 4  # other mdd variants
+                else:
+                    return 1  # plain base (bool)
+
+            def get_lazy_suborder(alias):
+                alias_lower = alias.lower()
+                if 'none' in alias_lower:
+                    return 0
+                elif 'shrink' in alias_lower:
+                    return 1
+                elif 'fractional' in alias_lower or 'frac' in alias_lower:
+                    return 2
+                elif 'coverlift' in alias_lower or 'cutlift' in alias_lower:
+                    return 3
+                elif 'best' in alias_lower:
+                    return 5  # lazyBest comes last in lazy section
+                else:
+                    return 4
+
+            def get_cutoff_value(alias):
+                # Extract numeric cutoff value from alias
+                # Handle LaTeX format like "\lazyCutoff (500)"
+                match = re.search(r'\((\d+)\)', alias)
+                if match:
+                    return int(match.group(1))
+                # Handle original format like "cutoff_500"
+                match = re.search(r'cutoff[_-]?(\d+)', alias.lower())
+                return int(match.group(1)) if match else 0
+
             def get_approach_order(alias):
                 alias_lower = alias.lower()
+                # Check for cutoff with value > 0 (separate section)
+                cutoff_val = get_cutoff_value(alias)
+                is_cutoff = 'cutoff' in alias_lower
                 match alias_lower:
                     case s if 'base' in s:
-                        return (0, alias)
-                    case s if 'cutoff' in s:
-                        return (1, alias)
+                        return (0, get_base_suborder(alias), alias)
+                    case s if is_cutoff and cutoff_val > 0:
+                        return (2, cutoff_val, alias)
                     case s if 'lazy' in s:
-                        return (2, alias)
+                        return (1, get_lazy_suborder(alias), alias)
                     case s if 'ortools' in s:
-                        return (3, alias)
+                        return (3, 0, alias)
                     case _:
-                        return (4, alias)
+                        return (4, 0, alias)
             tex_df_formatted = tex_df_formatted.iloc[sorted(range(len(tex_df_formatted)),
                                                            key=lambda i: get_approach_order(tex_df_formatted.index[i]))]
 
@@ -1467,8 +1536,10 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     approach_boundaries.append(i)
                 prev_approach = curr_approach
 
-            # Escape underscores in alias names for LaTeX
-            tex_df_formatted.index = tex_df_formatted.index.map(lambda x: x.replace('_', r'\_'))
+            # Escape underscores in alias names for LaTeX (skip if already a LaTeX macro)
+            tex_df_formatted.index = tex_df_formatted.index.map(
+                lambda x: x if x.startswith('\\') else x.replace('_', r'\_')
+            )
 
             # Generate just the tabular content (no table wrapper)
             tabular_output = tex_df_formatted[
@@ -1476,7 +1547,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     *(["unk", "mem", "post"]),
                     *(["feas"] if is_cop else []),
                     *(["solv", "t_solv_p2", "cons",
-                       # "cuts",
+                       "cuts",
                        ])
                 ]
             ].to_latex(
@@ -1484,9 +1555,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 header=[
                     *(["\\unk", "\\mem", "\\pst"]),
                     *(["\\sat"] if is_cop else []),
-                    *(["\\sol", "time [s]", "cons [k]",
-                       # "cuts [k]",
-                       ]),
+                    *(["\\sol", "time [s]", "cons [\\thousands]", "cuts [\\thousands]"]),
                 ],
                 escape=False,  # Don't escape so \textbf works
                 index_names=False,
