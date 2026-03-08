@@ -480,7 +480,6 @@ class TableData:
                 part = np.unique(parts[choice])
                 assert len(part) == 1, f"Expected to pick a unqiue part but got {part}"
                 part = part[0]
-                assert self.is_pos(part)
 
                 # part, expected_R = self.choose(choices, R, A_enc, single_choice=False, heuristic=self.env["heuristic"])
 
