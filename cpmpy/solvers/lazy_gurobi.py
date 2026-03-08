@@ -227,11 +227,12 @@ class TableData:
             if c:
                 a = "" if A_enc is None else f"[={A_enc[i]}]"
                 part = self.parts[i]
+                j = i - np.argmax(self.parts == part)
                 if self.is_pos(part):
-                    terms.append(f"{c} * b_{show(i)}_{part}_{show(i)} {a}")
+                    terms.append(f"{c} * b_{show(i)}_{part}_{show(j)} {a}")
                 else:
                     c_ = self.counterchoice(i, part)
-                    terms.append(f"{c} * (1 - b_{show(i)}_{self.parts[c_]}_{show(c_)} {a})")
+                    terms.append(f"{c} * (1 - b_{show(i)}_{self.parts[c_]}_{show(j)} {a})")
         cut_str = " + ".join(terms)
 
         cut_str = f"{cut_str} < {k}" if STRICT_CUTS else f"{cut_str} <= {k}"
@@ -318,7 +319,8 @@ class TableData:
 
                     if self.solver.env["verbosity"]:
                         # self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
-                        self.solver.log(f"H {R.sum()} ->", H, verbosity=2)
+                        self.solver.log(show_table(H), f"H (of {R.sum()})", verbosity=2)
+                        self.solver.log(show_table(reindex), "parts", verbosity=2)
                         self.solver.log("B", B, verbosity=2)
                         self.solver.log("HB", HB, verbosity=2)
                         self.solver.log("C", show_nz(choices), verbosity=2)
@@ -598,7 +600,7 @@ class TableData:
                 # solver.log(f"C_enc = {C_enc}", verbosity=3, indent=solver.indent + 2)
 
                 solver.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
-                solver.log(f"remaining choices {show_table(T_enc[R, :])}", verbosity=3, indent=solver.indent + 2)
+                solver.log(show_table(T_enc[R, :]), "T_enc[R,:]", verbosity=3)
                 if F.any():
                     solver.log("FRAC", frm, verbosity=2, indent=solver.indent + 2)
                 solver.log(f"R ({R.sum()}) ({expected_R})", verbosity=1, indent=solver.indent + 3)
@@ -612,7 +614,7 @@ class TableData:
                 assert R.sum() == expected_R, f"Number of remaining rows is |R|={R.sum()}, but expected {expected_R}"
                 assert R.sum() < R_, f"Did not reduce rows, curr={R.sum()}, prev={R_}"
 
-        C_enc = np.zeros(cols, dtype=float)
+        C_enc = np.zeros(cols, dtype=int)
         C_enc[X] = 1
 
         if self.env["verbosity"]:
@@ -1356,11 +1358,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     assert frm == "MIPNODE-OPT"
                     yield True
                 elif explanation:
+                    expr = self.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
+                    yield expr
                     if self.env["debug"] or self.env["checked"]:
                         X, C_enc, k = explanation
                         tbl.check_explanation(X, C_enc, k, A_enc, frm, check=2)
-                    expr = self.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
-                    yield expr
                 elif is_integer:  # unsat
                     raise Infeasible
             except Infeasible:
@@ -1430,13 +1432,13 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
                     # take the first non-solution, once depeleted, take the first solution
                     if len(self.env["remain"]):
-                        if self.env["choices"] is not None:
+                        if self.env["choices"] is None:
+                            sol = min(self.env["remain"].tolist())
+                        else:
                             assert self.env["choices"], (
                                 f"Choose from\n{'\n'.join(f'{i}: {c}' for i, c in enumerate(self.env['remain']))}"
                             )
                             sol = self.env["remain"][self.env["choices"].pop()]
-                        else:
-                            sol = min(self.env["remain"].tolist())
                     else:
                         if self.env["model"].has_objective():
                             hassol = self.env["checker"].solve()
