@@ -159,6 +159,12 @@ class TableData:
         self.solver = solver
         self.n_parts = parts.max(initial=0)
 
+        # Pre-compute which variables are negated (for efficient value retrieval)
+        self.is_negated = np.array([isinstance(x, NegBoolView) for x in X_enc], dtype=bool)
+
+        # var_indices will be set by solver._finalize_tables() before solve
+        self.var_indices = None
+
         if self.env["negatives"]:
             # Pre-allocate T_enc with space for negatives
             n_rows, n_cols = T_enc.shape
@@ -1213,13 +1219,34 @@ class CPM_lazy_gurobi(CPM_gurobi):
             if self.env["debug"]:
                 self.check_max_iterations(self.env["callbacks"])
 
+    def _finalize_tables(self):
+        """Build global variable index mapping for all tables. Called before solve."""
+        # Collect all unique base variables across all tables
+        all_base_vars = []
+        var_to_idx = {}
+        for tbl in self.tables:
+            for x in tbl.X_enc:
+                base_var = x._bv if isinstance(x, NegBoolView) else x
+                if base_var not in var_to_idx:
+                    var_to_idx[base_var] = len(all_base_vars)
+                    all_base_vars.append(base_var)
+
+        # Store for callback use
+        self._all_base_vars = all_base_vars
+        self._all_grb_vars = [self._varmap[x] for x in all_base_vars]
+        self._all_values = np.empty(len(all_base_vars), dtype=float)
+
+        # Assign var_indices to each table
+        for tbl in self.tables:
+            tbl.var_indices = np.array([
+                var_to_idx[x._bv if isinstance(x, NegBoolView) else x]
+                for x in tbl.X_enc
+            ], dtype=int)
+
     def get_solution_callback(self):
         from gurobipy import GRB
 
-        xs = {x_enc_i._bv if isinstance(x_enc_i, NegBoolView) else x_enc_i for table in self.tables for x_enc_i in table.X_enc}
-        # Pre-compute separate lists for batch retrieval
-        cpm_vars = list(xs)
-        grb_vars = [self._varmap[x] for x in cpm_vars]
+        grb_vars = self._all_grb_vars
 
         def solution_callback(what, where):
             time_cb = time.time()
@@ -1243,10 +1270,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     case _:
                         return
 
-                # Batch retrieve all values at once
-                values = cbGetVal(grb_vars)
-                for x_enc_i, v in zip(cpm_vars, values):
-                    x_enc_i._value = v
+                # Batch retrieve all values into shared array
+                self._all_values[:] = cbGetVal(grb_vars)
 
                 # if self.env["verbosity"]:
                 #     self.log("VHAT", verbosity=3)
@@ -1313,11 +1338,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         for i, tbl in enumerate(self.tables, start=INDEX):
             X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
-            # Pre-allocate and fill values array
-            n = len(X_enc)
-            values = np.empty(n, dtype=float)
-            for j, x in enumerate(X_enc):
-                values[j] = 1.0 - x._bv.value() if isinstance(x, NegBoolView) else x.value()
+            # Get values for this table using pre-computed indices
+            values = self._all_values[tbl.var_indices].copy()
+            # Apply negation where needed
+            values[tbl.is_negated] = 1.0 - values[tbl.is_negated]
 
             if frm == "MIPSOL":
                 A_enc = values > 0.5
@@ -1436,6 +1460,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
 
         assert solution_callback is None, "For now, no solution_callback in `CPM_lazy_gurobi`"
 
+        # Build global variable index mapping for all tables
+        self._finalize_tables()
+
         if self.env["verbosity"]:
             self.log("Solving.. ")
 
@@ -1505,10 +1532,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     for expr, lit in self._csemap.items():
                         lit._value = expr.value()
 
-                    all_xs = {x_enc_i for tbl in self.tables for x_enc_i in tbl.X_enc}
+                    # Populate _all_values from base variable values for _explain_assignment
+                    for j, x in enumerate(self._all_base_vars):
+                        self._all_values[j] = x.value()
 
                     self.check_max_iterations(iteration)
-                    assert all(x.value() is not None for x in all_xs), f"Has sol but no value {all_xs}"
                     for expr, k in self.solution_callback_inner("MIPSOL"):
                         # self.env["checker"] += [expr <= k]
                         self.env["checker"] += [expr < k if STRICT_CUTS else expr <= k]
