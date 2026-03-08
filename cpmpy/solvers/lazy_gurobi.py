@@ -191,6 +191,7 @@ class TableData:
         else:
             self.T_enc = T_enc
             self.parts = parts
+            self.densities = self.T_enc.mean(axis=0)
 
     @property
     def env(self):
@@ -713,7 +714,7 @@ class TableData:
             solver.log(f"k = {k}", verbosity=3)
 
         # Compute the upper bound for each row
-        RS = (C_enc * T_enc).sum(axis=1)
+        RS = T_enc @ C_enc
 
         def tight(RS, k):
             return RS == k
@@ -745,11 +746,10 @@ class TableData:
             solver.log(f"S_ = {show_nz(S)}", verbosity=3)
             solver.log(f"k_ = {k}", verbosity=2)
 
-        # centre of mass heuristic
+        # centre of mass heuristic (pre-computed as self.densities)
         if heuristic in (Coverlift.COM_MIN, Coverlift.COM_MAX):
-            com = T_enc.sum(axis=0) / len(T_enc)
+            com = self.densities
             if self.env["verbosity"]:
-                solver.log("COM", T_enc.sum(axis=0), verbosity=3)
                 solver.log("COM", com, verbosity=3)
 
         for iteration in itertools.count(1):
