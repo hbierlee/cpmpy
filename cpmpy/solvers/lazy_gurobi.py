@@ -44,10 +44,6 @@ def rshift(arr, n):
     return result
 
 
-def assign_mipsol(A_enc):
-    return [1 if a > 0.5 else 0 for a in A_enc]
-
-
 def get_table_area(c):
     return len(c.args[1]) * sum(cp.expressions.utils.dom_size(x) for x in c.args[0])
 
@@ -132,18 +128,6 @@ class Infeasible(Exception):
     pass
 
 
-def rows(T, i, j=1):
-    """Row indices where T[i]==j"""
-    return cols(T.T, i, j=j)
-    # return set(int(i) for i in np.where(T[:, i] == j)[0].flatten())
-
-
-def cols(T, i, j=1):
-    """Col indices where T[i]==j"""
-    # TODO replace for rows(T.T, ..)?
-    return set(i for i in np.where(T[i, :] == j)[0].flatten())
-
-
 def union(sets):
     sets = tuple(sets)
     return set.union(*sets) if sets else set()
@@ -171,28 +155,26 @@ class TableData:
 
     def __init__(self, X_enc, T_enc, parts, cpm_expr, solver):
         self.X_enc = cp.cpm_array(X_enc)
-        self.T_enc = T_enc
-        self.parts = parts
         self.cpm_expr = cpm_expr
         self.solver = solver
         self.n_parts = parts.max(initial=0)
 
         if self.env["negatives"]:
-            self.T_enc = np.concatenate([self.T_enc, ~self.T_enc], axis=1, dtype=bool)
-            assert np.issubdtype(self.T_enc.dtype, np.bool), self.T_enc.dtype
-            # TODO !!
-            # self.parts = np.concatenate([self.parts, self.parts])
-            assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
-            # self.parts = np.concatenate([self.parts, self.n_parts + self.parts], dtype=int) if self.parts.size else self.parts
-            self.parts = (
-                np.concatenate([self.parts, np.arange(self.cols()) + self.parts.max() + 1], dtype=int)
-                if self.parts.size
-                else self.parts
-            )
+            # Pre-allocate T_enc with space for negatives
+            n_rows, n_cols = T_enc.shape
+            self.T_enc = np.empty((n_rows, n_cols * 2), dtype=bool)
+            self.T_enc[:, :n_cols] = T_enc
+            self.T_enc[:, n_cols:] = ~T_enc
 
-            # self.parts = np.concatenate([self.parts, -self.parts], dtype=int)
+            # Pre-allocate parts with space for negatives
+            if parts.size:
+                self.parts = np.empty(n_cols * 2, dtype=int)
+                self.parts[:n_cols] = parts
+                self.parts[n_cols:] = np.arange(n_cols) + parts.max() + 1
+            else:
+                self.parts = parts
+
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
-            # TODO concat
             self.densities = self.T_enc.mean(axis=0)
             self.part_counts = np.unique_counts(self.parts)
             if self.parts.size:
@@ -200,6 +182,9 @@ class TableData:
                 self.part_count_lookup[self.part_counts.values] = self.part_counts.counts
             else:
                 self.part_count_lookup = np.array([], dtype=int)
+        else:
+            self.T_enc = T_enc
+            self.parts = parts
 
     @property
     def env(self):
@@ -821,7 +806,7 @@ class TableData:
 
             # assert C_enc[j] == 0
             # Calculate new row upper bounds just for the added column
-            RS = RS + a_j * T_enc[:, j]
+            RS += a_j * T_enc[:, j]
 
             # Find and update newly tight rows
             N_tight = ~R_tight & tight(RS, k)
@@ -1232,7 +1217,9 @@ class CPM_lazy_gurobi(CPM_gurobi):
         from gurobipy import GRB
 
         xs = {x_enc_i._bv if isinstance(x_enc_i, NegBoolView) else x_enc_i for table in self.tables for x_enc_i in table.X_enc}
-        all_xs = tuple((x, self._varmap[x]) for x in xs)
+        # Pre-compute separate lists for batch retrieval
+        cpm_vars = list(xs)
+        grb_vars = [self._varmap[x] for x in cpm_vars]
 
         def solution_callback(what, where):
             time_cb = time.time()
@@ -1256,8 +1243,10 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     case _:
                         return
 
-                for x_enc_i, grb_x in all_xs:
-                    x_enc_i._value = cbGetVal(grb_x)
+                # Batch retrieve all values at once
+                values = cbGetVal(grb_vars)
+                for x_enc_i, v in zip(cpm_vars, values):
+                    x_enc_i._value = v
 
                 # if self.env["verbosity"]:
                 #     self.log("VHAT", verbosity=3)
@@ -1315,28 +1304,29 @@ class CPM_lazy_gurobi(CPM_gurobi):
             b = lambda: True
         return a() if self.env.get("variant", 0) == 0 else b()
 
+    @line_profile
     def _explain_assignment(self, frm=None):
         # If fully integer, we can check if the tables are feasible yet
         if self.env["verbosity"]:
             self.log("EXPLAIN", frm, verbosity=2)
             self.log("Full sol", verbosity=4)
 
-        def value(x):
-            return 1.0 - x._bv.value() if isinstance(x, NegBoolView) else x.value()
-
         for i, tbl in enumerate(self.tables, start=INDEX):
             X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
+            # Pre-allocate and fill values array
+            n = len(X_enc)
+            values = np.empty(n, dtype=float)
+            for j, x in enumerate(X_enc):
+                values[j] = 1.0 - x._bv.value() if isinstance(x, NegBoolView) else x.value()
+
             if frm == "MIPSOL":
-                A_enc = np.fromiter((value(x) > 0.5 for x in X_enc), dtype=bool)
-                assert A_enc.dtype == bool, A_enc.dtype
+                A_enc = values > 0.5
                 is_integer = True
             else:
-                A_enc = np.fromiter((value(x) for x in X_enc), dtype=float)
-                assert A_enc.dtype == float
+                A_enc = values
                 is_integer = False
                 if self.is_integral(A_enc).all():
                     A_enc = A_enc > 0.5
-                    assert A_enc.dtype == bool
                     is_integer = True
 
             # TODO figure out when can be skipped
