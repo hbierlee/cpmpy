@@ -110,6 +110,9 @@ SEED = 42
 def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_none=True):
     if features is None:
         features = FEATURES
+
+    BEST = enable_all(features) | {"shrink": False, "negatives": True}
+
     return glob_filter(
         [
             *[{"solver": "ortools", "alias": "ortools", "solve_kwargs": {"random_seed": SEED}}],
@@ -173,9 +176,8 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                 for alias, solver_kwargs in [
                     (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.DOM_INCR, "reduce": True})
                     for alias, env in ablate(features, add_none=add_none, add_all=add_all)
-                    + [("best", enable_all(features) | {})]
-                    + [(f"best_cutoff_{c}", enable_all(features) | {"shrink": False, "cutoff": c}) for f, c in FEATURES if f == "cutoff" for c in c]
-                    + [("best_no_cutoff", enable_all(features) | {"negatives": False, "cutoff": 0})]
+                    + [("best", BEST | {})]
+                    + [(f"best_cutoff_{c}", BEST | {"cutoff": c}) for f, c in FEATURES if f == "cutoff" for c in c]
                     + [
                         (
                             "dev",
