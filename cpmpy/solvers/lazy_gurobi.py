@@ -175,7 +175,7 @@ class TableData:
         self.parts = parts
         self.cpm_expr = cpm_expr
         self.solver = solver
-        self.pos = parts.max(initial=0)
+        self.n_parts = parts.max(initial=0)
 
         if self.env["negatives"]:
             self.T_enc = np.concatenate([self.T_enc, ~self.T_enc], axis=1, dtype=bool)
@@ -183,12 +183,14 @@ class TableData:
             # TODO !!
             # self.parts = np.concatenate([self.parts, self.parts])
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
-            # self.parts = np.concatenate([self.parts, -self.parts], dtype=int) if self.parts.size else self.parts
-            self.parts = (
-                np.concatenate([self.parts, np.arange(self.cols()) + self.parts.max() + 1], dtype=int)
-                if self.parts.size
-                else self.parts
-            )
+            self.parts = np.concatenate([self.parts, self.n_parts + self.parts], dtype=int) if self.parts.size else self.parts
+            # self.parts = (
+            #     np.concatenate([self.parts, np.arange(self.cols()) + self.parts.max() + 1], dtype=int)
+            #     if self.parts.size
+            #     else self.parts
+            # )
+
+            # self.parts = np.concatenate([self.parts, -self.parts], dtype=int)
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
             # TODO concat
             self.densities = self.T_enc.mean(axis=0)
@@ -310,6 +312,7 @@ class TableData:
                     if self.env["debug"]:
                         assert ((0 < B) & (B < 1)).all(), f"B values out of range: {B}"
                     HB = H - B  # lex obj since 0<B<1 (no constant cols)
+                    HB = H
 
                     h = np.argmin(HB)
 
@@ -319,7 +322,7 @@ class TableData:
                         self.solver.log("B", B, verbosity=2)
                         self.solver.log("HB", HB, verbosity=2)
                         self.solver.log("C", show_nz(choices), verbosity=2)
-                        self.solver.log("h", show(h))
+                        self.solver.log("h", show(h), verbosity=3)
 
                     if self.env["debug"]:
                         assert H.min() < R.sum()
@@ -349,6 +352,11 @@ class TableData:
 
                     if self.solver.env["verbosity"]:
                         self.solver.log("H", H, verbosity=3)
+                        self.solver.log("reindex", h, verbosity=3)
+
+                if self.solver.env["verbosity"]:
+                    self.solver.log("reindex", reindex, verbosity=3)
+                    self.solver.log("reindex", h, reindex[h], verbosity=3)
 
                 expected_R = H[h]
                 # h is index into parts, map back to column index
@@ -366,7 +374,12 @@ class TableData:
                 # return choice if choice is not None else self.solver.choose(A, T_enc, R, heuristic=Heuristic.GREEDY)
 
     def is_pos(self, part):
-        return part <= self.pos
+        return part <= self.n_parts
+
+    def counterpart(self, part):
+        assert self.env["negatives"]
+        return part + self.n_parts if self.is_pos(part) else part - self.n_parts
+        # TODO faster with mod?
 
     def counterchoice(self, choice, part):
         assert self.env["negatives"]
@@ -495,9 +508,6 @@ class TableData:
 
                 # R <- T_i
                 R = T_enc[:, choice]
-                # R = R & T_enc[:, choice_parts & A_enc_pos].any(1)
-
-                # k = A_enc[choice]
 
                 if self.solver.env["negatives"]:
                     # Exclude the counterchoices
@@ -505,6 +515,7 @@ class TableData:
                     if self.env["verbosity"]:
                         self.solver.log("rm counter", show(counterchoice))
                     choices[counterchoice] = False
+                    choices[parts == self.counterpart(part)] = False
 
                 if self.env["verbosity"]:
                     solver.log(
@@ -562,6 +573,7 @@ class TableData:
                 if self.env["verbosity"]:
                     self.solver.log("rm counters: ", show_nz(counterchoices))
                 choices[counterchoices] = False
+                choices[parts == self.counterpart(part)] = False
 
             # k += A_enc[added].sum()
 
@@ -586,6 +598,7 @@ class TableData:
                 # solver.log(f"C_enc = {C_enc}", verbosity=3, indent=solver.indent + 2)
 
                 solver.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
+                solver.log(f"remaining choices {show_table(T_enc[R, :])}", verbosity=3, indent=solver.indent + 2)
                 if F.any():
                     solver.log("FRAC", frm, verbosity=2, indent=solver.indent + 2)
                 solver.log(f"R ({R.sum()}) ({expected_R})", verbosity=1, indent=solver.indent + 3)
@@ -596,7 +609,7 @@ class TableData:
                 self.show_cut(X, get_k(), A_enc=A_enc, verbosity=1, frm=frm, check=1)
 
             if self.env["debug"]:
-                assert R.sum() == expected_R, f"{R.sum()} {expected_R}"
+                assert R.sum() == expected_R, f"Number of remaining rows is |R|={R.sum()}, but expected {expected_R}"
                 assert R.sum() < R_, f"Did not reduce rows, curr={R.sum()}, prev={R_}"
 
         C_enc = np.zeros(cols, dtype=float)
@@ -825,7 +838,6 @@ class TableData:
         #     X, C_enc, k = self.revert_cut(X, C_enc, k)
 
         expr = self.get_expr(X, C_enc, k)
-
 
         # == {" + ".join(w * x.value() for (ws, xs, k) in terms(expr) for w, x in zip(ws, xs))}
         case = f"""The explanation
