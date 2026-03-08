@@ -210,8 +210,8 @@ class TableData:
     def cols(self):
         return (len(self.T_enc.T) // 2) if self.env["negatives"] else len(self.T_enc.T)
 
-    def get_expr(self, X, C_enc, k, revert=True):
-        if self.solver.env["negatives"] and revert:
+    def get_expr(self, X, C_enc, k):
+        if self.solver.env["negatives"] and len(X) > self.cols():
             X, C_enc, k = self.revert_cut(X, C_enc, k)
         return cp.sum(C_enc[X] * self.X_enc[X]) < k if STRICT_CUTS else cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
@@ -377,11 +377,14 @@ class TableData:
             return rshift(choice, self.cols()) if is_pos else lshift(choice, self.cols())
 
     @line_profile
-    def explain(self, A_enc, frm=None, is_integer=None):
+    def initial(self, A_enc, frm=None, is_integer=None):
         """The `explain_frac2` alg."""
         T_enc = self.T_enc
         parts = self.parts
         solver = self.solver
+
+        def get_k():
+            return len(np.unique(self.parts[X])) - 1
 
         def assert_example(A, B):
             assert (A.nonzero()[0] == [i - 1 for i in B]).all(), A.nonzero()[0]
@@ -444,8 +447,6 @@ class TableData:
             solver.log(f"W = {show_nz(W)}", verbosity=3)
             solver.log(f"F = {show_nz(F)}", verbosity=3)
 
-        C_enc = np.zeros(cols, dtype=float)
-
         if F.any():
             # D are the difficult rows which only contain 1s for each W/F columns
             if self.env["verbosity"]:
@@ -497,7 +498,6 @@ class TableData:
                 # R = R & T_enc[:, choice_parts & A_enc_pos].any(1)
 
                 # k = A_enc[choice]
-                k = 0
 
                 if self.solver.env["negatives"]:
                     # Exclude the counterchoices
@@ -515,7 +515,7 @@ class TableData:
                     # solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"V = {np.unique(parts[X])}")
-                    self.show_cut(X, k, A_enc=A_enc, verbosity=1, frm=frm, check=1)
+                    self.show_cut(X, get_k(), A_enc=A_enc, verbosity=1, frm=frm, check=1)
                     # solver.log(f"C_enc = {C_enc}", verbosity=3, indent=solver.indent + 2)
 
                 if self.env["example_frac"]:
@@ -528,7 +528,6 @@ class TableData:
             R = np.ones(m, dtype=bool)
             X = np.zeros(len(T_enc.T), dtype=bool)
             choices = np.ones(len(T_enc.T), dtype=bool)
-            k = -1
 
         if self.env["verbosity"]:
             solver.log(f"R ({R.sum()})", verbosity=2, indent=solver.indent + 2)
@@ -565,7 +564,6 @@ class TableData:
                 choices[counterchoices] = False
 
             # k += A_enc[added].sum()
-            k += 1
 
             X[added] = True
             # C_enc[added] = A_enc[added]
@@ -593,21 +591,34 @@ class TableData:
                 solver.log(f"R ({R.sum()}) ({expected_R})", verbosity=1, indent=solver.indent + 3)
                 solver.log(f"  = {show_nz(R)} ", verbosity=3, indent=solver.indent + 3)
                 solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
-                solver.log(f"k = {k}", verbosity=3, indent=solver.indent + 2)
+                solver.log(f"k = {get_k()}", verbosity=3, indent=solver.indent + 2)
 
-                self.show_cut(X, k, A_enc=A_enc, verbosity=1, frm=frm, check=1)
+                self.show_cut(X, get_k(), A_enc=A_enc, verbosity=1, frm=frm, check=1)
 
             if self.env["debug"]:
                 assert R.sum() == expected_R, f"{R.sum()} {expected_R}"
                 assert R.sum() < R_, f"Did not reduce rows, curr={R.sum()}, prev={R_}"
 
+        C_enc = np.zeros(cols, dtype=float)
         C_enc[X] = 1
 
         if self.env["verbosity"]:
             solver.log(f"by explanation of size ({sum(X)})", verbosity=2)
             solver.log(show_nz(X), verbosity=3)
             # solver.log("C_enc", C_enc, verbosity=3)
-            self.show_cut(X, k, C_enc=C_enc, A_enc=A_enc, verbosity=1, frm=frm)
+            self.show_cut(X, get_k(), C_enc=C_enc, A_enc=A_enc, verbosity=1, frm=frm)
+        return X, C_enc, get_k()
+
+    @line_profile
+    def explain(self, A_enc, frm=None, is_integer=None):
+        T_enc = self.T_enc
+        parts = self.parts
+        solver = self.solver
+
+        explanation = self.initial(A_enc, frm=frm, is_integer=is_integer)
+        if not isinstance(explanation, tuple):
+            return explanation
+        X, C_enc, k = explanation
 
         if self.env["shrink"]:
             C_enc, k = solver.shrink(X, C_enc, k, T_enc, A_enc, parts)
@@ -642,7 +653,7 @@ class TableData:
                 assert len(X[:n]) == len(X[n:])
                 duplicates = np.flatnonzero(X[:n] & X[n:])
                 assert len(duplicates) == 0, (
-                    f"Both b_{show(duplicates)} and (1 - b_{show(duplicates)}) in cut for {show_nz(X)} / {self.cols()}\n\n{self.get_expr(X_, C_enc_, k_, revert=False)}\n\n{show_nz(X[:n])} \n {show_nz(X[n:]) + self.cols()} "
+                    f"Both b_{show(duplicates)} and (1 - b_{show(duplicates)}) in cut for {show_nz(X)} / {self.cols()}\n\n{self.get_expr(X_, C_enc_, k_)}\n\n{show_nz(X[:n])} \n {show_nz(X[n:]) + self.cols()} "
                 )
             if self.env["verbosity"]:
                 self.solver.log("pos/neg = ", X[:n].sum(), X[n:].sum(), verbosity=2)
@@ -665,9 +676,13 @@ class TableData:
         # Compute the upper bound for each row
         RS = (C_enc * T_enc).sum(axis=1)
 
+        def tight(RS, k):
+            return RS == k
+            return solver.is_ge(RS, k)  # TODO if C_enc/k become fractional
+
         # All rows where upper bound == k are tight
         # TODO account for  self.solver.is_eq(RS, k)
-        R_tight = self.solver.is_ge(RS, k)
+        R_tight = tight(RS, k)
 
         # TODO earlier return
 
@@ -760,7 +775,7 @@ class TableData:
             RS = RS + a_j * T_enc[:, j]
 
             # Find and update newly tight rows
-            N_tight = ~R_tight & self.solver.is_ge(RS, k)
+            N_tight = ~R_tight & tight(RS, k)
             R_tight |= N_tight
 
             # Add var and coefficient to cut
@@ -802,17 +817,15 @@ class TableData:
         parts = self.parts
         X_enc = self.X_enc
 
+        # in case of reverted negative
+        A_enc = A_enc[: len(C_enc)]
+        T_enc = T_enc[:, : len(C_enc)]
+
+        # if self.solver.env["negatives"] and len(X) > self.cols():
+        #     X, C_enc, k = self.revert_cut(X, C_enc, k)
+
         expr = self.get_expr(X, C_enc, k)
 
-        def value(expr, value):
-            # TODO account for parts
-            if is_true_cst(expr):
-                return True
-            (expr,) = only_positive_bv([expr])
-            ws, xs, k = terms(expr)  # sum(ws*xs) <= k
-            lhs = sum(w * value[x] for w, x in zip(ws, xs))
-            cut = solver.is_lt(lhs, k) if STRICT_CUTS else solver.is_le(lhs, k)
-            return bool(cut)  # np -> python bool
 
         # == {" + ".join(w * x.value() for (ws, xs, k) in terms(expr) for w, x in zip(ws, xs))}
         case = f"""The explanation
@@ -1331,11 +1344,11 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     assert frm == "MIPNODE-OPT"
                     yield True
                 elif explanation:
-                    expr = self.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
-                    yield expr
                     if self.env["debug"] or self.env["checked"]:
                         X, C_enc, k = explanation
                         tbl.check_explanation(X, C_enc, k, A_enc, frm, check=2)
+                    expr = self.explanation_to_expr(explanation, A_enc, X_enc, T_enc, frm)
+                    yield expr
                 elif is_integer:  # unsat
                     raise Infeasible
             except Infeasible:
