@@ -257,7 +257,7 @@ class TableData:
             )
             # self.solver.log(self.cpm_expr)
             self.solver.log(
-                show_table(T_enc[np.ix_(R, choices)], full=self.env["verbosity"] >= 4), "T_enc[R,choices]", verbosity=3
+                show_table(T_enc[R][:, choices], full=self.env["verbosity"] >= 4), "T_enc[R,choices]", verbosity=3
             )
             self.solver.log("", parts[choices], "parts[choices]", verbosity=3)
             self.solver.log("", show_table(A_enc[choices]), "A_enc[choices]", verbosity=3)
@@ -281,7 +281,7 @@ class TableData:
 
                 H = np.bitwise_or.reduceat(
                     # get only the relevant rows and columns
-                    T_enc[np.ix_(R, choices)],
+                    T_enc[R][:, choices],
                     # for the columns of each part
                     indices,
                     # see if there is any 1 in the col
