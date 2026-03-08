@@ -183,12 +183,12 @@ class TableData:
             # TODO !!
             # self.parts = np.concatenate([self.parts, self.parts])
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
-            self.parts = np.concatenate([self.parts, self.n_parts + self.parts], dtype=int) if self.parts.size else self.parts
-            # self.parts = (
-            #     np.concatenate([self.parts, np.arange(self.cols()) + self.parts.max() + 1], dtype=int)
-            #     if self.parts.size
-            #     else self.parts
-            # )
+            # self.parts = np.concatenate([self.parts, self.n_parts + self.parts], dtype=int) if self.parts.size else self.parts
+            self.parts = (
+                np.concatenate([self.parts, np.arange(self.cols()) + self.parts.max() + 1], dtype=int)
+                if self.parts.size
+                else self.parts
+            )
 
             # self.parts = np.concatenate([self.parts, -self.parts], dtype=int)
             assert np.issubdtype(self.parts.dtype, np.integer), self.parts.dtype
@@ -217,10 +217,8 @@ class TableData:
             X, C_enc, k = self.revert_cut(X, C_enc, k)
         return cp.sum(C_enc[X] * self.X_enc[X]) < k if STRICT_CUTS else cp.sum(C_enc[X] * self.X_enc[X]) <= k
 
-    def show_cut(self, X, k, C_enc=None, frm=None, A_enc=None, verbosity=2, check=2):
+    def show_cut(self, X, C_enc, k, frm=None, A_enc=None, verbosity=2, check=2):
         assert self.env["verbosity"]
-        if C_enc is None:
-            C_enc = X.astype(int)
 
         terms = []
         for i, c in enumerate(C_enc):
@@ -231,16 +229,13 @@ class TableData:
                 if self.is_pos(part):
                     terms.append(f"{c} * b_{show(i)}_{part}_{show(j)} {a}")
                 else:
-                    c_ = self.counterchoice(i, part)
+                    c_ = self.counterchoice(i)
                     terms.append(f"{c} * (1 - b_{show(i)}_{self.parts[c_]}_{show(j)} {a})")
         cut_str = " + ".join(terms)
 
         cut_str = f"{cut_str} < {k}" if STRICT_CUTS else f"{cut_str} <= {k}"
-        self.solver.log(
-            f"cut {frm if frm is not None else ''} == {cut_str}",
-            indent=2,
-            verbosity=verbosity,
-        )
+        self.solver.log(f"cut {frm if frm is not None else ''} == {cut_str}", indent=2, verbosity=verbosity)
+        self.solver.log(f"C_enc = {C_enc}", indent=2, verbosity=verbosity)
         # self.solver.log(self.X_enc.value(), indent=2, verbosity=3)
         expr = self.get_expr(X, C_enc, k)
         self.solver.log(expr, indent=2, verbosity=3)
@@ -301,30 +296,32 @@ class TableData:
                     axis=1,
                 ).sum(0)
 
+                if self.solver.env["verbosity"]:
+                    self.solver.log(show_table(H), f"H (of {R.sum()})", verbosity=2)
+
                 # how many rows will be kept (low is good)
                 # H = T_enc[np.ix_(R, choices)].sum(0)  # number of 1's
                 if self.solver.env["negatives"] and not single_choice:
                     densities = self.densities
 
                     # TODO never picks negative terms?
-                    # B = 0
 
                     B = 1 / (1 + self.part_count_lookup[counts.values])
+                    # B = np.zeros(len(H))
                     if self.env["debug"]:
                         assert ((0 < B) & (B < 1)).all(), f"B values out of range: {B}"
-                    HB = H - B  # lex obj since 0<B<1 (no constant cols)
-                    HB = H
-
-                    h = np.argmin(HB)
 
                     if self.solver.env["verbosity"]:
                         # self.solver.log(show_table(densities[choices]), "^DDD", verbosity=3)
-                        self.solver.log(show_table(H), f"H (of {R.sum()})", verbosity=2)
                         self.solver.log(show_table(reindex), "parts", verbosity=2)
                         self.solver.log("B", B, verbosity=2)
-                        self.solver.log("HB", HB, verbosity=2)
-                        self.solver.log("C", show_nz(choices), verbosity=2)
-                        self.solver.log("h", show(h), verbosity=3)
+                        # self.solver.log("HB", HB, verbosity=2)
+                        # self.solver.log("C", show_nz(choices), verbosity=2)
+
+                    # B = 0
+
+                    HB = H - B  # lex obj since 0<B<1 (no constant cols)
+                    h = np.argmin(HB)
 
                     if self.env["debug"]:
                         assert H.min() < R.sum()
@@ -348,23 +345,20 @@ class TableData:
                     # if self.solver.env["verbosity"]:
                     #     self.solver.log("H", H, verbosity=3)
                     #     self.solver.log("B", B, verbosity=3)
-
                 else:
                     h = np.argmin(H)
 
-                    if self.solver.env["verbosity"]:
-                        self.solver.log("H", H, verbosity=3)
-                        self.solver.log("reindex", h, verbosity=3)
-
                 if self.solver.env["verbosity"]:
-                    self.solver.log("reindex", reindex, verbosity=3)
-                    self.solver.log("reindex", h, reindex[h], verbosity=3)
+                    self.solver.log("chooes #h from H", show(h), H, verbosity=3)
+                    self.solver.log("reindex arr", reindex, verbosity=3)
+                    self.solver.log("reindex", h, reindex[h], choices[parts == reindex[h]], verbosity=3)
 
                 expected_R = H[h]
                 # h is index into parts, map back to column index
                 # chosen_part = counts.values[h]
                 # return np.flatnonzero(choices & (parts == chosen_part))[0]
-                return reindex[h], expected_R
+                # return parts == reindex[h] if not single_choice else (np.arange(len(parts)) == reindex[h]), expected_R
+                return choices & (parts == reindex[h]) if not single_choice else reindex[h], expected_R
 
             case Heuristic.REDUCE:
                 assert False
@@ -383,12 +377,13 @@ class TableData:
         return part + self.n_parts if self.is_pos(part) else part - self.n_parts
         # TODO faster with mod?
 
-    def counterchoice(self, choice, part):
+    def counterchoice(self, choice):
         assert self.env["negatives"]
-        is_pos = self.is_pos(part)
         if isinstance(choice, (int, np.integer)):
+            is_pos = choice < self.cols()
             return choice + self.cols() if is_pos else choice - self.cols()
         else:
+            is_pos = np.argmax(choice) < self.cols()
             return rshift(choice, self.cols()) if is_pos else lshift(choice, self.cols())
 
     @line_profile
@@ -397,6 +392,7 @@ class TableData:
         T_enc = self.T_enc
         parts = self.parts
         solver = self.solver
+        A_enc = A_enc.astype(float)
 
         def get_k():
             return len(np.unique(self.parts[X])) - 1
@@ -462,6 +458,8 @@ class TableData:
             solver.log(f"W = {show_nz(W)}", verbosity=3)
             solver.log(f"F = {show_nz(F)}", verbosity=3)
 
+        C_enc = np.zeros(cols, dtype=int)
+
         if F.any():
             # D are the difficult rows which only contain 1s for each W/F columns
             if self.env["verbosity"]:
@@ -488,10 +486,15 @@ class TableData:
                 # i = choice
                 choices = U & A_enc_pos
                 choice, expected_R = self.choose(choices, R, A_enc, single_choice=True, heuristic=self.env["heuristic"])
+                part = np.unique(parts[choice])
+                assert len(part) == 1, f"Expected to pick a unqiue part but got {part}"
+                part = part[0]
+                assert self.is_pos(part)
+
                 # part, expected_R = self.choose(choices, R, A_enc, single_choice=False, heuristic=self.env["heuristic"])
 
-                part = parts[choice]
-                choice_parts = parts == part
+                # part = parts[choice]
+                # choice_parts = parts == part
 
                 if self.env["example_frac"]:
                     assert_example(W, [6])
@@ -502,33 +505,40 @@ class TableData:
 
                 # V <- {p(i)}
                 choices = np.ones(cols, dtype=bool)
-                choices[choice_parts] = False  # DON'T choose from current part
+                choices[parts == part] = False  # DON'T choose from current part
 
                 # X <- {i}
                 X = np.zeros(cols, dtype=bool)
                 X[choice] = True
+                # C_enc[choice] = 1.0 / A_enc[choice]
+                C_enc[choice] = 1
 
                 # R <- T_i
-                R = T_enc[:, choice]
+                # R = T_enc[:, choice]
+                R = R & T_enc[:, choice]
 
                 if self.solver.env["negatives"]:
                     # Exclude the counterchoices
-                    counterchoice = self.counterchoice(choice, part)
+                    counterchoice = self.counterchoice(choice)
                     if self.env["verbosity"]:
                         self.solver.log("rm counter", show(counterchoice))
                     choices[counterchoice] = False
-                    choices[parts == self.counterpart(part)] = False
+                    for counterpart in np.unique(parts[counterchoice]):
+                        choices[parts == counterpart] = False
+
+                    # choices[parts == self.counterpart(part)] = False
 
                 if self.env["verbosity"]:
                     solver.log(
-                        f"intially chosen from U; partition {part} -> choice {show(choice)}",
+                        f"intially chosen from U; add/choice {show_nz(choice)}",
                         verbosity=3,
                         indent=solver.indent + 2,
                     )
+                    assert R.sum() == expected_R, f"Number of remaining rows is |R|={R.sum()}, but expected {expected_R}"
                     # solver.log(f"part = {part}", verbosity=3, indent=solver.indent + 2)
-                    solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
+                    # solver.log(f"choices = {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
                     solver.log(f"V = {np.unique(parts[X])}")
-                    self.show_cut(X, get_k(), A_enc=A_enc, verbosity=1, frm=frm, check=1)
+                    self.show_cut(X, C_enc, get_k(), A_enc=A_enc, verbosity=1, frm=frm, check=1)
                     # solver.log(f"C_enc = {C_enc}", verbosity=3, indent=solver.indent + 2)
 
                 if self.env["example_frac"]:
@@ -555,48 +565,67 @@ class TableData:
             if none(R):
                 break
 
-            part, expected_R = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
-            if part is None:
-                assert False, "no part"
-                return True
+            add, expected_R = self.choose(choices & A_enc_pos, R, A_enc, heuristic=self.env["heuristic"])
+            part = np.unique(parts[add])
+
+            # part = parts[add]
+            # if part is None:
+            #     assert False, "no part"
+            #     return True
 
             # assert choice is not None and not X[part], choice
 
-            is_pos = self.is_pos(part)
+            # is_pos = self.is_pos(part)
 
-            choice_parts = parts == part  # l
+            # choice_parts = parts == part  # l
 
-            choices[choice_parts] = False
-            added = choice_parts & A_enc_pos
+            choices[add] = False
+
+            # choices[choice] = False
+            # added = choice_parts & A_enc_pos
+
+            # if self.solver.env["negatives"]:
+            #     # Exclude the counterchoices
+            #     counterchoices = self.counterchoice(add, part)
+            #     if self.env["verbosity"]:
+            #         self.solver.log("rm counters: ", show_nz(counterchoices))
+            #     choices[counterchoices] = False
+            #     # choices[parts == self.counterpart(part)] = False
 
             if self.solver.env["negatives"]:
                 # Exclude the counterchoices
-                counterchoices = self.counterchoice(added, part)
+                counterchoice = self.counterchoice(add)
                 if self.env["verbosity"]:
-                    self.solver.log("rm counters: ", show_nz(counterchoices))
-                choices[counterchoices] = False
-                choices[parts == self.counterpart(part)] = False
+                    self.solver.log(
+                        "rm counter", show_nz(add), show_nz(counterchoice), parts[add], np.unique(parts[counterchoice])
+                    )
+                choices[counterchoice] = False
+                for counterpart in np.unique(parts[counterchoice]):
+                    choices[parts == counterpart] = False
 
             # k += A_enc[added].sum()
 
-            X[added] = True
-            # C_enc[added] = A_enc[added]
+            X[add] = True
+            # C_enc[choice] = 1.0 / A_enc[choice]
+            C_enc[add] = 1
 
             if self.env["debug"]:
                 R_ = R.sum()
-            R = R & T_enc[:, added].any(1)
+
+            R = R & T_enc[:, add].any(1)
+            # R = R & T_enc[:, choice]
 
             solver.check_max_iterations(iteration)
 
             if self.env["verbosity"]:
-                self.solver.log("c ==", (choice_parts & A_enc_pos).sum(), verbosity=2)
+                # self.solver.log("c ==", (choice_parts & A_enc_pos).sum(), verbosity=2)
                 solver.log(f"V = {np.unique(parts[X])}")
                 solver.log(
-                    f"chosen {'pos' if self.is_pos(part) else 'neg'} part {part}",
+                    f"chosen {'POS' if self.is_pos(part) else 'NEG'} part {part}",
                     verbosity=3,
                     indent=solver.indent + 2,
                 )
-                solver.log(f"added columns {show_nz(added)} = {A_enc[added]}", verbosity=3, indent=solver.indent + 2)
+                # solver.log(f"added columns {show_nz(added)} = {A_enc[added]}", verbosity=3, indent=solver.indent + 2)
                 # solver.log(f"C_enc = {C_enc}", verbosity=3, indent=solver.indent + 2)
 
                 solver.log(f"remaining choices {show_nz(choices)}", verbosity=3, indent=solver.indent + 2)
@@ -608,20 +637,25 @@ class TableData:
                 solver.log(f"X {show_nz(X)}", verbosity=3, indent=solver.indent + 2)
                 solver.log(f"k = {get_k()}", verbosity=3, indent=solver.indent + 2)
 
-                self.show_cut(X, get_k(), A_enc=A_enc, verbosity=1, frm=frm, check=1)
+                self.show_cut(X, C_enc, get_k(), A_enc=A_enc, verbosity=1, frm=frm, check=1)
+
+            # assert self.is_pos(part)
 
             if self.env["debug"]:
+                assert self.solver.is_eq(A_enc[add].sum(), 1), (
+                    f"Choices {show_nz(add)} added to {A_enc[add].sum()} for counterexample {A_enc}"
+                )
                 assert R.sum() == expected_R, f"Number of remaining rows is |R|={R.sum()}, but expected {expected_R}"
                 assert R.sum() < R_, f"Did not reduce rows, curr={R.sum()}, prev={R_}"
 
-        C_enc = np.zeros(cols, dtype=int)
-        C_enc[X] = 1
+        # C_enc = np.zeros(cols, dtype=int)
+        # C_enc[X] = 1
 
         if self.env["verbosity"]:
             solver.log(f"by explanation of size ({sum(X)})", verbosity=2)
             solver.log(show_nz(X), verbosity=3)
             # solver.log("C_enc", C_enc, verbosity=3)
-            self.show_cut(X, get_k(), C_enc=C_enc, A_enc=A_enc, verbosity=1, frm=frm)
+            self.show_cut(X, C_enc, get_k(), A_enc=A_enc, verbosity=1, frm=frm)
         return X, C_enc, get_k()
 
     @line_profile
@@ -651,10 +685,10 @@ class TableData:
                 add = X.sum() - Xl
                 solver.log("coverlift added ", add, "of", Xl, verbosity=2)
                 if add:
-                    self.show_cut(X, k, C_enc=C_enc, frm=frm, A_enc=A_enc)
+                    self.show_cut(X, C_enc, k, frm=frm, A_enc=A_enc)
 
         if self.env["verbosity"]:
-            self.show_cut(X, k, C_enc=C_enc, frm=frm, A_enc=A_enc, verbosity=1)
+            self.show_cut(X, C_enc, k, frm=frm, A_enc=A_enc, verbosity=1)
 
         self.env["cuts"][-1]["size"] = len(X)
 
@@ -800,7 +834,7 @@ class TableData:
             X |= T_enc[N_tight, :].any(0)
 
             if self.env["negatives"]:
-                X[self.counterchoice(j, self.parts[j])] = True
+                X[self.counterchoice(j)] = True
 
             if self.env["verbosity"]:
                 solver.log(f"S = {show_nz(S)}", verbosity=3)
@@ -812,7 +846,7 @@ class TableData:
                 solver.log(f"X = {show_nz(X)}", verbosity=3)
                 solver.log(f"choices = {show_nz(~X)}", verbosity=3)
                 # solver.log("A", a_j * T_enc_.T[j], verbosity=3)
-                self.show_cut(S, k, C_enc=C_enc, A_enc=A_enc, verbosity=2)
+                self.show_cut(S, C_enc, k, A_enc=A_enc, verbosity=2)
 
             assert not self.env["example2"] or a_j == [2, 1, 1][iteration]
 
