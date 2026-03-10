@@ -499,8 +499,6 @@ class CPM_gurobi(SolverInterface):
                         self.prefix = prefix
                         self.counter = counter
 
-
-
                     def __eq__(self, other):
                         if not isinstance(other, Prefix):
                             return False
@@ -600,10 +598,8 @@ class CPM_gurobi(SolverInterface):
                         return self._hash
 
 
-
-
                 def lookup_mdd(mdd_node, cache):
-                    while isinstance(mdd_node, Prefix):
+                    if isinstance(mdd_node, Prefix):
                         mdd_node = cache[mdd_node]
                     return mdd_node
 
@@ -626,7 +622,6 @@ class CPM_gurobi(SolverInterface):
                 def reduce_mdd(mdd_node, mdd, level):
                     if isinstance(mdd_node, TerminatingState):
                         return mdd_node
-
 
                     mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
 
@@ -651,14 +646,14 @@ class CPM_gurobi(SolverInterface):
                     lookups = mdd.MDD_cache_reverse.get(key, set())
 
                     for lookup in lookups:
-                        if lookup.prefix in mdd.repeated_keys:
-                            return Prefix(lookup.prefix).__deepcopy__()
+                        if lookup in mdd.repeated_keys:
+                            return lookup.__deepcopy__()
                         else:
-                            temp = lookup.prefix
+                            temp = lookup.__deepcopy__()
 
                     if temp is not None:
                         mdd.repeated_keys.add(temp)
-                        return Prefix(temp).__deepcopy__()
+                        return temp
 
                     update_mdd_cache(mdd, Prefix(mdd_node.prefix), G, combined)
 
@@ -679,7 +674,7 @@ class CPM_gurobi(SolverInterface):
 
                     if combined:
                         if isinstance(mdd_node, MDD_node):
-                            if mdd_node.prefix in mdd.repeated_keys:
+                            if tuple_key in mdd.repeated_keys:
                                 prev_node = mdd.MDD_cache[tuple_key].deepcopy()
                                 update_mdd_cache(mdd, tuple_key, prev_node, combined)
                                 tuple_key = tuple_key.incr()
@@ -719,10 +714,28 @@ class CPM_gurobi(SolverInterface):
                         row = table[i]
                         mdd_node = add_row_to_mdd(row, mdd_node, mdd, 0)
 
+                        cache = mdd.MDD_cache
+                        print()
+                        print("Cache")
+                        for k, v in cache.items():
+                            print("Key: ", k)
+                            print("Value: ", v)
+                        print()
+
+                        reverse_cache = mdd.MDD_cache_reverse
+                        print()
+                        print("Reverse cache")
+                        for k, v in reverse_cache.items():
+                            print("Key: ", k)
+                            print("Value: ", v)
+                        print()
+
+
                     if combined:
                         mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
-                        max_key = max(mdd_node.transition.keys())
-                        reduced_mdd = reduce_mdd(mdd_node.transition[max_key], mdd, 1)
+                        mdd_node_copy = mdd_node.deepcopy()
+                        max_key = max(mdd_node_copy.transition.keys())
+                        reduced_mdd = reduce_mdd(mdd_node_copy.transition[max_key], mdd, 1)
                         mdd_node.transition[max_key] = reduced_mdd
 
 
