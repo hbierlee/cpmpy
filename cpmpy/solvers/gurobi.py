@@ -49,6 +49,7 @@ import pathlib
 import numpy as np
 
 import cpmpy as cp
+from itertools import combinations, permutations
 from cpmpy.expressions.globalconstraints import Table
 from cpmpy.expressions.utils import dom_size
 from .solver_interface import SolverInterface, SolverStatus, ExitStatus, Callback
@@ -97,7 +98,10 @@ class Order(Feature):
     DOM_DECR = "dom-decr"
     FIEDLER = "fiedler"
     GREEDY = "greedy"
+    LOOKAHEAD_2 = "lookahead2"
+    LOOKAHEAD_3 = "lookahead3"
     BIDIRECTIONAL = "bidirectional"
+
 
 
 def trivial_decomposition(arr, tab):
@@ -178,6 +182,39 @@ def greedy_ordering(arr):
         column_order.append(best_col)
         remaining_cols.remove(best_col)
         existing_table = add_column(arr, existing_table, best_col)
+    return column_order
+
+
+
+def lookahead_ordering(arr, n):
+    n_cols = arr.shape[1]
+    if n_cols == 1:
+        return [0]
+    if n > n_cols:
+        n = n_cols
+    remaining_cols = list(range(n_cols))
+    existing_table = np.array([])
+    column_order = []
+    while len(remaining_cols) > 0:
+        partitions_dict = {}
+        k = min(n, len(remaining_cols))
+        for cols in permutations(remaining_cols, k):
+
+            table = existing_table
+            partitions_dict[cols] = 0
+            for c in cols:
+                table = add_column(arr, table, c)
+                partitions_dict[cols] += np.unique(table, axis=0).shape[0]
+
+        best_cols = min(partitions_dict, key=partitions_dict.get)
+        if partitions_dict[best_cols] == arr.shape[0]*k:
+            column_order.extend(remaining_cols)
+            break
+        for col in best_cols:
+            column_order.append(col)
+            remaining_cols.remove(col)
+            existing_table = add_column(arr, existing_table, col)
+
     return column_order
 
 
@@ -637,13 +674,13 @@ class CPM_gurobi(SolverInterface):
 
                     G = MDD_node(mdd_node.prefix, level, B)
 
-                    if mdd_node.prefix in mdd.repeated_keys:
-                        return Prefix(mdd_node.prefix).__deepcopy__()
-
                     temp = None
 
                     key = MDD_node_key(G)
                     lookups = mdd.MDD_cache_reverse.get(key, set())
+
+                    if combined:
+                        lookups = sorted(lookups, key=lambda x : x.prefix)
 
                     for lookup in lookups:
                         if lookup in mdd.repeated_keys:
@@ -858,6 +895,10 @@ class CPM_gurobi(SolverInterface):
                             ordering = np.array(greedy_ordering(Tb))
                         case Order.BIDIRECTIONAL:
                             ordering = np.array(bidirectional_ordering(Tb))
+                        case Order.LOOKAHEAD_2:
+                            ordering = np.array(lookahead_ordering(Tb, 2))
+                        case Order.LOOKAHEAD_3:
+                            ordering = np.array(lookahead_ordering(Tb, 3))
                         case _:
                             raise ValueError(order)
 
