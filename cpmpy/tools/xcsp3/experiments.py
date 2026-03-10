@@ -151,6 +151,8 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                             Order.DOM_INCR,
                             Order.GREEDY,
                             Order.BIDIRECTIONAL,
+                            Order.LOOKAHEAD_2,
+                            Order.LOOKAHEAD_3
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
