@@ -714,22 +714,6 @@ class CPM_gurobi(SolverInterface):
                         row = table[i]
                         mdd_node = add_row_to_mdd(row, mdd_node, mdd, 0)
 
-                        cache = mdd.MDD_cache
-                        print()
-                        print("Cache")
-                        for k, v in cache.items():
-                            print("Key: ", k)
-                            print("Value: ", v)
-                        print()
-
-                        reverse_cache = mdd.MDD_cache_reverse
-                        print()
-                        print("Reverse cache")
-                        for k, v in reverse_cache.items():
-                            print("Key: ", k)
-                            print("Value: ", v)
-                        print()
-
 
                     if combined:
                         mdd_node = lookup_mdd(mdd_node, mdd.MDD_cache)
