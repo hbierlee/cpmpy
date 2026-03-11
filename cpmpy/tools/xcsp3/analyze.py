@@ -1337,6 +1337,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 'lazy_gurobi-none': r'\lazyGenerate',
                 'lazy_gurobi-shrink': r'\lazyShrink',
                 'lazy_gurobi-fractional': r'\lazyFractional',
+                'lazy_gurobi-negatives': r'\lazyNegatives',
                 'lazy_gurobi-coverlift_com_max': r'\lazyCutlift',
                 'lazy_gurobi-best_cutoff_0': r'\lazyBest',
                 'lazy_gurobi-best_cutoff_500': r'\lazyCutoff (500)',
@@ -1485,7 +1486,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
 
             def get_lazy_suborder(alias):
                 alias_lower = alias.lower()
-                if 'none' in alias_lower:
+                if 'generate' in alias_lower:
                     return 0
                 elif 'shrink' in alias_lower:
                     return 1
@@ -1493,10 +1494,12 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     return 2
                 elif 'coverlift' in alias_lower or 'cutlift' in alias_lower:
                     return 3
-                elif 'best' in alias_lower:
+                elif 'negatives' in alias_lower:
+                    return 4
+                elif 'best' in alias_lower or 'all' in alias_lower:
                     return 5  # lazyBest comes last in lazy section
                 else:
-                    return 4
+                    raise Exception(alias_lower)
 
             def get_cutoff_value(alias):
                 # Extract numeric cutoff value from alias
