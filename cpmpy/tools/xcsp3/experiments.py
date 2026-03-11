@@ -111,7 +111,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
     if features is None:
         features = FEATURES
 
-    BEST = enable_all(features) | {"shrink": False, "negatives": True}
+    BEST = enable_all(features) | {"shrink": False}
 
     return glob_filter(
         [
@@ -151,8 +151,9 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                             Order.DOM_INCR,
                             Order.GREEDY,
                             Order.BIDIRECTIONAL,
+                            Order.FIEDLER,
                             Order.LOOKAHEAD_2,
-                            Order.LOOKAHEAD_3
+                            Order.LOOKAHEAD_3,
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
@@ -179,16 +180,15 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                     (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.DOM_INCR, "reduce": True})
                     for alias, env in ablate(features, add_none=add_none, add_all=add_all)
                     + [(f"hybrid_{c}", enable_all(features) | {"cutoff": c}) for f, c in FEATURES if f == "cutoff" for c in c]
-                    + [(f"best_cutoff_{c}", BEST | {"cutoff": c}) for f, c in FEATURES if f == "cutoff" for c in c]
                     + [
                         (
                             "dev",
                             enable_all(features)
                             | {
-                                "shrink": True,
+                                "shrink": False,
                                 "cutoff": 0,
                                 "fractional": True,
-                                "negatives": False,
+                                "negatives": True,
                                 "coverlift": Coverlift.COM_MAX,
                             },
                         )

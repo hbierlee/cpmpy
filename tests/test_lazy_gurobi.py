@@ -1091,6 +1091,7 @@ FILTER_PRESETS = {
     ],
     "all": [],
     "none": [("alias", ("none",))],
+    "shrink": [("alias", ("none","shrink"))],
     "bool": [
         (
             "alias",
@@ -1438,7 +1439,8 @@ def benchmark_table_constraints(
             values += ["avg_power"]
 
         if not checked and verbosity == 0:
-            values += ["time_post"]
+            # values += ["time_post"]
+            values += ["time_cb"]
             if hardness[0] >= 5:
                 values += ["time_solve"]
             values += ["mem_python_mb"]
