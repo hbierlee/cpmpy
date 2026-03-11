@@ -176,7 +176,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                 for alias, solver_kwargs in [
                     (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.DOM_INCR, "reduce": True})
                     for alias, env in ablate(features, add_none=add_none, add_all=add_all)
-                    + [("best", BEST | {})]
+                    + [(f"hybrid_{c}", enable_all(features) | {"cutoff": c}) for f, c in FEATURES if f == "cutoff" for c in c]
                     + [(f"best_cutoff_{c}", BEST | {"cutoff": c}) for f, c in FEATURES if f == "cutoff" for c in c]
                     + [
                         (
