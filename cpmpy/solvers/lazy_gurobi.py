@@ -1194,7 +1194,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # self.log("", show_table(A_enc), "A_enc", verbosity=3)
 
         shrunk = 0
-        for i in np.unique(parts):
+        for i in np.unique(parts[X]):
             C_enc_ = C_enc[parts == i]
             C_enc[parts == i] = 0
 
