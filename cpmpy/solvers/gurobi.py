@@ -348,8 +348,6 @@ class CPM_gurobi(SolverInterface):
             for x, x_width, a in zip(X, dom_sizes, row):
                 if x.lb <= a <= x.ub:
                     T_enc[i, offset + a - x.lb] = True
-                #else:
-                #    np.delete(T_enc, i)
                 offset += x_width
 
 

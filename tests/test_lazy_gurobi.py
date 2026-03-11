@@ -953,6 +953,49 @@ class TestTables:
         # model = cp.Model(cp.Table(X, T), cp.AllDifferent(X))
         # check_model(model, env=env)
 
+    @pytest.mark.skip()
+    def test_heuristic(self, env):
+        expr = generate_table_from_example().constraints[0]
+        X, T = expr.args
+        print(X, T)
+
+        # TODO maybe unneccesary to pass through TF?
+
+        slv = CPM_lazy_gurobi(env={"negatives": True, "verbosity": 3})
+        X_enc, T_enc, cons, parts = slv.encode_table_constraint(X, T)
+
+        # if self.env["verbosity"]:
+        #     self.log("X =", ", ".join(f"{x} in {x.lb}..{x.ub}" for x in X), verbosity=3)
+        #     self.log("T =", verbosity=3)
+        #     self.log(T, verbosity=3)
+        #     self.log("T_enc =", verbosity=3)
+        #     # self.log(show_table(T_enc), verbosity=3)
+        #     # self.log("X_enc =", show_table(X_enc), verbosity=3)
+        # assert len(set(X_enc)) == len(X_enc), f"Dup. bool vars in table for {expr}"
+
+        t = TableData(X_enc, T_enc, parts, expr, slv)
+        # A_enc = np.array([0.25, 0.25, 0.25, 0.25, 0.5, 0.5, 0, 0.25, 0.25, 0.5])
+        A_enc = np.array([0.0, 1.0, 0.0, 0.0, 0.0, 1, 0.0, 0.0, 1.0, 0.0])
+        A_enc = np.array([0.25, 0.25, 0.25, 0.25, 0.5, 0.0, 0.5, 0.0, 0.5, 0.5])
+        A_enc = np.array([0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.1, 0.0])
+        A_enc = np.array([0.5, 0.0, 0.0, 0.5, 0.0, 0.1, 0.0, 0.0, 0.1, 0.0])
+        A_enc = np.concatenate([A_enc, 1.0 - A_enc], dtype=A_enc.dtype)
+
+        # R = np.array([1, 5]) - 1
+        # chosen = np.array([1, 4]) - 1
+
+        R = np.ones(len(T_enc), dtype=bool)
+        choices = np.ones(len(A_enc), dtype=bool)
+
+        print(t.T_enc.astype(int))
+        print(A_enc)
+
+        choices &= A_enc > 0.0
+        choice, expected_R = t.choose(choices, R, A_enc)
+        print(choice)
+        part = np.nonzero(choice)[0]
+        assert t.is_pos(t.parts[part]) is False, f"looking for pos part but got {part}"
+
 
 def idfn(a):
     if isinstance(a, dict):
@@ -1145,6 +1188,7 @@ def benchmark_table_constraints(
     debug=None,
     time_limit=None,
     choices=None,
+    counterexamples=None,
     xcsp3_path=None,
     raise_errors=False,
 ):
@@ -1237,6 +1281,9 @@ def benchmark_table_constraints(
             env["solver_kwargs"]["env"]["max_iterations"] = max_iterations
             env["solver_kwargs"]["env"]["debug"] = debug
             env["solver_kwargs"]["env"]["choices"] = [int(i) for i in choices] if choices is not None else None
+            env["solver_kwargs"]["env"]["counterexamples"] = (
+                [int(i) for i in counterexamples] if counterexamples is not None else None
+            )
         else:
             env["solver_kwargs"]["verbose"] = verbosity >= 1
 
@@ -1331,6 +1378,7 @@ def benchmark_table_constraints(
                 else:
                     print(f"  ERROR: {e}")
                     import traceback
+
                     traceback.print_exc()
                 results.append({"env": env_alias, "name": name, "satisfiable": None, "error": str(e)})
             finally:
@@ -1390,7 +1438,7 @@ def benchmark_table_constraints(
             values += ["avg_power"]
 
         if not checked and verbosity == 0:
-            # values += ["time_post"]
+            values += ["time_post"]
             if hardness[0] >= 5:
                 values += ["time_solve"]
             values += ["mem_python_mb"]
@@ -1505,6 +1553,12 @@ if __name__ == "__main__":
         help="Enable solution checking/verification",
     )
     parser.add_argument(
+        "--counterexamples",
+        nargs="*",
+        default=None,
+        help="Fix counterexamples",
+    )
+    parser.add_argument(
         "--choices",
         nargs="*",
         default=None,
@@ -1585,6 +1639,7 @@ if __name__ == "__main__":
         debug=args.debug if args.debug else None,
         time_limit=args.time_limit,
         choices=args.choices,
+        counterexamples=args.counterexamples,
         xcsp3_path=xcsp3_glob,
         raise_errors=args.raise_errors,
     )
