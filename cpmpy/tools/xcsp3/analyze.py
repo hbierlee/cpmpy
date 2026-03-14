@@ -300,7 +300,7 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
             y[mask],
             c=inst_metrics[mask],
             alpha=alpha_values[mask],
-            s=50,
+            s=100 if paper else 50,
             cmap=cmap,
             edgecolors='black',
             linewidth=0.5,
@@ -782,7 +782,7 @@ def load_and_process_csvs(files, time_limit=None, no_errors=False, intermediate=
     df["unknown"] = df["status"] == UNK
     df["error"] = df["status"] == ERR
     df["memory"] = df["status"] == MEM
-    df["feasible"] = df["status"].isin((OPT, SAT, UNS))
+    df["feasible"] = df["status"].isin((OPT, SAT))
 
     # For COP tracks: solved if status is OPT or UNS
     # For other tracks: solved if status is SAT or UNS
@@ -980,7 +980,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         cons_filtered_parts.append(has_constraints)
     cons_filtered_df = pd.concat(cons_filtered_parts) if cons_filtered_parts else df.iloc[:0]
 
-    # Pre-compute filtered instances for cuts (per track, instances solved by all lazy approaches)
+    # Pre-compute filtered instances for cuts (per track, instances solved by all lazy approaches with at least one cut)
     cuts_filtered_parts = []
     for track, track_df in df.groupby('track'):
         lazy_df = track_df[track_df['alias'].str.contains('lazy', case=False)]
@@ -990,6 +990,11 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         solved_by_all_lazy = lazy_df[lazy_df['solved']].groupby(['problem', 'instance']).filter(
             lambda g: g['alias'].nunique() == n_lazy_solvers
         )
+        # Only include instances where at least one cut was generated
+        # has_cuts = solved_by_all_lazy.groupby(['problem', 'instance']).filter(
+        #     lambda g: g['cuts'].sum() > 0
+        # )
+        # cuts_filtered_parts.append(has_cuts)
         cuts_filtered_parts.append(solved_by_all_lazy)
     cuts_filtered_df = pd.concat(cuts_filtered_parts) if cuts_filtered_parts else df.iloc[:0]
     cuts_filtered_instances = cuts_filtered_df[['track', 'problem', 'instance']].drop_duplicates()
@@ -1092,7 +1097,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         if "rows" in groups_:
             groups_["rows"] = groups_["rows"].map(lambda x: f"{x:.1e}")
 
-        if not paper:
+        if paper:
             print(f"\n== {grouping_type} ==")
             print(groups_)
 
@@ -1297,7 +1302,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                                                         problem_data[metadata_col],
                                                         problem_data[time_col],
                                                          alpha=alpha_values,
-                                                         s=50,
+                                                         s=75,
                                                          label=f"{problem} ({n_instances})",
                                                          # color=problem_colors[problem],
                                                          marker=problem_markers[problem]
@@ -1459,14 +1464,14 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     for idx in tex_df_formatted.index:
                         x = tex_df_formatted.loc[idx, col]
                         if pd.isna(x):
-                            formatted_col.append("")
+                            formatted_col.append("{}")
                         else:
                             if col in ['solv', 'feas', 'post', 'cons', 'cuts']:
                                 formatted = f"{x:.0f}"
                             else:
                                 formatted = f"{x:.1f}"
                             if x == global_best:
-                                formatted_col.append(f"\\textbf{{{formatted}}}")
+                                formatted_col.append(f"\\bfseries {formatted}")
                             # elif x == section_bests[idx]:
                             #     formatted_col.append(f"\\underline{{{formatted}}}")
                             else:
@@ -1478,23 +1483,23 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 if col not in bold_cols:
                     def format_other(x):
                         if pd.isna(x):
-                            return ""
+                            return "{}"
                         if col in ['unk', 'mem', 'post']:
                             return f"{x:.0f}"
                         return f"{x:.1f}"
                     tex_df_formatted[col] = tex_df_formatted[col].apply(format_other)
 
-            # Format cons and cuts columns (in thousands, empty for ortools/base)
+            # Format cons and cuts columns (empty for ortools/base)
             for col in ['cons', 'cuts']:
                 def format_cons_cuts(x, alias, col=col):
                     if 'ortools' in alias.lower():
-                        return ""
+                        return "{}"
                     # cuts only applies to lazy approaches
                     if col == 'cuts' and 'base' in alias.lower():
-                        return ""
+                        return "{}"
                     if pd.isna(x):
-                        return ""
-                    return f"{x/1000:.1f}"
+                        return "{}"
+                    return f"{x:.1f}"
                 tex_df_formatted[col] = [format_cons_cuts(tex_df.loc[idx, col], idx) for idx in tex_df.index]
 
             # Sort by approach type: base first, then lazy, then cutoff
@@ -1576,23 +1581,35 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             )
 
             # Generate just the tabular content (no table wrapper)
-            tabular_output = tex_df_formatted[
-                [
-                    *(["unk", "mem", "post"]),
-                    *(["feas"] if is_cop else []),
-                    *(["solv", "t_solv_p2", "cons",
-                       "cuts",
-                       ])
-                ]
-            ].to_latex(
-                na_rep="",
+            selected_cols = [
+                *(["post"]),
+                *(["feas"] if is_cop else []),
+                *(["solv", "t_solv_p2", "cons", "cuts"])
+            ]
+            # Compute S column table-format from data
+            def get_table_format(col):
+                # Columns formatted as integers vs decimals
+                decimals = 0 if col in ['solv', 'feas', 'post'] else 1
+                # Get max value to determine integer digits needed
+                numeric_vals = pd.to_numeric(tex_df[col], errors='coerce').dropna()
+                if len(numeric_vals) == 0:
+                    int_digits = 1
+                else:
+                    max_val = numeric_vals.abs().max()
+                    int_digits = max(1, len(str(int(max_val))))
+                return f"S[table-format={int_digits}.{decimals}]"
+
+            column_format = "l" + "".join(get_table_format(c) for c in selected_cols)
+            tabular_output = tex_df_formatted[selected_cols].to_latex(
+                na_rep="{}",
                 header=[
-                    *(["\\unk", "\\mem", "\\pst"]),
-                    *(["\\sat"] if is_cop else []),
-                    *(["\\sol", "time [s]", "cons [\\thousands]", "cuts [\\thousands]"]),
+                    *(["{{\\pst}}"]),
+                    *(["{{\\sat}}"] if is_cop else []),
+                    *(["{{\\sol}}", "{{time}}", "{{constraints}}", "{{cuts}}"]),
                 ],
                 escape=False,  # Don't escape so \textbf works
                 index_names=False,
+                column_format=column_format,
             )
 
             # Extract just the tabular environment and insert hlines between approach groups
@@ -1756,7 +1773,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             meta = subtable.get('metadata', {})
             mean_rows = meta.get('mean_rows', 0)
             stdev_rows = meta.get('stdev_rows', 0)
-            caption = f"{subtable['n_instances']} {subtable['track']} instances (mean rows: {mean_rows:,.0f}, stdev: {stdev_rows:,.0f})"
+            caption = f"{subtable['n_instances']} {subtable['track']} instances (mean rows: \\num{{{mean_rows:.0f}}}, stdev: \\num{{{stdev_rows:.0f}}})"
             combined_lines.append(f"        \\caption{{{caption}}}")
             combined_lines.append(f"        \\label{{tbl:res:{subtable['track'].lower()}}}")
             # Indent the tabular content
