@@ -325,9 +325,10 @@ def xcsp3_scatter_plot(df, solver1=None, solver2=None, metric="time_solve", inst
     ax.plot(diagonal_range, diagonal_range, 'k--', linewidth=1.5, label='Equal performance', zorder=0)
 
     # Add 10% improvement lines (parallel to diagonal)
-    improvement_factor = 2
-    ax.plot(diagonal_range, [m * improvement_factor for m in diagonal_range], 'k:', linewidth=1, alpha=0.5, zorder=0)
-    ax.plot(diagonal_range, [m / improvement_factor for m in diagonal_range], 'k:', linewidth=1, alpha=0.5, zorder=0)
+    if not paper:
+        improvement_factor = 2
+        ax.plot(diagonal_range, [m * improvement_factor for m in diagonal_range], 'k:', linewidth=1, alpha=0.5, zorder=0)
+        ax.plot(diagonal_range, [m / improvement_factor for m in diagonal_range], 'k:', linewidth=1, alpha=0.5, zorder=0)
 
     # Add time limit borders and grey out areas outside
     if time_limit is not None:
@@ -575,6 +576,13 @@ def check_inconsistent_instances(df):
                     err_msg = f"Sub-optimal OPT ({method_str}): claimed optimal={row['obj']} {cmp} best known={best_obj} from [{better_solvers_str}]"
                     existing = df.loc[idx, 'traceback']
                     df.loc[idx, 'traceback'] = ('' if pd.isna(existing) else existing + '\n') + err_msg
+
+    # Check that time_post not NaN implies constraints not NaN
+    invalid_mask = df['time_post'].notna() & df['constraints'].isna()
+    if invalid_mask.any():
+        invalid_rows = df[invalid_mask][['track', 'problem', 'instance', 'alias', 'time_post', 'constraints']]
+        print(f"WARNING: {len(invalid_rows)} rows have time_post but no constraints:")
+        print(invalid_rows.to_string())
 
     return inconsistent, suboptimal
 
@@ -962,6 +970,30 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
     # Check for inconsistent instances
     check_inconsistent_instances(df)
 
+    # Pre-compute filtered instances for constraints (per track, instances with constraints for all solvers)
+    cons_filtered_parts = []
+    for track, track_df in df.groupby('track'):
+        n_solvers = track_df['alias'].nunique()
+        has_constraints = track_df[track_df['constraints'].notna()].groupby(['problem', 'instance']).filter(
+            lambda g: g['alias'].nunique() == n_solvers
+        )
+        cons_filtered_parts.append(has_constraints)
+    cons_filtered_df = pd.concat(cons_filtered_parts) if cons_filtered_parts else df.iloc[:0]
+
+    # Pre-compute filtered instances for cuts (per track, instances solved by all lazy approaches)
+    cuts_filtered_parts = []
+    for track, track_df in df.groupby('track'):
+        lazy_df = track_df[track_df['alias'].str.contains('lazy', case=False)]
+        n_lazy_solvers = lazy_df['alias'].nunique()
+        if n_lazy_solvers == 0:
+            continue
+        solved_by_all_lazy = lazy_df[lazy_df['solved']].groupby(['problem', 'instance']).filter(
+            lambda g: g['alias'].nunique() == n_lazy_solvers
+        )
+        cuts_filtered_parts.append(solved_by_all_lazy)
+    cuts_filtered_df = pd.concat(cuts_filtered_parts) if cuts_filtered_parts else df.iloc[:0]
+    cuts_filtered_instances = cuts_filtered_df[['track', 'problem', 'instance']].drop_duplicates()
+    cuts_filtered_df = df.merge(cuts_filtered_instances, on=['track', 'problem', 'instance'], how='inner')
 
     for grouping_type, grouping in (
             # ("per_alias", ['alias', 'problem']),
@@ -993,23 +1025,29 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 post = ('post', 'sum'),
                 feas = ('feasible', 'sum'),
                 solv = ('solved', 'sum'),
-                cuts = ('cuts', 'mean'),
                 lp_cuts = ('lp_cuts', 'mean'),
                 no_cuts = ('no_cuts', 'mean'),
-                constraints = ('constraints', 'mean'),
                 cb_rel = ('cb_rel', 'mean'),
                 time_pc = ('time_pc', 'mean'),
                 method = ('method', 'first'),
                 obj = ('obj', 'first'),
                 )
 
-        # Filter out instances which have not been solved by at least one solver
-        if grouping_type == "per_instance":
-            # Get the instance-level keys (excluding 'alias')
-            instance_keys = [k for k in grouping if k != 'alias']
-            # For each instance, check if any solver solved it
-            solved_mask = groups.groupby(instance_keys)['solv'].transform('max') > 0
-            groups = groups[solved_mask]
+        # Aggregate constraints from pre-filtered data
+        cons_by_grouping = cons_filtered_df.groupby(grouping).agg(constraints=('constraints', 'mean'))
+        groups = groups.join(cons_by_grouping)
+
+        # Aggregate cuts from pre-filtered data
+        cuts_by_grouping = cuts_filtered_df.groupby(grouping).agg(cuts=('cuts', 'mean'))
+        groups = groups.join(cuts_by_grouping)
+
+        # # Filter out instances which have not been solved by at least one solver
+        # if grouping_type == "per_instance":
+        #     # Get the instance-level keys (excluding 'alias')
+        #     instance_keys = [k for k in grouping if k != 'alias']
+        #     # For each instance, check if any solver solved it
+        #     solved_mask = groups.groupby(instance_keys)['solv'].transform('max') > 0
+        #     groups = groups[solved_mask]
 
         track = groups.index.get_level_values('track')[0]
         is_cop = "COP" in track
@@ -1332,17 +1370,17 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             ALIAS_TO_LATEX = {
                 'base_gurobi-bool': r'\baseBool',
                 'base_gurobi-gleb': r'\baseGleb',
-                'base_gurobi-mdd-reduce-dom-incr-hashtable': r'\baseMddDomIncr',
-                'base_gurobi-mdd-reduce-input-hashtable': r'\baseMddInput',
+                'base_gurobi-mdd-reduce-dom-incr-nocombined': r'\baseMddDomIncr',
+                'base_gurobi-mdd-reduce-input-nocombined': r'\baseMddInput',
                 'lazy_gurobi-none': r'\lazyGenerate',
                 'lazy_gurobi-shrink': r'\lazyShrink',
                 'lazy_gurobi-fractional': r'\lazyFractional',
                 'lazy_gurobi-negatives': r'\lazyNegatives',
                 'lazy_gurobi-coverlift_com_max': r'\lazyCutlift',
-                'lazy_gurobi-best_cutoff_0': r'\lazyBest',
-                'lazy_gurobi-best_cutoff_500': r'\lazyCutoff (500)',
-                'lazy_gurobi-best_cutoff_1000': r'\lazyCutoff (1000)',
-                'lazy_gurobi-best_cutoff_2000': r'\lazyCutoff (2000)',
+                'lazy_gurobi-hybrid_0': r'\lazyAll',
+                'lazy_gurobi-hybrid_500': r'\lazyCutoff (500)',
+                'lazy_gurobi-hybrid_1000': r'\lazyCutoff (1000)',
+                'lazy_gurobi-hybrid_2000': r'\lazyCutoff (2000)',
             }
 
             def rename_idx(x):
@@ -1362,25 +1400,16 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 t_post_p2=('time_post_p2', 'mean'),
                 t_solv_p2=('time_solve_p2', 'mean'),
             )
-            # Calculate cons only for instances posted by all solvers
-            n_solvers = groups['alias'].nunique()
-            posted_by_all = groups[groups['post']].groupby(['problem', 'instance']).filter(
-                lambda g: g['alias'].nunique() == n_solvers
-            )
-            cons_groups = posted_by_all.groupby('alias').agg(
+
+            # Use pre-computed filtered data for this track
+            track_full = groups['track'].iloc[0]
+            track_cons_df = cons_filtered_df[cons_filtered_df['track'] == track_full]
+            cons_groups = track_cons_df.groupby('alias').agg(
                 cons=('constraints', 'mean'),
             )
 
-            # Calculate cuts only for instances solved by all lazy approaches
-            lazy_groups = groups[groups['alias'].str.contains('lazy', case=False)]
-            n_lazy_solvers = lazy_groups['alias'].nunique()
-            solved_by_all_lazy = lazy_groups[lazy_groups['solved']].groupby(['problem', 'instance']).filter(
-                lambda g: g['alias'].nunique() == n_lazy_solvers
-            )
-            # Calculate cuts for all solvers, but only on instances solved by all lazy approaches
-            solved_instances = solved_by_all_lazy[['problem', 'instance']].drop_duplicates()
-            cuts_data = groups.merge(solved_instances, on=['problem', 'instance'], how='inner')
-            cuts_groups = cuts_data.groupby('alias').agg(
+            track_cuts_df = cuts_filtered_df[cuts_filtered_df['track'] == track_full]
+            cuts_groups = track_cuts_df.groupby('alias').agg(
                 cuts=('cuts', 'mean'),
             )
             tex_df = tex_df.join(cons_groups).join(cuts_groups)
@@ -1475,6 +1504,8 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 alias_lower = alias.lower()
                 if 'gleb' in alias_lower:
                     return 0
+                elif 'bool' in alias_lower:
+                    return 1
                 elif 'mddinput' in alias_lower or 'mdd-input' in alias_lower:
                     return 2
                 elif 'mdddomincr' in alias_lower or 'mdd-dom-incr' in alias_lower or 'mdd-reduce-dom-incr' in alias_lower:
@@ -1482,7 +1513,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 elif 'mdd' in alias_lower:
                     return 4  # other mdd variants
                 else:
-                    return 1  # plain base (bool)
+                    raise Exception
 
             def get_lazy_suborder(alias):
                 alias_lower = alias.lower()
@@ -1496,7 +1527,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     return 3
                 elif 'negatives' in alias_lower:
                     return 4
-                elif 'best' in alias_lower or 'all' in alias_lower:
+                elif 'hybrid' in alias_lower or 'all' in alias_lower:
                     return 5  # lazyBest comes last in lazy section
                 else:
                     raise Exception(alias_lower)
@@ -1715,7 +1746,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             r'\begin{table}[htbp]',
             r'    \centering',
             r'    \caption{\tableCaption}',
-            r'    \label{tbl:res:combined}',
+            r'    \label{tbl:res}',
             '',
         ])
 
@@ -1845,6 +1876,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                     "solve",
                     "cb",
                 )] + [
+                    'constraints',
                     'cb_rel',
                     'n_cuts',
                     'n_cuts_explained',
