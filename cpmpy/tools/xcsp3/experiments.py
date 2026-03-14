@@ -52,6 +52,14 @@ DEFAULTS = [
 ]
 
 
+CUTOFFS = (
+            0,
+            250,
+            500,
+            1000,
+            2000,
+            3000,
+        )
 FEATURES = [
     ("heuristic", (Heuristic.GREEDY,)),
     (
@@ -79,18 +87,13 @@ FEATURES = [
     ),
     (
         "cutoff",
-        (
-            0,
-            500,
-            1000,
-            2000,
-        ),
+        CUTOFFS,
     ),
     (
         "negatives",
         (
             False,
-            True,
+            # True,
         ),
     ),
 ]
@@ -179,7 +182,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                 for alias, solver_kwargs in [
                     (alias, {"env": env, "encoding": Encoding.MDD, "order": Order.DOM_INCR, "reduce": True})
                     for alias, env in ablate(features, add_none=add_none, add_all=add_all)
-                    + [(f"hybrid_{c}", enable_all(features) | {"cutoff": c}) for f, c in FEATURES if f == "cutoff" for c in c]
+                    + [(f"hybrid_{c}", BEST | {"cutoff": c}) for c in CUTOFFS]
                     + [
                         (
                             "dev",
