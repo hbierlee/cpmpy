@@ -990,12 +990,13 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
         solved_by_all_lazy = lazy_df[lazy_df['solved']].groupby(['problem', 'instance']).filter(
             lambda g: g['alias'].nunique() == n_lazy_solvers
         )
+        cuts_filtered_parts.append(solved_by_all_lazy)
         # Only include instances where at least one cut was generated
+        # print(solved_by_all_lazy)
         # has_cuts = solved_by_all_lazy.groupby(['problem', 'instance']).filter(
         #     lambda g: g['cuts'].sum() > 0
         # )
         # cuts_filtered_parts.append(has_cuts)
-        cuts_filtered_parts.append(solved_by_all_lazy)
     cuts_filtered_df = pd.concat(cuts_filtered_parts) if cuts_filtered_parts else df.iloc[:0]
     cuts_filtered_instances = cuts_filtered_df[['track', 'problem', 'instance']].drop_duplicates()
     cuts_filtered_df = df.merge(cuts_filtered_instances, on=['track', 'problem', 'instance'], how='inner')
@@ -1386,6 +1387,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
                 'lazy_gurobi-hybrid_500': r'\lazyCutoff (500)',
                 'lazy_gurobi-hybrid_1000': r'\lazyCutoff (1000)',
                 'lazy_gurobi-hybrid_2000': r'\lazyCutoff (2000)',
+                'lazy_gurobi-hybrid_3000': r'\lazyCutoff (3000)',
             }
 
             def rename_idx(x):
@@ -1581,11 +1583,12 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             )
 
             # Generate just the tabular content (no table wrapper)
-            selected_cols = [
-                *(["post"]),
-                *(["feas"] if is_cop else []),
-                *(["solv", "t_solv_p2", "cons", "cuts"])
-            ]
+            selected_cols = ["post", "feas", "solv", "t_solv_p2", "cons", "cuts"]
+
+            # For CSP, set feas column to empty
+            if not is_cop:
+                tex_df_formatted["feas"] = "{}"
+
             # Compute S column table-format from data
             def get_table_format(col):
                 # Columns formatted as integers vs decimals
@@ -1603,9 +1606,7 @@ def analyze(files=[], time_limit=None, plot=None, show=None, sync=None, no_error
             tabular_output = tex_df_formatted[selected_cols].to_latex(
                 na_rep="{}",
                 header=[
-                    *(["{{\\pst}}"]),
-                    *(["{{\\sat}}"] if is_cop else []),
-                    *(["{{\\sol}}", "{{time}}", "{{constraints}}", "{{cuts}}"]),
+                    "{{\\pst}}", "{{\\sat}}", "{{\\sol}}", "{{time}}", "{{constraints}}", "{{cuts}}"
                 ],
                 escape=False,  # Don't escape so \textbf works
                 index_names=False,

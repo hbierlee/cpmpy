@@ -1000,6 +1000,7 @@ for tables:
                 )
                 solver.log(f"REMOVED {len(removed)}", verbosity=1)
                 solver.log(removed, verbosity=1)
+                assert len(removed)
 
             strength = len(removed)
 
@@ -1194,21 +1195,21 @@ class CPM_lazy_gurobi(CPM_gurobi):
             # self.log("", show_table(A_enc), "A_enc", verbosity=3)
 
         shrunk = 0
-        for i in np.unique(parts[X]):
-            C_enc_ = C_enc[parts == i]
-            C_enc[parts == i] = 0
+        for part in np.unique(parts[X]):
+            C_enc_ = C_enc[parts == part]
+            C_enc[parts == part] = 0
 
             if self.env["verbosity"]:
-                self.log("i", i, show_table(parts == i), verbosity=3)
+                self.log("i", part, show_table(parts == part), verbosity=3)
                 self.log("C", show_table(C_enc), verbosity=3)
                 self.log("A", np.sum(C_enc * T_enc, axis=1), verbosity=3)
             if np.all(np.sum(C_enc * T_enc, axis=1) <= k - 1):
                 shrunk += 1
                 k -= 1
                 if self.env["verbosity"]:
-                    self.log(f"shrinking {i + INDEX} in {show_nz(X)}", verbosity=3)
+                    self.log(f"shrinking {part + INDEX} in {show_nz(X)}", verbosity=3)
             else:
-                C_enc[parts == i] = C_enc_
+                C_enc[parts == part] = C_enc_
         if self.env["verbosity"] and shrunk:
             self.log(f"shrunk by {shrunk}", verbosity=1)
         return C_enc, k
@@ -1245,6 +1246,8 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if feasible and frm == "MIPSOL":
             if self.env["verbosity"]:
                 self.log("found feasible", verbosity=2)
+                # TODO 
+                # self.env["time_feas"] = time.time()
                 # self.log(X_enc.value(), verbosity=3)
             self.env["found_feasible"] = feasible
             if self.env["debug"]:
@@ -1363,6 +1366,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
         if self.env["verbosity"]:
             self.log("EXPLAIN", frm, verbosity=2)
             self.log("Full sol", verbosity=4)
+            self.log(self._all_values, verbosity=2)
 
         for i, tbl in enumerate(self.tables, start=INDEX):
             X_enc, T_enc, parts = tbl.X_enc, tbl.T_enc, tbl.parts
@@ -1568,6 +1572,7 @@ class CPM_lazy_gurobi(CPM_gurobi):
                     for expr, k in self.solution_callback_inner("MIPSOL"):
                         # self.env["checker"] += [expr <= k]
                         self.env["checker"] += [expr < k if STRICT_CUTS else expr <= k]
+
 
             else:
                 hassol = super().solve(
