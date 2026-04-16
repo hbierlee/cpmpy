@@ -390,39 +390,64 @@ class IntVarEncLazyDirect(IntVarEncDirect):
     def encode_term(self, w=1):
         return [(w * val, bv) for val, bv in self._xs.items()], 0
 
-    def encode_constraints(self):
-        """Return AMO + conditional channeling constraints for all tracked values.
+    def encode_constraints(self, csemap=None):
+        """Return encoding constraints for all tracked values.
 
-        Returns an empty list if fewer than 2 values have been added.
+        For a full encoding (all domain values tracked): EO + unconditional channel.
+        For a partial encoding: adds gap BVs for contiguous ranges of untracked values,
+        then uses EO + per-value/gap indicator constraints. The gap indicators exclude
+        tracked values from gaps, so EO forces the backward direction (x==v_i -> BV_i=1).
         """
-        # if len(self._xs) < 2:
-        #     return []
+        if len(self._xs) == 0:
+            return []
 
-        if len(self._xs) == _dom_size(self._x):
+        tracked = sorted(self._xs.keys())
+
+        print("ENCODED", self._x, len(tracked) / _dom_size(self._x))
+        if len(tracked) == _dom_size(self._x):
+            # Full encoding: exactly-one + unconditional channel
             terms, k = self.encode_term()
             ws = [1] + [-w for (w, _) in terms]
             bs = [self._x] + [b for (_, b) in terms]
-            channel = Operator("wsum", (ws, bs)) == k
-            return [cp.sum(self._xs.values()) == 1, channel]
-        elif True:
-            r = cp.boolvar()
-            terms, k = self.encode_term()
-            ws = [1] + [-w for (w, _) in terms]
-            bs = [self._x] + [b for (_, b) in terms]
-            channel = Operator("wsum", (ws, bs)) == k
-            return [
-                cp.sum(self._xs.values()) == r,
-                r.implies(channel)
+            channel = Comparison("==", Operator("wsum", (ws, bs)), k)
+            return [Comparison("==", Operator("sum", list(self._xs.values())), 1), channel]
 
-                # cp.sum(self._xs.values()) <= 1,
-                # r == cp.any(self._xs.values()),
-                # r.implies(channel),
-            ]
-            return [cp.sum(self._xs.values()) == r, r.implies(self._x == cp.sum(w * x for w, x in terms) + k)]
+        gaps = [(a + 1, b - 1) for a, b in zip([self._x.lb - 1] + tracked, tracked + [self._x.ub + 1]) if b - a > 1]
+
+        def encode_gap(gap):
+            a, b = gap
+            if a == b:
+                self.add(self._x == a, csemap=csemap)
+            else:
+                x_enc_i = cp.boolvar()
+                x_enc_i.name = f"BV[{a}<={self._x}<={b}]"
+                return ((a, b), x_enc_i)
+        gaps = list(filter(None, map(encode_gap, gaps)))
+
+        cons = []
+        # Exactly-one: sum(tracked BVs) + sum(gap BVs) == 1
+        cons.append(cp.sum(list(self._xs.values()) + list(x_enc_i for _, x_enc_i in gaps)) == 1)
+
+        if True:
+            # x = BV[x=1] + 2*BV[x=2] + BV[3<=x<=5]*z + BV[x=6] + 2*BV[x=7]
+            z = cp.intvar(self._x.lb, self._x.ub)
+            z.name=f"IV[z == {self._x}]"
+            cons.append(self._x == cp.sum(w*b for w,b in self._xs.items()) + cp.sum(b*z for _, b in gaps))
+            pass
         else:
-            # return [cp.sum(self._xs.values()) <= 1] + [Operator("wsum", ([1,-d_i], [self._x, x_enc_i])) == 0 for d_i, x_enc_i in self._xs.items()]
-            # return [cp.sum(self._xs.values()) <= 1] + [x_enc_i - self._x == d_i for d_i, x_enc_i in self._xs.items()]
-            return [cp.sum(self._xs.values()) <= 1] + [x_enc_i.implies(self._x == d_i) for d_i, x_enc_i in self._xs.items()]
+            # Forward indicators for tracked values: BV_i -> x == v_i
+            for val, bv in self._xs.items():
+                cons.append(bv.implies(Comparison("==", self._x, val)))
+
+            # Gap indicators: g_j -> lb_j <= x <= ub_j
+            for (glb, gub), gbv in gaps:
+                if glb == gub:
+                    cons.append(gbv.implies(Comparison("==", self._x, glb)))
+                else:
+                    cons.append(gbv.implies(Comparison(">=", self._x, glb)))
+                    cons.append(gbv.implies(Comparison("<=", self._x, gub)))
+
+        return cons
 
 
 class IntVarEncOrder(IntVarEnc):

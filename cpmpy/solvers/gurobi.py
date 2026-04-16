@@ -342,7 +342,7 @@ class CPM_gurobi(SolverInterface):
 
         raise NotImplementedError("gurobi: Not a known supported numexpr {}".format(cpm_expr))
 
-    def transform(self, cpm_expr):
+    def transform(self, cpm_expr, finalize=True):
         """
             Transform arbitrary CPMpy expressions to constraints the solver supports
 
@@ -368,11 +368,12 @@ class CPM_gurobi(SolverInterface):
         cpm_cons = reify_rewrite(cpm_cons, supported=frozenset(['sum', 'wsum']), csemap=self._csemap, ivarmap=self._ivarmap)  # constraints that support reification
         cpm_cons = only_numexpr_equality(cpm_cons, supported=frozenset(["sum", "wsum", "sub"]), csemap=self._csemap, ivarmap=self._ivarmap)  # supports >, <, !=
         cpm_cons = only_bv_reifies(cpm_cons, csemap=self._csemap, ivarmap=self._ivarmap)
-        cpm_cons = finalize_lazy_direct_encoding(cpm_cons, ivarmap=self._ivarmap)
         cpm_cons = only_implies(cpm_cons, csemap=self._csemap, ivarmap=self._ivarmap)  # anything that can create full reif should go above...
         # gurobi does not round towards zero, so no 'div' in supported set: https://github.com/CPMpy/cpmpy/pull/593#issuecomment-2786707188
         cpm_cons = linearize_constraint(cpm_cons, supported=frozenset({"sum", "wsum","->","sub","min","max","mul","abs","pow"}), csemap=self._csemap, ivarmap=self._ivarmap)  # the core of the MIP-linearization
         cpm_cons = only_positive_bv(cpm_cons, csemap=self._csemap)  # after linearization, rewrite ~bv into 1-bv
+        if finalize:
+            cpm_cons = self.transform(finalize_lazy_direct_encoding(cpm_cons, csemap=self._csemap, ivarmap=self._ivarmap), finalize=False)
         return cpm_cons
 
     def add(self, cpm_expr_orig):

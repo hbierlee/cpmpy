@@ -683,7 +683,7 @@ class TestLazyDirectEncoding:
 
     def flatten(self, cpm_cons):
         cpm_cons = toplevel_list(cpm_cons)
-        return finalize_lazy_direct_encoding(flatten_constraint(cpm_cons, csemap=self.csemap, ivarmap=self.ivarmap), ivarmap=self.ivarmap)
+        return finalize_lazy_direct_encoding(flatten_constraint(cpm_cons, csemap=self.csemap, ivarmap=self.ivarmap), csemap=self.csemap,ivarmap=self.ivarmap)
 
     def test_two_equalities_or(self):
         """(x==2)|(x==3) produces lazy encoding with AMO + channeling."""

@@ -153,7 +153,7 @@ def flatten_constraint(expr, csemap=None, ivarmap=None):
                 var, val = lexpr, rexpr
             elif isinstance(rexpr, _IntVarImpl) and not isinstance(rexpr, _BoolVarImpl) and is_int(lexpr):
                 var, val = rexpr, lexpr
-            if var is not None and var in ivarmap:
+            if var is not None and var in ivarmap and val in ivarmap[var]._xs:
                 bv = ivarmap[var].eq(val)
                 newlist.append(bv if expr.name == '==' else ~bv)
                 continue

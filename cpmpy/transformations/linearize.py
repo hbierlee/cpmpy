@@ -626,7 +626,7 @@ def get_linear_decompositions():
     # Should we add Gleb's table decomposition? or is it not non-reifiable?
 
 
-def finalize_lazy_direct_encoding(constraints, ivarmap=None):
+def finalize_lazy_direct_encoding(constraints, csemap=None, ivarmap=None):
     """
     Emit constraints for all lazy direct encodings built up during flattening.
 
@@ -642,7 +642,7 @@ def finalize_lazy_direct_encoding(constraints, ivarmap=None):
     if ivarmap is None:
         return constraints
     else:
-        return constraints + [c for enc in ivarmap.values() for c in enc.encode_constraints()]
+        return constraints + [c for enc in ivarmap.values() for c in enc.encode_constraints(csemap=csemap)]
 
 
 def linearize_reified_variables(constraints, min_values=3, csemap=None, ivarmap=None):
