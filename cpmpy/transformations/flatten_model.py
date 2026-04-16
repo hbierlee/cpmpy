@@ -366,19 +366,25 @@ def get_or_make_var(expr, csemap=None, ivarmap=None):
             # Lazy direct encoding: for (intvar == constant), register the BV
             # and skip the defining constraint — the encoding's channeling handles it.
             if isinstance(expr, Comparison) and expr.name in {"==", "!="} and isinstance(expr.args[0], _IntVarImpl) and is_int(expr.args[1]):
-                from .int2bool import IntVarEncLazyDirect
-                if expr.name == "!=":
-                    expr = copy.copy(expr)
-                    expr.name = "=="
-                    is_pos = False
-                else:
-                    is_pos = True
+                a, b = expr.args
+                if a.lb <= b <= a.ub:
+                    from .int2bool import IntVarEncLazyDirect
+                    if expr.name == "!=":
+                        expr = copy.copy(expr)
+                        expr.name = "=="
+                        is_pos = False
+                    else:
+                        is_pos = True
 
-                var = expr.args[0]
-                if var not in ivarmap:
-                    ivarmap[var] = IntVarEncLazyDirect(var)
-                lit = ivarmap[var].add(expr, csemap=csemap)
-                return lit if is_pos else ~lit, flatcons
+                    var = expr.args[0]
+                    if var not in ivarmap:
+                        ivarmap[var] = IntVarEncLazyDirect(var)
+                    lit = ivarmap[var].add(expr, csemap=csemap)
+                    return lit if is_pos else ~lit, flatcons
+                else:
+                    from ..expressions.core import BoolVal
+                    return BoolVal(expr.name != "=="), flatcons
+
 
         r = cp.boolvar()
         if csemap is not None:

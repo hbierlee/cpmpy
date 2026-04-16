@@ -356,7 +356,6 @@ class IntVarEncLazyDirect(IntVarEncDirect):
 
     def add(self, expr, csemap=None):
         """Add a new (val, bv) pair to the encoding."""
-        print("A", expr)
         lit = super().add(expr, csemap=csemap)
         self._xs[expr.args[1]] = lit
         return lit
@@ -403,7 +402,10 @@ class IntVarEncLazyDirect(IntVarEncDirect):
 
         tracked = sorted(self._xs.keys())
 
-        print("ENCODED", self._x, len(tracked) / _dom_size(self._x))
+        per = len(tracked) / _dom_size(self._x)
+        if per < 1.0:
+            print("T", self._xs)
+            print("ENCODED", self._x, self._x.lb, self._x.ub, len(tracked), per)
         if len(tracked) == _dom_size(self._x):
             # Full encoding: exactly-one + unconditional channel
             terms, k = self.encode_term()
@@ -429,23 +431,29 @@ class IntVarEncLazyDirect(IntVarEncDirect):
         cons.append(cp.sum(list(self._xs.values()) + list(x_enc_i for _, x_enc_i in gaps)) == 1)
 
         if True:
-            # x = BV[x=1] + 2*BV[x=2] + BV[3<=x<=5]*z + BV[x=6] + 2*BV[x=7]
+            # Channel with slack variable:
+            # x == sum(val*BV[x==val]) + sum(gap_bv*z)
+            # where z is a slack variable with full domain of x.
             z = cp.intvar(self._x.lb, self._x.ub)
-            z.name=f"IV[z == {self._x}]"
-            cons.append(self._x == cp.sum(w*b for w,b in self._xs.items()) + cp.sum(b*z for _, b in gaps))
-            pass
+            z.name = f"IV[z=={self._x}]"
+            tracked_sum = cp.sum([val * bv for val, bv in self._xs.items()])
+            gap_sum = cp.sum([gbv * z for (_, _), gbv in gaps]) if gaps else 0
+            cons.append(Comparison("==", self._x, tracked_sum + gap_sum))
+
+            # Gap indicators: constrain z to the gap range when active
+            for (glb, gub), gbv in gaps:
+                cons.append(gbv.implies(Comparison(">=", z, glb)))
+                cons.append(gbv.implies(Comparison("<=", z, gub)))
         else:
+            # Per-value/gap indicator constraints
             # Forward indicators for tracked values: BV_i -> x == v_i
             for val, bv in self._xs.items():
                 cons.append(bv.implies(Comparison("==", self._x, val)))
 
             # Gap indicators: g_j -> lb_j <= x <= ub_j
             for (glb, gub), gbv in gaps:
-                if glb == gub:
-                    cons.append(gbv.implies(Comparison("==", self._x, glb)))
-                else:
-                    cons.append(gbv.implies(Comparison(">=", self._x, glb)))
-                    cons.append(gbv.implies(Comparison("<=", self._x, gub)))
+                cons.append(gbv.implies(Comparison(">=", self._x, glb)))
+                cons.append(gbv.implies(Comparison("<=", self._x, gub)))
 
         return cons
 

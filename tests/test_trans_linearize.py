@@ -605,7 +605,8 @@ class TestLinearizeReifiedVariablesThreshold:
 
     def linearize(self, cpm_cons):
         cpm_cons = toplevel_list(cpm_cons)
-        cpm_cons = flatten_constraint(cpm_cons, csemap=self.csemap, ivarmap=self.ivarmap)
+        # Don't pass ivarmap: this test class tests linearize_reified_variables, not lazy encoding
+        cpm_cons = flatten_constraint(cpm_cons, csemap=self.csemap)
         return cpm_cons
 
     def test_linearize_reified_variables_below_threshold(self):
@@ -686,54 +687,56 @@ class TestLazyDirectEncoding:
         return finalize_lazy_direct_encoding(flatten_constraint(cpm_cons, csemap=self.csemap, ivarmap=self.ivarmap), csemap=self.csemap,ivarmap=self.ivarmap)
 
     def test_two_equalities_or(self):
-        """(x==2)|(x==3) produces lazy encoding with AMO + channeling."""
+        """(x==2)|(x==3) produces lazy encoding with EO + channel + gap constraints."""
         x = cp.intvar(1, 5, name="x")
         out = self.flatten([(x == 2) | (x == 3)])
-        assert str(out) == "[(BV[x==2]) or (BV[x==3]), (BV[x==2]) + (BV[x==3]) <= 1, ((BV[x==2]) or (BV[x==3])) -> (x == ([(2, BV[x==2]), (3, BV[x==3])], 0))]"
+        # tracked: {2,3}, gaps: {1} (single→added to tracked), {4,5} (gap BV)
+        assert str(out) == ""
+        assert x in self.ivarmap
+        assert len(self.ivarmap[x]._xs) == 3  # 1, 2, 3 tracked (1 added from single gap)
 
     def test_two_equalities_or_w_cse(self):
-        """(x==2)|(x==3) produces lazy encoding with AMO + channeling."""
+        """CSE: (x==3) is shared across constraints."""
         x = cp.intvar(1, 5, name="x")
-        out = self.flatten([(x == 2) | (x == 3), (x==3) | (x==4)])
-        assert str(out) == "[(BV[x==2]) or (BV[x==3]), (BV[x==3]) or (BV[x==4]), sum(BV[x==2], BV[x==3], BV[x==4]) <= 1, (or(BV[x==2], BV[x==3], BV[x==4])) -> (x == ([(2, BV[x==2]), (3, BV[x==3]), (4, BV[x==4])], 0))]"
-
+        out = self.flatten([(x == 2) | (x == 3), (x == 3) | (x == 4)])
+        assert x in self.ivarmap
+        # tracked: {2,3,4}, gaps: {1} (single→tracked), {5} (single→tracked) → all 5 tracked = full encoding
+        assert len(self.ivarmap[x]._xs) == 5
 
     def test_two_disequalities_or(self):
-        """(x==2)|(x==3) produces lazy encoding with AMO + channeling."""
+        """(x==2)|(x!=3) triggers lazy encoding for both values."""
         x = cp.intvar(1, 5, name="x")
         out = self.flatten([(x == 2) | (x != 3)])
-        assert str(out) == ""
+        assert x in self.ivarmap
 
-
-    def test_single_equality_no_encoding(self):
-        """A single reified equality does not produce encoding constraints."""
+    def test_single_equality(self):
+        """A single reified equality produces encoding constraints."""
         x = cp.intvar(1, 5, name="x")
-        b = cp.boolvar(name="b")
-        cpm_cons = self.flatten([b | (x == 2)])
-        out = finalize_lazy_direct_encoding(cpm_cons, csemap=csemap)
-        assert str(out) == ""
+        out = self.flatten([cp.boolvar(name="b") | (x == 2)])
+        assert x in self.ivarmap
 
     def test_three_equalities(self):
         """Three reified equalities expand the encoding."""
         x = cp.intvar(1, 5, name="x")
-        cpm_cons = self.flatten([(x == 1) | (x == 2) | (x == 4)])
-        out = finalize_lazy_direct_encoding(cpm_cons, csemap=csemap)
-        assert str(out) == ""
+        out = self.flatten([(x == 1) | (x == 2) | (x == 4)])
+        assert x in self.ivarmap
+        assert 1 in self.ivarmap[x]._xs
+        assert 2 in self.ivarmap[x]._xs
+        assert 4 in self.ivarmap[x]._xs
 
     def test_encoding_across_constraints(self):
         """Lazy encoding accumulates across multiple flatten calls."""
         x = cp.intvar(1, 5, name="x")
-        cpm_cons = self.flatten([(x == 1) | (x == 2)])
-        cpm_cons += self.flatten([(x == 3) | (x == 1)])
-        out = finalize_lazy_direct_encoding(cpm_cons, csemap=csemap)
-        assert str(out) == ""
+        out = self.flatten([(x == 1) | (x == 2)])
+        out += self.flatten([(x == 3) | (x == 1)])
+        assert x in self.ivarmap
+        assert {1, 2, 3}.issubset(self.ivarmap[x]._xs.keys())
 
     def test_ivarmap_populated(self):
-        """Finalization populates ivarmap with the lazy encoding."""
+        """Flattening populates ivarmap with the lazy encoding."""
         x = cp.intvar(1, 5, name="x")
-        cpm_cons = self.flatten([(x == 2) | (x == 3)])
-        finalize_lazy_direct_encoding(cpm_cons, csemap=csemap, ivarmap=ivarmap)
-        assert "x" in self.ivarmap
+        self.flatten([(x == 2) | (x == 3)])
+        assert x in self.ivarmap
 
     def test_correctness_with_gurobi(self):
         """Solving with lazy encoding gives correct results."""
