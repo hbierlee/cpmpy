@@ -20,7 +20,7 @@ from ..expressions.core import Comparison, Operator
 from ..expressions.utils import is_boolexpr
 from ..expressions.variables import _NumVarImpl, _BoolVarImpl
 
-def only_numexpr_equality(constraints, supported=frozenset(), csemap=None):
+def only_numexpr_equality(constraints, supported=frozenset(), csemap=None, ivarmap=None):
     """
         Transforms ``NumExpr <op> IV`` to ``(NumExpr == A) & (A <op> IV)`` if not supported.
         Also for the reified uses of `NumExpr`
@@ -63,7 +63,7 @@ def only_numexpr_equality(constraints, supported=frozenset(), csemap=None):
                     continue
 
                 # identical to the above, but keep for readability?
-                new_arg, new_cons = _rewrite_comparison(cpm_expr.args[idx], supported=supported,csemap=csemap)
+                new_arg, new_cons = _rewrite_comparison(cpm_expr.args[idx], supported=supported,csemap=csemap, ivarmap=ivarmap)
                 if new_arg is not cpm_expr.args[idx]: # changed
                     cpm_expr = copy.copy(cpm_expr) # shallow copy
                     args = list(cpm_expr.args)
@@ -73,7 +73,7 @@ def only_numexpr_equality(constraints, supported=frozenset(), csemap=None):
                 newlist += [cpm_expr] + new_cons
 
             elif cpm_expr.name != "==": # numerical comparison
-                new_expr, new_cons = _rewrite_comparison(cpm_expr, supported=supported,csemap=csemap)
+                new_expr, new_cons = _rewrite_comparison(cpm_expr, supported=supported, csemap=csemap, ivarmap=ivarmap)
                 newlist += [new_expr] + new_cons
             
             else:
@@ -86,7 +86,7 @@ def only_numexpr_equality(constraints, supported=frozenset(), csemap=None):
     return newlist
 
 
-def _rewrite_comparison(cpm_expr, supported=frozenset(), csemap=None):
+def _rewrite_comparison(cpm_expr, supported=frozenset(), csemap=None, ivarmap=None):
     """
     Rewrite a comparison to an equality comparison, and a defining constraint.
 
@@ -104,7 +104,7 @@ def _rewrite_comparison(cpm_expr, supported=frozenset(), csemap=None):
     if cpm_expr.name != "==" and not isinstance(lhs, _NumVarImpl) and lhs.name not in supported:
         # lhs is unsupported, rewrite to `(LHS == A) & (A <op> RHS)`
         cpm_expr = copy.copy(cpm_expr)
-        new_lhs, new_cons = get_or_make_var(lhs, csemap=csemap)
+        new_lhs, new_cons = get_or_make_var(lhs, csemap=csemap, ivarmap=ivarmap)
         args = list(cpm_expr.args)
         args[0] = new_lhs
         cpm_expr.update_args(args) # XXX redundant? we know it's flat so no subexprs anyway

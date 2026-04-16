@@ -8,7 +8,7 @@ from typing import List
 
 from ..expressions.core import BoolVal, Comparison, Expression, Operator
 from ..expressions.globalconstraints import DirectConstraint
-from ..expressions.variables import _BoolVarImpl, _IntVarImpl
+from ..expressions.variables import _BoolVarImpl, _IntVarImpl, NegBoolView
 from ..transformations.flatten_model import get_or_make_var
 from ..expressions.utils import is_int
 
@@ -285,14 +285,18 @@ class IntVarEncDirect(IntVarEnc):
         x_enc = []
         # the direct encoding requires |dom(x)| Boolean equality variables
         for d in _dom(x):
-            expr = x == d
-            # we can omit the defining constraints as the int var will be replaced
-            lit, _ = get_or_make_var(expr, csemap=csemap)
-            # ensure that the original variable's name is never replaced. This can happen when a BV is encoded, which does occur.
-            if self.__class__.NAMED and lit.name != expr.name:
-                lit.name = f"BV[{expr}]"
+            lit = self.add(x == d, csemap=csemap)
             x_enc.append(lit)
         super().__init__(x, x_enc)
+
+    def add(self, expr, csemap=None):
+        # we can omit the defining constraints as the int var will be replaced
+        lit, _ = get_or_make_var(expr, csemap=csemap)
+        # ensure that the original variable's name is never replaced. This can happen when a BV is encoded, which does occur.
+        if self.__class__.NAMED and lit.name != expr.name:
+            lit.name = f"BV[{expr}]"
+        return lit
+
 
     def encode_domain_constraint(self):
         """
@@ -327,6 +331,98 @@ class IntVarEncDirect(IntVarEnc):
 
     def encode_term(self, w=1):
         return [(w * i, b) for i, b in enumerate(self._xs)], self._x.lb * w
+
+
+class IntVarEncLazyDirect(IntVarEncDirect):
+    """
+    Lazy direct encoding of an integer variable.
+
+    Unlike IntVarEncDirect which eagerly creates a Boolean variable for every
+    domain value, this encoding only tracks values that are actually reified
+    (i.e., appear as (x == d) == bv in the csemap). New values are added
+    incrementally via :meth:`add`.
+
+    At the end of transformation, :meth:`encode_constraints` emits:
+    - AMO:         sum(bvs) <= 1       (at most one value is true)
+    - Indicator:   b == OR(bvs)        (b is true iff any encoded value is active)
+    - Channeling:  b -> wsum(vals, bvs) == x  (conditional value consistency)
+    """
+
+    def __init__(self, x):
+        # Skip IntVarEncDirect.__init__ which eagerly creates BVs for all domain values.
+        # Only initialize the base IntVarEnc with an empty encoding.
+        IntVarEnc.__init__(self, x, [])
+        self._xs = {}  # val -> bv (sparse mapping)
+
+    def add(self, expr, csemap=None):
+        """Add a new (val, bv) pair to the encoding."""
+        print("A", expr)
+        lit = super().add(expr, csemap=csemap)
+        self._xs[expr.args[1]] = lit
+        return lit
+
+    def eq(self, d):
+        """Return a literal whether x==d."""
+        if d in self._xs:
+            return self._xs[d]
+        return BoolVal(False)
+
+    def encode_domain_constraint(self):
+        """At most one of the tracked values is true (partial encoding)."""
+        if len(self._xs) < 2:
+            return []
+        return [cp.sum(self._xs) <= 1]
+
+    # def encode_comparison(self, op, d, csemap=None):
+    #     if op == "==":
+    #         return [self.eq(d)]
+    #     elif op == "!=":
+    #         return [~self.eq(d)]
+    #     else:
+    #         raise ValueError(f"Lazy direct encoding only supports == and !=, got {op}")
+
+    # def encode_term(self, w=1):
+    #     """Encode as weighted sum over tracked values only."""
+    #     vals = sorted(self._xs.keys())
+    #     bvs = [self._xs[v] for v in vals]
+    #     return [(w * v, b) for v, b in zip(vals, bvs)], 0
+
+    def encode_term(self, w=1):
+        return [(w * val, bv) for val, bv in self._xs.items()], 0
+
+    def encode_constraints(self):
+        """Return AMO + conditional channeling constraints for all tracked values.
+
+        Returns an empty list if fewer than 2 values have been added.
+        """
+        # if len(self._xs) < 2:
+        #     return []
+
+        if len(self._xs) == _dom_size(self._x):
+            terms, k = self.encode_term()
+            ws = [1] + [-w for (w, _) in terms]
+            bs = [self._x] + [b for (_, b) in terms]
+            channel = Operator("wsum", (ws, bs)) == k
+            return [cp.sum(self._xs.values()) == 1, channel]
+        elif True:
+            r = cp.boolvar()
+            terms, k = self.encode_term()
+            ws = [1] + [-w for (w, _) in terms]
+            bs = [self._x] + [b for (_, b) in terms]
+            channel = Operator("wsum", (ws, bs)) == k
+            return [
+                cp.sum(self._xs.values()) == r,
+                r.implies(channel)
+
+                # cp.sum(self._xs.values()) <= 1,
+                # r == cp.any(self._xs.values()),
+                # r.implies(channel),
+            ]
+            return [cp.sum(self._xs.values()) == r, r.implies(self._x == cp.sum(w * x for w, x in terms) + k)]
+        else:
+            # return [cp.sum(self._xs.values()) <= 1] + [Operator("wsum", ([1,-d_i], [self._x, x_enc_i])) == 0 for d_i, x_enc_i in self._xs.items()]
+            # return [cp.sum(self._xs.values()) <= 1] + [x_enc_i - self._x == d_i for d_i, x_enc_i in self._xs.items()]
+            return [cp.sum(self._xs.values()) <= 1] + [x_enc_i.implies(self._x == d_i) for d_i, x_enc_i in self._xs.items()]
 
 
 class IntVarEncOrder(IntVarEnc):

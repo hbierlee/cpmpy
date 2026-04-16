@@ -82,8 +82,7 @@ from ..expressions.variables import _BoolVarImpl, boolvar, NegBoolView, _NumVarI
 from .int2bool import _encode_int_var
 
 
-
-def linearize_constraint(lst_of_expr, supported={"sum","wsum","->"}, reified=False, csemap=None):
+def linearize_constraint(lst_of_expr, supported={"sum","wsum","->"}, reified=False, csemap=None, ivarmap=None):
     """
     Transforms all constraints to a linear form.
     This function assumes all constraints are in 'flat normal form' with only boolean variables on the lhs of an implication.
@@ -133,7 +132,7 @@ def linearize_constraint(lst_of_expr, supported={"sum","wsum","->"}, reified=Fal
 
                 # BV -> LinExpr
                 elif isinstance(cond, _BoolVarImpl):
-                    lin_sub = linearize_constraint([sub_expr], supported=supported, reified=True, csemap=csemap)
+                    lin_sub = linearize_constraint([sub_expr], supported=supported, reified=True, csemap=csemap, ivarmap=ivarmap)
                     # BV -> (C1 and ... and Cn) == (BV -> C1) and ... and (BV -> Cn)
                     indicator_constraints=[]
                     for lin in lin_sub:
@@ -141,7 +140,7 @@ def linearize_constraint(lst_of_expr, supported={"sum","wsum","->"}, reified=Fal
                             continue
                         elif is_false_cst(lin):
                             indicator_constraints=[] # do not add any constraints
-                            newlist += linearize_constraint([~cond], supported=supported, csemap=csemap, reified=reified) # post linear version of unary constraint
+                            newlist += linearize_constraint([~cond], supported=supported, csemap=csemap, reified=reified, ivarmap=ivarmap) # post linear version of unary constraint
                             break # do not need to add other
                         elif "->" in supported and not reified:
                             indicator_constraints.append(cond.implies(lin)) # Add indicator constraint
@@ -169,14 +168,14 @@ def linearize_constraint(lst_of_expr, supported={"sum","wsum","->"}, reified=Fal
                             elif lin.name == "==":
                                 indicator_constraints += linearize_constraint([cond.implies(lin_lhs <= lin_rhs),
                                                                                cond.implies(lin_lhs >= lin_rhs)],
-                                                                              supported=supported, reified=reified, csemap=csemap)
+                                                                              supported=supported, reified=reified, csemap=csemap, ivarmap=ivarmap)
                             else:
                                 raise ValueError(f"Unexpected linearized rhs of implication {lin} in {cpm_expr}")
                     newlist+=indicator_constraints
 
                     # ensure no new solutions are created
                     new_vars = set(get_variables(lin_sub)) - set(get_variables(sub_expr)) - {cond, ~cond}
-                    newlist += linearize_constraint([(~cond).implies(nv == nv.lb) for nv in new_vars], supported=supported, reified=reified, csemap=csemap)
+                    newlist += linearize_constraint([(~cond).implies(nv == nv.lb) for nv in new_vars], supported=supported, reified=reified, csemap=csemap, ivarmap=ivarmap)
 
             else: # supported operator
                 newlist.append(cpm_expr)
@@ -227,18 +226,18 @@ def linearize_constraint(lst_of_expr, supported={"sum","wsum","->"}, reified=Fal
                 if t_lb and t_ub:
                     continue
                 elif not t_lb and not t_ub:
-                    newlist += linearize_constraint([BoolVal(False)], supported=supported, csemap=csemap) # post the linear version of False
+                    newlist += linearize_constraint([BoolVal(False)], supported=supported, csemap=csemap, ivarmap=ivarmap) # post the linear version of False
                     break
 
             # now fix the comparisons themselves
             if cpm_expr.name == "<":
-                new_rhs, cons = get_or_make_var(rhs - 1, csemap=csemap) # if rhs is constant, will return new constant
+                new_rhs, cons = get_or_make_var(rhs - 1, csemap=csemap, ivarmap=ivarmap) # if rhs is constant, will return new constant
                 newlist.append(lhs <= new_rhs)
-                newlist += linearize_constraint(cons, csemap=csemap)
+                newlist += linearize_constraint(cons, csemap=csemap, ivarmap=ivarmap)
             elif cpm_expr.name == ">":
-                new_rhs, cons = get_or_make_var(rhs + 1, csemap=csemap) # if rhs is constant, will return new constant
+                new_rhs, cons = get_or_make_var(rhs + 1, csemap=csemap, ivarmap=ivarmap) # if rhs is constant, will return new constant
                 newlist.append(lhs >= new_rhs)
-                newlist += linearize_constraint(cons, csemap=csemap)
+                newlist += linearize_constraint(cons, csemap=csemap, ivarmap=ivarmap)
             elif cpm_expr.name == "!=":
                 # Special case: BV != BV
                 if isinstance(lhs, _BoolVarImpl) and isinstance(rhs, _BoolVarImpl):
@@ -259,13 +258,13 @@ def linearize_constraint(lst_of_expr, supported={"sum","wsum","->"}, reified=Fal
                     _, M1 = (lhs - rhs + 1).get_bounds()
                     _, M2 = (rhs - lhs + 1).get_bounds()
                     cons = [lhs + -M1*z <= rhs-1, lhs  + -M2*z >= rhs-M2+1]
-                    newlist += linearize_constraint(flatten_constraint(cons, csemap=csemap), supported=supported, reified=reified, csemap=csemap)
+                    newlist += linearize_constraint(flatten_constraint(cons, csemap=csemap, ivarmap=ivarmap), supported=supported, reified=reified, csemap=csemap, ivarmap=ivarmap)
 
                 else:
                     # introduce new indicator constraints
                     z = boolvar()
                     constraints = [z.implies(lhs < rhs), (~z).implies(lhs > rhs)]
-                    newlist += linearize_constraint(constraints, supported=supported, reified=reified, csemap=csemap)
+                    newlist += linearize_constraint(constraints, supported=supported, reified=reified, csemap=csemap, ivarmap=ivarmap)
             else:
                 # supported comparison
                 newlist.append(eval_comparison(cpm_expr.name, lhs, rhs))
@@ -627,6 +626,25 @@ def get_linear_decompositions():
     # Should we add Gleb's table decomposition? or is it not non-reifiable?
 
 
+def finalize_lazy_direct_encoding(constraints, ivarmap=None):
+    """
+    Emit constraints for all lazy direct encodings built up during flattening.
+
+    During flatten_constraint / get_or_make_var, each reification of (x == d)
+    registers itself in an IntVarEncLazyDirect stored in csemap["__lazy_enc__"].
+    This function finalizes those encodings: removes the original (x == val) == bv
+    reification constraints and replaces them with AMO + channeling constraints.
+
+    If ivarmap is provided, the encodings are stored there (keyed by variable name).
+
+    Apply AFTER flatten_constraint and BEFORE only_implies and linearize_constraint.
+    """
+    if ivarmap is None:
+        return constraints
+    else:
+        return constraints + [c for enc in ivarmap.values() for c in enc.encode_constraints()]
+
+
 def linearize_reified_variables(constraints, min_values=3, csemap=None, ivarmap=None):
     """
     Replace reified (BV <-> (x == val)) implications with direct encoding when a variable
@@ -647,11 +665,11 @@ def linearize_reified_variables(constraints, min_values=3, csemap=None, ivarmap=
     # Collect bv -> (var == val)'s in csemap
     var_vals = {}  # var: [val, bv]
     for expr, bv in csemap.items():
-        if expr.name == '==':
+        if isinstance(expr, Expression) and expr.name == '==':
             var,val = expr.args
             if isinstance(var, _NumVarImpl) and is_int(val):
                 var_vals.setdefault(var, []).append((val, bv))
-    
+
     # Make the integer encodings in integer linear friendly way
     my_ivarmap = ivarmap if ivarmap is not None else {}
     toplevel = []
@@ -665,7 +683,7 @@ def linearize_reified_variables(constraints, min_values=3, csemap=None, ivarmap=
 
         # encode the values
         enc, domain_constraint = _encode_int_var(my_ivarmap, var, "direct", csemap=csemap)
-        
+
         # domain and channeling constraints
         toplevel.extend(domain_constraint) # with the overwritten Bools
         if ivarmap is None:
@@ -674,8 +692,8 @@ def linearize_reified_variables(constraints, min_values=3, csemap=None, ivarmap=
             # var == wsum + k :: var - wsum == k
             ws = [1] + [-w for (w, _) in terms]
             bs = [var] + [b for (_, b) in terms]
-            toplevel.append(Operator("wsum", (ws, bs)) == k)  
-        
+            toplevel.append(Operator("wsum", (ws, bs)) == k)
+
         # store the bvs that no longer need to be reified
         for val, bv in vals:
             bv_map[bv] = (var, val)
@@ -696,6 +714,7 @@ def linearize_reified_variables(constraints, min_values=3, csemap=None, ivarmap=
         constraints = newcons
 
     return constraints + toplevel
+
 
 
 def _extract_var_from_lhs(lhs):

@@ -29,7 +29,7 @@ from ..expressions.utils import is_any_list
 from .flatten_model import flatten_constraint, get_or_make_var
 from .negation import recurse_negation
 
-def only_bv_reifies(constraints, csemap=None):
+def only_bv_reifies(constraints, csemap=None, ivarmap=None):
 
     newcons = []
     for cpm_expr in constraints:
@@ -40,11 +40,11 @@ def only_bv_reifies(constraints, csemap=None):
                 # BE -> BV :: ~BV -> ~BE
                 if cpm_expr.name == '->':
                     newexpr = (~a1).implies(recurse_negation(a0))
-                    newexpr = only_bv_reifies(flatten_constraint(newexpr, csemap=csemap), csemap=csemap)
+                    newexpr = only_bv_reifies(flatten_constraint(newexpr, csemap=csemap, ivarmap=ivarmap), csemap=csemap, ivarmap=ivarmap)
                 else:
                     newexpr = [a1 == a0]  # BE == BV :: BV == BE
                     if not a0.is_bool():
-                        newexpr = flatten_constraint(newexpr, csemap=csemap)
+                        newexpr = flatten_constraint(newexpr, csemap=csemap, ivarmap=ivarmap)
                 newcons.extend(newexpr)
             else:
                 newcons.append(cpm_expr)
@@ -52,7 +52,7 @@ def only_bv_reifies(constraints, csemap=None):
             newcons.append(cpm_expr)
     return newcons
 
-def only_implies(constraints, csemap=None):
+def only_implies(constraints, csemap=None, ivarmap=None):
     """
         Transforms all reifications to ``BV -> BE`` form
 
@@ -123,12 +123,12 @@ def only_implies(constraints, csemap=None):
             newcons.append(cpm_expr)
     
     if len(retransform) != 0:
-        newcons.extend(only_implies(only_bv_reifies(flatten_constraint(retransform, csemap=csemap), csemap=csemap), csemap=csemap))
+        newcons.extend(only_implies(only_bv_reifies(flatten_constraint(retransform, csemap=csemap, ivarmap=ivarmap), csemap=csemap, ivarmap=ivarmap), csemap=csemap, ivarmap=ivarmap))
 
     return newcons
 
 
-def reify_rewrite(constraints, supported=frozenset(), csemap=None):
+def reify_rewrite(constraints, supported=frozenset(), csemap=None, ivarmap=None):
     """
         Rewrites reified constraints not natively supported by a solver,
         to a version that uses standard constraints and reification over equalities between variables.
@@ -196,7 +196,7 @@ def reify_rewrite(constraints, supported=frozenset(), csemap=None):
                     #     introduce aux var and bring function to toplevel
                     #     (AUX,c) = get_or_make_var(LHS)
                     #     return c+[Comp(OP,AUX,RHS) == BV] or +[Comp(OP,AUX,RHS) -> BV] or +[Comp(OP,AUX,RHS) <- BV]
-                    (auxvar, cons) = get_or_make_var(lhs, csemap=csemap)
+                    (auxvar, cons) = get_or_make_var(lhs, csemap=csemap, ivarmap=ivarmap)
                     newcons += cons
                     reifexpr = copy.copy(cpm_expr)
                     args = list(reifexpr.args)

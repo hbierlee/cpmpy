@@ -101,13 +101,13 @@ from ..expressions.utils import is_num, is_any_list, is_int, is_star
 from .negation import push_down_negation
 
 
-def flatten_model(orig_model, csemap=None):
+def flatten_model(orig_model, csemap=None, ivarmap=None):
     """
         Receives model, returns new model where every constraint is in 'flat normal form'
     """
 
     # the top-level constraints
-    basecons = flatten_constraint(orig_model.constraints, csemap=csemap)
+    basecons = flatten_constraint(orig_model.constraints, csemap=csemap, ivarmap=ivarmap)
 
     # the objective
     if orig_model.objective_ is None:
@@ -121,7 +121,7 @@ def flatten_model(orig_model, csemap=None):
             return cp.Model(*basecons, maximize=newobj)
 
 
-def flatten_constraint(expr, csemap=None):
+def flatten_constraint(expr, csemap=None, ivarmap=None):
     """
         input is any expression; except is_num(), pure _NumVarImpl,
         or Operator/GlobalConstraint with not is_bool()
@@ -144,6 +144,20 @@ def flatten_constraint(expr, csemap=None):
     lst_of_expr = simplify_boolean(lst_of_expr)     # simplify boolean expressions, and ensure types are correct
     for expr in lst_of_expr:
 
+        # Lazy direct encoding: replace toplevel (intvar == const) with BV
+        if ivarmap is not None and isinstance(expr, Comparison) \
+                and expr.name in ('==', '!='):
+            lexpr, rexpr = expr.args
+            var, val = None, None
+            if isinstance(lexpr, _IntVarImpl) and not isinstance(lexpr, _BoolVarImpl) and is_int(rexpr):
+                var, val = lexpr, rexpr
+            elif isinstance(rexpr, _IntVarImpl) and not isinstance(rexpr, _BoolVarImpl) and is_int(lexpr):
+                var, val = rexpr, lexpr
+            if var is not None and var in ivarmap:
+                bv = ivarmap[var].eq(val)
+                newlist.append(bv if expr.name == '==' else ~bv)
+                continue
+
         if not expr.has_subexpr():
             newlist.append(expr)  # no need to do anything
             continue
@@ -165,7 +179,7 @@ def flatten_constraint(expr, csemap=None):
                         if isinstance(a, Operator) and a.name == '->':
                             newargs[i:i+1] = [~a.args[0],a.args[1]]
                     # there could be nested implications
-                    newlist.extend(flatten_constraint(Operator('or', newargs), csemap=csemap))
+                    newlist.extend(flatten_constraint(Operator('or', newargs), csemap=csemap, ivarmap=ivarmap))
                     continue
                 # conjunctions in disjunctions could be split out by applying distributivity,
                 # but this would explode the number of constraints in favour of having less auxiliary variables.
@@ -176,30 +190,30 @@ def flatten_constraint(expr, csemap=None):
                 if expr.args[1].name == 'and':
                     a1s = expr.args[1].args
                     a0 = expr.args[0]
-                    newlist.extend(flatten_constraint([a0.implies(a1) for a1 in a1s], csemap=csemap))
+                    newlist.extend(flatten_constraint([a0.implies(a1) for a1 in a1s], csemap=csemap, ivarmap=ivarmap))
                     continue
                 # 2) if lhs is 'or' then or([a01..a0n])->a1 :: ~a1->and([~a01..~a0n] and split
                 elif expr.args[0].name == 'or':
                     a0s = expr.args[0].args
                     a1 = expr.args[1]
-                    newlist.extend(flatten_constraint([(~a1).implies(~a0) for a0 in a0s], csemap=csemap))
+                    newlist.extend(flatten_constraint([(~a1).implies(~a0) for a0 in a0s], csemap=csemap, ivarmap=ivarmap))
                     continue
                 # 2b) if lhs is ->, like 'or': a01->a02->a1 :: (~a01|a02)->a1 :: ~a1->a01,~a1->~a02
                 elif expr.args[0].name == '->':
                     a01,a02 = expr.args[0].args
                     a1 = expr.args[1]
-                    newlist.extend(flatten_constraint([(~a1).implies(a01), (~a1).implies(~a02)], csemap=csemap))
+                    newlist.extend(flatten_constraint([(~a1).implies(a01), (~a1).implies(~a02)], csemap=csemap, ivarmap=ivarmap))
                     continue
 
                 # ->, allows a boolexpr on one side
                 elif isinstance(expr.args[0], _BoolVarImpl):
                     # LHS is var, ensure RHS is normalized 'Boolexpr'
                     lhs,lcons = expr.args[0], ()
-                    rhs,rcons = normalized_boolexpr(expr.args[1], csemap=csemap)
+                    rhs,rcons = normalized_boolexpr(expr.args[1], csemap=csemap, ivarmap=ivarmap)
                 else:
                     # make LHS normalized 'Boolexpr', RHS must be a var
-                    lhs,lcons = normalized_boolexpr(expr.args[0], csemap=csemap)
-                    rhs,rcons = get_or_make_var(expr.args[1], csemap=csemap)
+                    lhs,lcons = normalized_boolexpr(expr.args[0], csemap=csemap, ivarmap=ivarmap)
+                    rhs,rcons = get_or_make_var(expr.args[1], csemap=csemap, ivarmap=ivarmap)
 
                 newlist.append(Operator(expr.name, (lhs,rhs)))
                 newlist.extend(lcons)
@@ -210,7 +224,7 @@ def flatten_constraint(expr, csemap=None):
 
             # if none of the above cases + continue matched:
             # a normalizable boolexpr
-            (con, flatcons) = normalized_boolexpr(expr, csemap=csemap)
+            (con, flatcons) = normalized_boolexpr(expr, csemap=csemap, ivarmap=ivarmap)
             newlist.append(con)
             newlist.extend(flatcons)
 
@@ -254,18 +268,18 @@ def flatten_constraint(expr, csemap=None):
                 continue
 
             # ensure rhs is var
-            (rvar, rcons) = get_or_make_var(rexpr, csemap=csemap)
+            (rvar, rcons) = get_or_make_var(rexpr, csemap=csemap, ivarmap=ivarmap)
             # Reification (double implication): Boolexpr == Var
             # normalize the lhs (does not have to be a var, hence we call normalize instead of get_or_make_var
             if exprname == '==' and lexpr.is_bool():
                 if rvar.is_bool():
                     # this is a reification
-                    (lhs, lcons) = normalized_boolexpr(lexpr, csemap=csemap)
+                    (lhs, lcons) = normalized_boolexpr(lexpr, csemap=csemap, ivarmap=ivarmap)
                 else:
                     # integer comparison
-                    (lhs, lcons) = get_or_make_var(lexpr, csemap=csemap)
+                    (lhs, lcons) = get_or_make_var(lexpr, csemap=csemap, ivarmap=ivarmap)
             else:
-                (lhs, lcons) = normalized_numexpr(lexpr, csemap=csemap)
+                (lhs, lcons) = normalized_numexpr(lexpr, csemap=csemap, ivarmap=ivarmap)
 
             newlist.append(Comparison(exprname, lhs, rvar))
             newlist.extend(lcons)
@@ -275,7 +289,7 @@ def flatten_constraint(expr, csemap=None):
             """
     - Global constraint: global([Var]*)          (CPMpy class 'GlobalConstraint')
             """
-            (con, flatcons) = normalized_boolexpr(expr, csemap=csemap)
+            (con, flatcons) = normalized_boolexpr(expr, csemap=csemap, ivarmap=ivarmap)
             newlist.append(con)
             newlist.extend(flatcons)
 
@@ -286,10 +300,10 @@ def flatten_constraint(expr, csemap=None):
     return newlist
 
 
-def flatten_objective(expr, supported=frozenset(["sum", "wsum"]), csemap=None):
+def flatten_objective(expr, supported=frozenset(["sum", "wsum"]), csemap=None, ivarmap=None):
     """
     - Decision variable: Var
-    - Linear: 
+    - Linear:
         ======================                       ========
         sum([Var])                                   (CPMpy class 'Operator', name 'sum')
         wsum([Const],[Var])                          (CPMpy class 'Operator', name 'wsum')
@@ -301,12 +315,12 @@ def flatten_objective(expr, supported=frozenset(["sum", "wsum"]), csemap=None):
         raise Exception(f"Objective expects a single variable/expression, not a list of expressions: {expr}")
 
     expr = simplify_boolean([expr])[0]
-    (flatexpr, flatcons) = normalized_numexpr(expr, csemap=csemap)  # might rewrite expr into a (w)sum
+    (flatexpr, flatcons) = normalized_numexpr(expr, csemap=csemap, ivarmap=ivarmap)  # might rewrite expr into a (w)sum
     if isinstance(flatexpr, Expression) and flatexpr.name in supported:
         return (flatexpr, flatcons)
     else:
         # any other numeric expression,
-        var, cons = get_or_make_var(flatexpr, csemap=csemap)
+        var, cons = get_or_make_var(flatexpr, csemap=csemap, ivarmap=ivarmap)
         return (var, cons+flatcons)
 
 
@@ -323,7 +337,7 @@ def __is_flat_var_or_list(arg):
            is_any_list(arg) and all(__is_flat_var_or_list(el) for el in arg) or \
            is_star(arg)
 
-def get_or_make_var(expr, csemap=None):
+def get_or_make_var(expr, csemap=None, ivarmap=None):
     """
         Must return a variable, and list of flat normal constraints
         Determines whether this is a Boolean or Integer variable and returns
@@ -341,22 +355,40 @@ def get_or_make_var(expr, csemap=None):
 
     if expr.is_bool():
         # normalize expr into a boolexpr LHS, reify LHS == bvar
-        (flatexpr, flatcons) = normalized_boolexpr(expr, csemap=csemap)
+        (flatexpr, flatcons) = normalized_boolexpr(expr, csemap=csemap, ivarmap=ivarmap)
 
         if isinstance(flatexpr,_BoolVarImpl):
             # avoids unnecessary bv == bv or bv == ~bv assignments
             return flatexpr,flatcons
-        bvar = _BoolVarImpl()
 
         # save expr in dict
+        if ivarmap is not None:
+            # Lazy direct encoding: for (intvar == constant), register the BV
+            # and skip the defining constraint — the encoding's channeling handles it.
+            if isinstance(expr, Comparison) and expr.name in {"==", "!="} and isinstance(expr.args[0], _IntVarImpl) and is_int(expr.args[1]):
+                from .int2bool import IntVarEncLazyDirect
+                if expr.name == "!=":
+                    expr = copy.copy(expr)
+                    expr.name = "=="
+                    is_pos = False
+                else:
+                    is_pos = True
+
+                var = expr.args[0]
+                if var not in ivarmap:
+                    ivarmap[var] = IntVarEncLazyDirect(var)
+                lit = ivarmap[var].add(expr, csemap=csemap)
+                return lit if is_pos else ~lit, flatcons
+
+        r = cp.boolvar()
         if csemap is not None:
-            csemap[expr] = bvar
-        return bvar, [flatexpr == bvar] + flatcons
+            csemap[expr] = r
+        return r, [flatexpr == r] + flatcons
 
     else:
         # normalize expr into a numexpr LHS,
         # then compute bounds and return (newintvar, LHS == newintvar)
-        (flatexpr, flatcons) = normalized_numexpr(expr, csemap=csemap)
+        (flatexpr, flatcons) = normalized_numexpr(expr, csemap=csemap, ivarmap=ivarmap)
 
         lb, ub = flatexpr.get_bounds()
         if not is_int(lb) or not is_int(ub):
@@ -370,7 +402,7 @@ def get_or_make_var(expr, csemap=None):
             csemap[expr] = ivar
         return ivar, [flatexpr == ivar] + flatcons
 
-def get_or_make_var_or_list(expr, csemap=None):
+def get_or_make_var_or_list(expr, csemap=None, ivarmap=None):
     """ Like get_or_make_var() but also accepts and recursively transforms lists
         Used to convert arguments of globals
     """
@@ -378,13 +410,13 @@ def get_or_make_var_or_list(expr, csemap=None):
     if __is_flat_var_or_list(expr):
         return (expr,[])
     elif is_any_list(expr):
-        flatvars, flatcons = zip(*[get_or_make_var(arg, csemap=csemap) for arg in expr])
+        flatvars, flatcons = zip(*[get_or_make_var(arg, csemap=csemap, ivarmap=ivarmap) for arg in expr])
         return (flatvars, [c for con in flatcons for c in con])
     else:
-        return get_or_make_var(expr, csemap=csemap)
+        return get_or_make_var(expr, csemap=csemap, ivarmap=ivarmap)
 
 
-def normalized_boolexpr(expr, csemap=None):
+def normalized_boolexpr(expr, csemap=None, ivarmap=None):
     """
         input is any Boolean (is_bool()) expression
         output are all 'flat normal form' Boolean expressions that can be 'reified', meaning that
@@ -420,18 +452,18 @@ def normalized_boolexpr(expr, csemap=None):
         # apply De Morgan's transform for "implies"
         if expr.name == '->':
             # TODO, optimisation if args0 is an 'and'?
-            (lhs,lcons) = get_or_make_var(expr.args[0], csemap=csemap)
+            (lhs,lcons) = get_or_make_var(expr.args[0], csemap=csemap, ivarmap=ivarmap)
             # TODO, optimisation if args1 is an 'or'?
-            (rhs,rcons) = get_or_make_var(expr.args[1], csemap=csemap)
+            (rhs,rcons) = get_or_make_var(expr.args[1], csemap=csemap, ivarmap=ivarmap)
             return ((~lhs | rhs), lcons+rcons)
         if expr.name == 'not':
-            flatvar, flatcons = get_or_make_var(expr.args[0], csemap=csemap)
+            flatvar, flatcons = get_or_make_var(expr.args[0], csemap=csemap, ivarmap=ivarmap)
             return (~flatvar, flatcons)
         if not expr.has_subexpr():
             return (expr, [])
         else:
             # one of the arguments is not flat, flatten all
-            flatvars, flatcons = zip(*[get_or_make_var(arg, csemap=csemap) for arg in expr.args])
+            flatvars, flatcons = zip(*[get_or_make_var(arg, csemap=csemap, ivarmap=ivarmap) for arg in expr.args])
             newexpr = Operator(expr.name, flatvars)
             return (newexpr, [c for con in flatcons for c in con])
 
@@ -450,19 +482,19 @@ def normalized_boolexpr(expr, csemap=None):
                 lexpr, rexpr = rexpr, lexpr
 
             # ensure rhs is var
-            (rvar, rcons) = get_or_make_var(rexpr, csemap=csemap)
+            (rvar, rcons) = get_or_make_var(rexpr, csemap=csemap, ivarmap=ivarmap)
 
             # LHS: check if Boolexpr == smth:
             if (exprname == '==' or exprname == '!=') and lexpr.is_bool():
                 # this is a reified constraint, so lhs must be var too to be in normal form
-                (lhs, lcons) = get_or_make_var(lexpr, csemap=csemap)
+                (lhs, lcons) = get_or_make_var(lexpr, csemap=csemap, ivarmap=ivarmap)
                 if expr.name == '!=' and rvar.is_bool():
                     # != not needed, negate RHS variable
                     rvar = ~rvar
                     exprname = '=='
             else:
                 # other cases: LHS is numexpr
-                (lhs, lcons) = normalized_numexpr(lexpr, csemap=csemap)
+                (lhs, lcons) = normalized_numexpr(lexpr, csemap=csemap, ivarmap=ivarmap)
 
             return (Comparison(exprname, lhs, rvar), lcons+rcons)
 
@@ -475,7 +507,7 @@ def normalized_boolexpr(expr, csemap=None):
             return (expr, [])
         else:
             # recursively flatten all children
-            flatargs, flatcons = zip(*[get_or_make_var_or_list(arg, csemap=csemap) for arg in expr.args])
+            flatargs, flatcons = zip(*[get_or_make_var_or_list(arg, csemap=csemap, ivarmap=ivarmap) for arg in expr.args])
 
             # take copy, replace args
             newexpr = copy.copy(expr) # shallow or deep? currently shallow
@@ -483,7 +515,7 @@ def normalized_boolexpr(expr, csemap=None):
             return (newexpr, [c for con in flatcons for c in con])
 
 
-def normalized_numexpr(expr, csemap=None):
+def normalized_numexpr(expr, csemap=None, ivarmap=None):
     """
         all 'flat normal form' numeric expressions...
 
@@ -507,17 +539,17 @@ def normalized_numexpr(expr, csemap=None):
     elif expr.is_bool():
         # unusual case, but its truth-value is a valid numexpr
         # so reify and return the boolvar
-        return get_or_make_var(expr, csemap=csemap)
+        return get_or_make_var(expr, csemap=csemap, ivarmap=ivarmap)
 
     # rewrite const*a into a weighted sum, so it can be used as objective
     elif expr.name == "mul" and getattr(expr, "is_lhs_num", False):
         w, e = expr.args
-        return normalized_numexpr(Operator("wsum", ([w], [e])), csemap=csemap)
+        return normalized_numexpr(Operator("wsum", ([w], [e])), csemap=csemap, ivarmap=ivarmap)
 
     elif isinstance(expr, Operator):
         # rewrite -a into a weighted sum, so it can be used as objective
         if expr.name == '-':
-            return normalized_numexpr(Operator("wsum", _wsum_make(expr)), csemap=csemap)
+            return normalized_numexpr(Operator("wsum", _wsum_make(expr)), csemap=csemap, ivarmap=ivarmap)
 
         if not expr.has_subexpr():
             return (expr, [])
@@ -550,13 +582,13 @@ def normalized_numexpr(expr, csemap=None):
                     i = i+1
 
             # now flatten the resulting subexprs
-            flatvars, flatcons = map(list, zip(*[get_or_make_var(arg, csemap=csemap) for arg in sub_exprs])) # also bool, reified...
+            flatvars, flatcons = map(list, zip(*[get_or_make_var(arg, csemap=csemap, ivarmap=ivarmap) for arg in sub_exprs])) # also bool, reified...
             newexpr = Operator(expr.name, (weights, flatvars))
             return (newexpr, [c for con in flatcons for c in con])
 
         else: # generic operator
             # recursively flatten all children
-            flatvars, flatcons = zip(*[get_or_make_var(arg, csemap=csemap) for arg in expr.args])
+            flatvars, flatcons = zip(*[get_or_make_var(arg, csemap=csemap, ivarmap=ivarmap) for arg in expr.args])
 
             newexpr = Operator(expr.name, flatvars)
             return (newexpr, [c for con in flatcons for c in con])
@@ -568,7 +600,7 @@ def normalized_numexpr(expr, csemap=None):
             return (expr, [])
         else:
             # recursively flatten all children
-            flatvars, flatcons = zip(*[get_or_make_var_or_list(arg, csemap=csemap) for arg in expr.args])
+            flatvars, flatcons = zip(*[get_or_make_var_or_list(arg, csemap=csemap, ivarmap=ivarmap) for arg in expr.args])
 
             # take copy, replace args
             newexpr = copy.copy(expr) # shallow or deep? currently shallow

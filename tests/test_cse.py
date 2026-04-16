@@ -98,10 +98,10 @@ class TestCSE:
         cons = cp.max([x,y,z]) <= 42
         csemap = dict()
         eq_cons = only_numexpr_equality([cons], csemap=csemap)
-        
+
         assert set([str(c) for c in eq_cons]) == {"(max(x,y,z)) == (IV0)", "IV0 <= 42"}
         assert len(csemap) == 1
-        
+
         # next time we use max([x,y,z]) it should replace it with IV0
         non_eq_cons = cp.max([x,y,z]) != 1337
         eq_cons = only_numexpr_equality([non_eq_cons], csemap=csemap)

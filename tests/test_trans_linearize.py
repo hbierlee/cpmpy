@@ -4,7 +4,7 @@ import cpmpy as cp
 from cpmpy.expressions import boolvar, intvar
 from cpmpy.expressions.core import Operator
 from cpmpy.transformations.flatten_model import flatten_constraint, flatten_objective
-from cpmpy.transformations.linearize import linearize_constraint, linearize_reified_variables, decompose_linear, canonical_comparison, only_positive_bv, only_positive_coefficients, only_positive_bv_wsum_const, only_positive_bv_wsum
+from cpmpy.transformations.linearize import linearize_constraint, linearize_reified_variables, finalize_lazy_direct_encoding, decompose_linear, canonical_comparison, only_positive_bv, only_positive_coefficients, only_positive_bv_wsum_const, only_positive_bv_wsum
 from cpmpy.transformations.decompose_global import decompose_in_tree
 from cpmpy.transformations.normalize import toplevel_list
 from cpmpy.transformations.reification import only_bv_reifies, only_implies
@@ -605,7 +605,7 @@ class TestLinearizeReifiedVariablesThreshold:
 
     def linearize(self, cpm_cons):
         cpm_cons = toplevel_list(cpm_cons)
-        cpm_cons = flatten_constraint(cpm_cons, csemap=self.csemap)
+        cpm_cons = flatten_constraint(cpm_cons, csemap=self.csemap, ivarmap=self.ivarmap)
         return cpm_cons
 
     def test_linearize_reified_variables_below_threshold(self):
@@ -669,4 +669,77 @@ class TestLinearizeReifiedVariablesThreshold:
         b, c = cp.intvar(1, 3, name="b"), cp.intvar(1, 3, name="c")
         out = linearize_reified_variables(self.cpm_cons + self.linearize([(b == 1) | (b == 2), b + c == 3]), min_values=2, csemap=self.csemap)
         assert str(out) == "[(BV[a == 1]) or (BV[a == 2]), (BV[b == 1]) or (BV[b == 2]), (b) + (c) == 3, sum([BV[a == 1], BV[a == 2], BV[a == 3]]) == 1, sum([BV[b == 1], BV[b == 2], BV[b == 3]]) == 1, sum([1, 0, -1, -2] * [b, BV[b == 1], BV[b == 2], BV[b == 3]]) == 1]", "The `a` var does occur"
+
+
+class TestLazyDirectEncoding:
+    """Tests for the lazy direct encoding built during flattening."""
+
+    def setup_method(self):
+        _IntVarImpl.counter = 0
+        _BoolVarImpl.counter = 0
+
+        self.ivarmap = {}
+        self.csemap = {}
+
+    def flatten(self, cpm_cons):
+        cpm_cons = toplevel_list(cpm_cons)
+        return finalize_lazy_direct_encoding(flatten_constraint(cpm_cons, csemap=self.csemap, ivarmap=self.ivarmap), ivarmap=self.ivarmap)
+
+    def test_two_equalities_or(self):
+        """(x==2)|(x==3) produces lazy encoding with AMO + channeling."""
+        x = cp.intvar(1, 5, name="x")
+        out = self.flatten([(x == 2) | (x == 3)])
+        assert str(out) == "[(BV[x==2]) or (BV[x==3]), (BV[x==2]) + (BV[x==3]) <= 1, ((BV[x==2]) or (BV[x==3])) -> (x == ([(2, BV[x==2]), (3, BV[x==3])], 0))]"
+
+    def test_two_equalities_or_w_cse(self):
+        """(x==2)|(x==3) produces lazy encoding with AMO + channeling."""
+        x = cp.intvar(1, 5, name="x")
+        out = self.flatten([(x == 2) | (x == 3), (x==3) | (x==4)])
+        assert str(out) == "[(BV[x==2]) or (BV[x==3]), (BV[x==3]) or (BV[x==4]), sum(BV[x==2], BV[x==3], BV[x==4]) <= 1, (or(BV[x==2], BV[x==3], BV[x==4])) -> (x == ([(2, BV[x==2]), (3, BV[x==3]), (4, BV[x==4])], 0))]"
+
+
+    def test_two_disequalities_or(self):
+        """(x==2)|(x==3) produces lazy encoding with AMO + channeling."""
+        x = cp.intvar(1, 5, name="x")
+        out = self.flatten([(x == 2) | (x != 3)])
+        assert str(out) == ""
+
+
+    def test_single_equality_no_encoding(self):
+        """A single reified equality does not produce encoding constraints."""
+        x = cp.intvar(1, 5, name="x")
+        b = cp.boolvar(name="b")
+        cpm_cons = self.flatten([b | (x == 2)])
+        out = finalize_lazy_direct_encoding(cpm_cons, csemap=csemap)
+        assert str(out) == ""
+
+    def test_three_equalities(self):
+        """Three reified equalities expand the encoding."""
+        x = cp.intvar(1, 5, name="x")
+        cpm_cons = self.flatten([(x == 1) | (x == 2) | (x == 4)])
+        out = finalize_lazy_direct_encoding(cpm_cons, csemap=csemap)
+        assert str(out) == ""
+
+    def test_encoding_across_constraints(self):
+        """Lazy encoding accumulates across multiple flatten calls."""
+        x = cp.intvar(1, 5, name="x")
+        cpm_cons = self.flatten([(x == 1) | (x == 2)])
+        cpm_cons += self.flatten([(x == 3) | (x == 1)])
+        out = finalize_lazy_direct_encoding(cpm_cons, csemap=csemap)
+        assert str(out) == ""
+
+    def test_ivarmap_populated(self):
+        """Finalization populates ivarmap with the lazy encoding."""
+        x = cp.intvar(1, 5, name="x")
+        cpm_cons = self.flatten([(x == 2) | (x == 3)])
+        finalize_lazy_direct_encoding(cpm_cons, csemap=csemap, ivarmap=ivarmap)
+        assert "x" in self.ivarmap
+
+    def test_correctness_with_gurobi(self):
+        """Solving with lazy encoding gives correct results."""
+        pytest.importorskip("gurobipy")
+        x = cp.intvar(1, 5, name="x")
+        m = cp.Model([(x == 2) | (x == 3)])
+        assert m.solve(solver="gurobi")
+        assert x.value() in [2, 3]
 

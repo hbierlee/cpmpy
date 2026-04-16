@@ -54,7 +54,7 @@ from ..expressions.globalconstraints import DirectConstraint
 from ..transformations.comparison import only_numexpr_equality
 from ..transformations.flatten_model import flatten_constraint, flatten_objective
 from ..transformations.get_variables import get_variables
-from ..transformations.linearize import linearize_constraint, linearize_reified_variables, only_positive_bv, only_positive_bv_wsum, decompose_linear, decompose_linear_objective
+from ..transformations.linearize import linearize_constraint, finalize_lazy_direct_encoding, only_positive_bv, only_positive_bv_wsum, decompose_linear, decompose_linear_objective
 from ..transformations.normalize import toplevel_list
 from ..transformations.reification import only_implies, reify_rewrite, only_bv_reifies
 from ..transformations.safening import no_partial_functions, safen_objective
@@ -141,6 +141,7 @@ class CPM_gurobi(SolverInterface):
 
         # TODO: subsolver could be a GRB_ENV if a user would want to hand one over
         self.grb_model = gp.Model(env=GRB_ENV)
+        self._ivarmap = {}  # maps integer variable names to their lazy direct encoding
 
         # initialise everything else and post the constraints/objective
         # it is sufficient to implement add() and minimize/maximize() below
@@ -363,14 +364,14 @@ class CPM_gurobi(SolverInterface):
                                     supported=self.supported_global_constraints,
                                     supported_reified=self.supported_reified_global_constraints,
                                     csemap=self._csemap)
-        cpm_cons = flatten_constraint(cpm_cons, csemap=self._csemap)  # flat normal form
-        cpm_cons = reify_rewrite(cpm_cons, supported=frozenset(['sum', 'wsum']), csemap=self._csemap)  # constraints that support reification
-        cpm_cons = only_numexpr_equality(cpm_cons, supported=frozenset(["sum", "wsum", "sub"]), csemap=self._csemap)  # supports >, <, !=
-        cpm_cons = linearize_reified_variables(cpm_cons, min_values=2, csemap=self._csemap)
-        cpm_cons = only_bv_reifies(cpm_cons, csemap=self._csemap)
-        cpm_cons = only_implies(cpm_cons, csemap=self._csemap)  # anything that can create full reif should go above...
+        cpm_cons = flatten_constraint(cpm_cons, csemap=self._csemap, ivarmap=self._ivarmap)  # flat normal form
+        cpm_cons = reify_rewrite(cpm_cons, supported=frozenset(['sum', 'wsum']), csemap=self._csemap, ivarmap=self._ivarmap)  # constraints that support reification
+        cpm_cons = only_numexpr_equality(cpm_cons, supported=frozenset(["sum", "wsum", "sub"]), csemap=self._csemap, ivarmap=self._ivarmap)  # supports >, <, !=
+        cpm_cons = only_bv_reifies(cpm_cons, csemap=self._csemap, ivarmap=self._ivarmap)
+        cpm_cons = finalize_lazy_direct_encoding(cpm_cons, ivarmap=self._ivarmap)
+        cpm_cons = only_implies(cpm_cons, csemap=self._csemap, ivarmap=self._ivarmap)  # anything that can create full reif should go above...
         # gurobi does not round towards zero, so no 'div' in supported set: https://github.com/CPMpy/cpmpy/pull/593#issuecomment-2786707188
-        cpm_cons = linearize_constraint(cpm_cons, supported=frozenset({"sum", "wsum","->","sub","min","max","mul","abs","pow"}), csemap=self._csemap)  # the core of the MIP-linearization
+        cpm_cons = linearize_constraint(cpm_cons, supported=frozenset({"sum", "wsum","->","sub","min","max","mul","abs","pow"}), csemap=self._csemap, ivarmap=self._ivarmap)  # the core of the MIP-linearization
         cpm_cons = only_positive_bv(cpm_cons, csemap=self._csemap)  # after linearization, rewrite ~bv into 1-bv
         return cpm_cons
 
