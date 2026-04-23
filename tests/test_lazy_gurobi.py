@@ -647,7 +647,7 @@ def load_model(path):
 
 @pytest.mark.timeout(60)
 class TestTables:
-    # @pytest.mark.skip()
+    @pytest.mark.skip()
     def test_repro_explain(self, env):
         path = pathlib.Path("fail.pkl")
         if path.exists():
@@ -1011,9 +1011,9 @@ TIME_LIMIT = 30
 REPEAT = 3
 SOL_LIMIT = 10e5
 CHECKED = False
-MAX_SEARCH=10e4
-VERBOSITY=1
-HARDNESS=2
+MAX_SEARCH = 10e4
+VERBOSITY = 3
+HARDNESS = 2
 
 
 def _generate_cases_with_expected():
@@ -1091,7 +1091,7 @@ FILTER_PRESETS = {
     ],
     "all": [],
     "none": [("alias", ("none",))],
-    "shrink": [("alias", ("none","shrink"))],
+    "shrink": [("alias", ("none", "shrink"))],
     "bool": [
         (
             "alias",
@@ -1115,8 +1115,8 @@ FILTER_PRESETS = {
         (
             "alias",
             (
-                "bool",
-                "mdd-reduce",
+                # "bool",
+                "mdd-reduce-input-combined",
             ),
         )
     ],
