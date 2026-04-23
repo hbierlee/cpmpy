@@ -656,7 +656,7 @@ if __name__ == "__main__":
     parser.add_argument('--no-timestamp', action='store_true', help='Add timestamp to file names')
     parser.add_argument('--verbose', action='store_true', help='Show solver output')
     parser.add_argument('--intermediate', action='store_true', help='Report on intermediate solutions')
-    parser.add_argument('--checker-path', type=str, default="jbang  --main org.xcsp.parser.callbacks.SolutionChecker org.xcsp:xcsp3-tools:2.5", help='Path to the XCSP3 solution checker JAR file')
+    parser.add_argument('--checker-path', type=str, default=None, help='Path to the XCSP3 solution checker JAR file')
     parser.add_argument('--profile', type=pathlib.Path, help='Profile')
     parser.add_argument('--analyze', action='store_true', help='Analyze results')
     parser.add_argument('--dry', action='store_true', help='Dry run')

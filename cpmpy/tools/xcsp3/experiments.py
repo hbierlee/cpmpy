@@ -54,8 +54,6 @@ DEFAULTS = [
 
 CUTOFFS = (
             0,
-            250,
-            500,
             1000,
             2000,
             3000,
@@ -73,8 +71,6 @@ FEATURES = [
         "coverlift",
         (
             Coverlift.No,
-            # Coverlift.INPUT,
-            # Coverlift.COM_MIN,
             Coverlift.COM_MAX,
         ),
     ),
@@ -93,7 +89,6 @@ FEATURES = [
         "negatives",
         (
             False,
-            # True,
         ),
     ),
 ]
@@ -143,7 +138,7 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                     for reduce in (
                         [
                             True,
-                            False,
+                            # False,
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
@@ -152,18 +147,18 @@ def get_solvers(features=None, overrides={}, filters=None, add_all=False, add_no
                         [
                             Order.INPUT,
                             Order.DOM_INCR,
-                            Order.GREEDY,
-                            Order.BIDIRECTIONAL,
-                            Order.FIEDLER,
-                            Order.LOOKAHEAD_2,
-                            Order.LOOKAHEAD_3,
+                            # Order.GREEDY,
+                            # Order.BIDIRECTIONAL,
+                            # Order.FIEDLER,
+                            # Order.LOOKAHEAD_2,
+                            # Order.LOOKAHEAD_3,
                         ]
                         if encoding_ is Encoding.MDD
                         else [None]
                     )
                     for combined in (
                         [
-                            True,
+                            # True,
                             False,
                         ]
                         if encoding_ is Encoding.MDD
